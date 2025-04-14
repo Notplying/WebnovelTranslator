@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Options</title>
+  <style>
+    /* General styles for dark mode */
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #1e1e2f; /* Dark background */
+      color: #f5f5f5; /* Light text */
+      margin: 0;
+      padding: 0 0 200px 0; /* Added bottom padding for virtual keyboard */
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      overflow-y: auto;
+      box-sizing: border-box;
+      -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+      user-select: text; /* Enable text selection */
+      -webkit-user-select: text; /* Safari support */
+      -moz-user-select: text; /* Firefox support */
+      -ms-user-select: text; /* IE/Edge support */
+    }
+
+    /* Prevent dragging on form elements */
+    form, input, textarea, select, button {
+      -webkit-user-drag: none;
+      -moz-user-drag: none;
+      -ms-user-drag: none;
+    }
+
+    h1 {
+      color: #ffffff; /* White title */
+      margin-top: 20px;
+    }
+
+    form {
+      background-color: #2b2b3d;
+      border: 1px solid #444;
+      border-radius: 8px;
+      padding: 20px;
+      width: 90%;
+      max-width: 600px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
+      margin: 20px auto;
+      position: relative;
+    }
+
+    .section {
+      border-bottom: 1px solid #444;
+      padding-bottom: 20px;
+      margin-bottom: 20px;
+    }
+
+    .section:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+      margin-bottom: 0;
+    }
+
+    @media (max-width: 768px) {
+      form {
+        width: calc(100% - 20px); /* Account for padding */
+        padding: 15px;
+        margin: 10px auto;
+        max-width: none; /* Allow form to use full width on mobile */
+        box-sizing: border-box;
+      }
+
+      input, textarea, select {
+        font-size: 16px; /* Prevents iOS zoom on focus */
+        max-width: 100%; /* Prevent overflow */
+        box-sizing: border-box;
+      }
+
+      .section {
+        padding-bottom: 15px;
+        margin-bottom: 15px;
+        width: 100%;
+        box-sizing: border-box;
+      }
+
+      /* Ensure inputs don't overflow their containers */
+      input, textarea, select, button {
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+      }
+    }
+
+    label {
+      display: block;
+      font-weight: bold;
+      margin-top: 10px;
+      color: #f5f5f5; /* Light text for labels */
+    }
+
+    input, textarea, select {
+      width: 100%;
+      padding: 10px;
+      margin-top: 5px;
+      margin-bottom: 15px;
+      border: 1px solid #555; /* Darker input border */
+      border-radius: 4px;
+      font-size: 14px;
+      background-color: #3c3c4f; /* Dark input background */
+      color: #ffffff; /* White input text */
+    }
+
+    textarea {
+      height: 120px; /* Increase the height of textareas */
+    }
+
+    input::placeholder, textarea::placeholder {
+      color: #aaa; /* Placeholder text color */
+    }
+
+    button {
+      border: none;
+      padding: 12px 24px;
+      border-radius: 4px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      width: auto;
+      display: inline-block;
+      text-align: center;
+    }
+
+    .primary-button {
+      background-color: #007bff;
+      color: #ffffff;
+      font-weight: bold;
+      width: 100%;
+      margin-top: 10px;
+    }
+
+    .primary-button:hover {
+      background-color: #0056b3;
+      transform: translateY(-1px);
+    }
+
+    .secondary-button {
+      background-color: #6c757d;
+      color: #ffffff;
+      margin-bottom: 15px;
+    }
+
+    .secondary-button:hover {
+      background-color: #545b62;
+    }
+
+    @media (max-width: 768px) {
+      button {
+        padding: 14px 28px; /* Larger touch target on mobile */
+        font-size: 16px;
+      }
+
+      .primary-button, .secondary-button {
+        width: 100%; /* Full width on mobile */
+      }
+    }
+
+    #gemini-settings, #vertex-settings {
+      margin-top: 15px;
+    }
+
+    .button-container {
+      display: flex;
+      gap: 10px;
+      margin-top: 15px;
+    }
+
+    .button-container .secondary-button {
+      flex: 1;
+    }
+
+    @media (max-width: 480px) {
+      .button-container {
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .button-container .secondary-button {
+        width: 100%;
+        margin-bottom: 0;
+      }
+    }
+
+    .import-textarea {
+      margin-top: 15px;
+      height: 100px;
+      width: 100%;
+      resize: vertical;
+    }
+
+    #import-container {
+      margin-top: 15px;
+      width: 100%;
+    }
+
+    .section-title {
+      font-size: 18px;
+      color: #c5c5c5; /* Slightly lighter section titles */
+      margin-top: 20px;
+      margin-bottom: 10px;
+    }
+
+    /* Scrollbars for dark mode */
+    textarea::-webkit-scrollbar, input::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    textarea::-webkit-scrollbar-thumb, input::-webkit-scrollbar-thumb {
+      background-color: #555; /* Dark scrollbar thumb */
+      border-radius: 4px;
+    }
+
+    textarea::-webkit-scrollbar-track, input::-webkit-scrollbar-track {
+      background-color: #2b2b3d; /* Dark scrollbar track */
+    }
+  </style>
+</head>
+<body>
+  <h1>Options</h1>
+  <form id="options-form">
+    <div class="section">
+      <div class="section-title">API Configuration</div>
+      <label for="api-type">API Type: <span style="color: red;">NEW!</span> Openrouter API with Streaming!</label>
+      <select id="api-type">
+        <option value="gemini">Gemini API</option>
+        <option value="vertex">Vertex AI API</option>
+        <option value="openRouter">OpenRouter API</option>
+      </select>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Text Processing Settings</div>
+      <label for="max-length">Max Length:</label>
+      <input type="number" id="max-length" placeholder="e.g., 7000">
+
+      <label for="prefix">Prefix:</label>
+      <textarea id="prefix" placeholder="Enter prefix text here..."></textarea>
+
+      <label for="suffix">Suffix:</label>
+      <textarea id="suffix" placeholder="Enter suffix text here..."></textarea>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Model Parameters</div>
+      <label for="retry-count">Retry Count:</label>
+      <input type="number" id="retry-count" placeholder="e.g., 3">
+
+      <label for="temperature">Temperature:</label>
+      <input type="number" step="0.1" id="temperature" placeholder="e.g., 0.9">
+
+      <label for="top-k">Top K:</label>
+      <input type="number" id="top-k" placeholder="e.g., 40">
+
+      <label for="top-p">Top P:</label>
+      <input type="number" step="0.01" id="top-p" placeholder="e.g., 0.95">
+    </div>
+
+    <div id="gemini-settings" class="section" style="display: none;">
+      <div class="section-title">Gemini Settings</div>
+      <label for="gemini-api-key">Gemini API Key:</label>
+      <input type="text" id="gemini-api-key" placeholder="Enter Gemini API key">
+      <label for="gemini-model-id">Model ID:</label>
+      <input type="text" id="gemini-model-id" placeholder="e.g., gemini-1.5-flash-002">
+    </div>
+
+    <div id="vertex-settings" class="section" style="display: none;">
+      <div class="section-title">Vertex AI Settings</div>
+      <label for="service-account-key">Service Account Key (JSON):</label>
+      <textarea id="service-account-key" placeholder="Paste your service account JSON here"></textarea>
+      <button type="button" id="test-service-account" class="secondary-button">Test Service Account Key</button>
+
+      <label for="location">Location:</label>
+      <input type="text" id="location" placeholder="e.g., us-central1">
+
+      <label for="project-id">Project ID:</label>
+      <input type="text" id="project-id" placeholder="Enter your project ID">
+
+      <label for="model-id">Model ID:</label>
+      <input type="text" id="model-id" placeholder="e.g., gemini-1.5-flash-002">
+    </div>
+
+    <div id="openRouter-settings" class="section" style="display: none;">
+      <div class="section-title">OpenRouter Settings</div>
+      <label for="openRouter-api-key">OpenRouter API Key:</label>
+      <input type="text" id="openRouter-api-key" placeholder="Enter OpenRouter API key">
+      
+      <label for="openRouter-model-id">Model ID:</label>
+      <input type="text" id="openRouter-model-id" placeholder="e.g., openai/gpt-4">
+
+      <label for="openRouter-stream">Streaming:</label>
+      <select id="openRouter-stream">
+        <option value="true">Streaming Enabled</option>
+        <option value="false">Streaming Disabled</option>
+      </select>
+    </div>
+
+    <div class="section">
+      <button type="submit" class="primary-button">Save Settings</button>
+      <div class="button-container">
+        <button type="button" id="export-settings" class="secondary-button">Export Settings</button>
+        <button type="button" id="import-settings" class="secondary-button">Import Settings</button>
+        <button type="button" id="reset-settings" class="secondary-button">Reset Settings</button>
+      </div>
+      <div id="import-container" style="display: none;">
+        <textarea id="import-text" class="import-textarea" placeholder="Paste your settings JSON here..."></textarea>
+        <div class="button-container" style="margin-top: 8px;">
+          <button type="button" id="import-submit" class="secondary-button">Import</button>
+          <button type="button" id="import-cancel" class="secondary-button">Cancel</button>
+        </div>
+      </div>
+      <input type="file" id="import-file" accept=".json" style="display: none;">
+    </div>
+  </form>
+
+  <script src="options.js"></script>
+  <div style="position: fixed; bottom: 20px; left: 0; right: 0; text-align: center; padding: 10px; background-color: #1e1e2f;">
+    <a href="https://discord.gg/kTQvSuxZ6Y" target="_blank" style="color: #7289DA; text-decoration: none; font-size: 16px;">
+      Found a bug? Thought of an improvement? Post it to my email or join the discord!
+    </a>
+  </div>
+</body>
+</html>
