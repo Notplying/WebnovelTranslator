@@ -98,7 +98,7 @@ function createChunkButtons(chunks, prefix, suffix) {
 async function processStoredChunks(chunks, prefix, suffix, retryCount) {
   for (let i = 0; i < chunks.length; i++) {
     try {
-      // Send the chunk for processing
+      updateAttemptProgress(1, retryCount, ProgressState.PROCESSING); // Show processing for this chunk
       const response = await browser.runtime.sendMessage({
         action: 'processChunk',
         chunk: chunks[i],
@@ -108,16 +108,50 @@ async function processStoredChunks(chunks, prefix, suffix, retryCount) {
 
       if (response.error) {
         showError(response.error);
+        updateAttemptProgress(0, retryCount, ProgressState.ERROR); // Show error for this attempt
         continue;
       }
 
-      // Update progress after each chunk
-      updateProgress(i + 1, chunks.length);
-      updateAttemptProgress(0, retryCount);
+      // If response is not streamed, it's complete. Add it, then update progress.
+      if (!response.streaming) {
+        const processedContent = {
+          parts: response.parts || [response.result],
+          text: response.result
+        };
+        // addChunk creates the UI and saves to storage.
+        // We need to ensure it's displayed before updating progress.
+        // The addChunk function itself doesn't return the div, so we find it.
+        let chunkDiv = document.getElementById(`chunk-${i}`);
+        if (!chunkDiv) {
+            // If addChunk hasn't run or finished UI part yet, we might need to call it here
+            // or ensure background.js sends an 'addChunk' message for non-streamed.
+            // For simplicity, assuming background.js sends 'addChunk' or we call it here.
+            // Let's assume background.js sends 'addChunk' message for non-streamed results too.
+            // If not, we'd call: await addChunk(i, processedContent, chunks[i]);
+            // For now, we expect an 'addChunk' message from background.js for non-streamed.
+            // The 'updateProgress' will be triggered by the 'addChunk' message handler
+            // or by the 'isComplete' in streaming.
+
+            // Let's explicitly call addChunk here for non-streamed results from processStoredChunks
+            // to ensure UI and storage are updated before progress.
+            await addChunk(i, processedContent, chunks[i]);
+            updateProgress(i + 1, chunks.length); // Update main progress after this chunk is fully processed and saved
+          } else {
+            // If div exists, it means addChunk was called (e.g. by a message from background)
+            // We just need to ensure progress is updated.
+            // This path might be redundant if addChunk message handler updates progress.
+            // Let's ensure save and then update progress.
+            await saveChunkToStorage(i, processedContent, chunks[i]); // Ensure it's saved
+            updateProgress(i + 1, chunks.length);
+          }
+      }
+      // For streamed responses, updateProgress will be called by updateStreamingChunk when isComplete is true.
+      updateAttemptProgress(0, retryCount, ProgressState.COMPLETED); // Mark attempt as complete
 
     } catch (error) {
-      console.error('Error processing chunk:', error);
+      console.error(`Error processing stored chunk ${i}:`, error);
       showError(error.message);
+      updateAttemptProgress(0, retryCount, ProgressState.ERROR);
     }
   }
 }
@@ -252,10 +286,10 @@ const ProgressState = {
 
 // Progress bar colors
 const ProgressColors = {
-  [ProgressState.INITIALIZING]: '#bb86fc',
-  [ProgressState.PROCESSING]: '#03dac6',
-  [ProgressState.COMPLETED]: '#4CAF50',
-  [ProgressState.ERROR]: '#cf6679'
+  [ProgressState.INITIALIZING]: 'linear-gradient(to right, #b39ddb, #7e57c2)', // Light Purple to Dark Purple
+  [ProgressState.PROCESSING]: 'linear-gradient(to right, #80deea, #00acc1)', // Light Cyan to Dark Cyan
+  [ProgressState.COMPLETED]: 'linear-gradient(to right, #a5d6a7, #4caf50)',  // Light Green to Dark Green
+  [ProgressState.ERROR]: 'linear-gradient(to right, #ef9a9a, #f44336)'      // Light Red to Dark Red
 };
 
 function updateProgressBar(elementId, current, total, state = ProgressState.PROCESSING) {
@@ -267,8 +301,8 @@ function updateProgressBar(elementId, current, total, state = ProgressState.PROC
 
   const percentage = Math.min(Math.max((current / total) * 100, 0), 100);
   progressBar.style.width = `${percentage}%`;
-  progressBar.style.backgroundColor = ProgressColors[state];
-  progressBar.style.transition = 'width 0.3s ease-in-out, background-color 0.3s ease-in-out';
+  progressBar.style.background = ProgressColors[state]; // Use background for gradients
+  progressBar.style.transition = 'width 0.3s ease-in-out, background 0.3s ease-in-out'; // Transition background
 }
 
 function updateProgress(current, total) {
@@ -393,18 +427,19 @@ function createChunkHeader(index) {
   return header;
 }
 
-function addChunk(index, content, rawContent) {
+async function addChunk(index, content, rawContent) {
   const sessionId = getSessionId();
   if (!sessionId) {
     console.error('No session ID found when adding chunk');
     return;
   }
 
-  // Store the chunk data under the session ID
-  browser.storage.local.get(['processedChunks', 'translationSessions']).then(result => {
+  try {
+    // Store the chunk data under the session ID
+    const result = await browser.storage.local.get(['processedChunks', 'translationSessions']);
     const allChunks = result.processedChunks || {};
     const sessionChunks = allChunks[sessionId] || [];
-    sessionChunks[index] = { content, rawContent };
+    sessionChunks[index] = { content, rawContent }; // Ensure 'content' is the structured object
     allChunks[sessionId] = sessionChunks;
 
     // Get the 3 most recent session IDs
@@ -421,8 +456,11 @@ function addChunk(index, content, rawContent) {
       }
     });
 
-    browser.storage.local.set({ processedChunks: filteredChunks });
-  });
+    await browser.storage.local.set({ processedChunks: filteredChunks });
+    console.log(`addChunk: Successfully saved chunk ${index} for session ${sessionId}`);
+  } catch (error) {
+    console.error(`addChunk: Error saving chunk ${index} to storage:`, error);
+  }
 
   const chunksContainer = document.getElementById('chunks-container');
   const chunkDiv = document.createElement('div');
@@ -531,6 +569,20 @@ function showFeedback(message, isError = false) {
   const feedback = document.createElement('div');
   feedback.className = `feedback-message ${isError ? 'error' : 'success'}`;
   feedback.textContent = message;
+
+  // Apply styles for bottom-stickied notification
+  feedback.style.position = 'fixed';
+  feedback.style.bottom = '20px';
+  feedback.style.left = '50%';
+  feedback.style.transform = 'translateX(-50%)';
+  feedback.style.padding = '10px 20px';
+  feedback.style.backgroundColor = isError ? '#f44336' : '#4caf50'; // Red for error, Green for success
+  feedback.style.color = 'white';
+  feedback.style.borderRadius = '5px';
+  feedback.style.zIndex = '9999'; // Ensure it's on top
+  feedback.style.textAlign = 'center';
+  feedback.style.boxShadow = '0 2px 10px rgba(0,0,0,0.2)';
+
   document.body.appendChild(feedback);
 
   // Remove the feedback after animation
@@ -769,190 +821,345 @@ async function reprocessChunk(index, rawContent) {
 
 let currentChunkIndex = -1;  // Start at -1 so first increment makes it 0
 let isStreaming = false;
-let streamingChunkId = null;
-let lastRawContent = null;
+let streamingChunkId = null; // Tracks the ID of the div being streamed into
+let lastRawContent = null; // Tracks raw content for the current *new* chunk stream
 let saveTimeout = null; // For debouncing save operations
+let reprocessingState = { isActive: false, targetIndex: -1, targetElementId: null, originalRawContent: null };
+
+async function reprocessChunk(index, rawContent) {
+  try {
+    const storedData = await browser.runtime.sendMessage({ action: 'getStoredData' });
+    const { prefix, suffix, retryCount } = storedData;
+    const sessionId = getSessionId();
+    if (!sessionId) throw new Error('No session ID found');
+
+    reprocessingState.isActive = true;
+    reprocessingState.targetIndex = index;
+    reprocessingState.targetElementId = `chunk-${index}`;
+    reprocessingState.originalRawContent = rawContent; // Store the raw content being reprocessed
+    console.log(`Reprocessing activated for index: ${index}, ID: ${reprocessingState.targetElementId}`);
+
+    const targetChunkDiv = document.getElementById(reprocessingState.targetElementId);
+    if (!targetChunkDiv) {
+      console.error(`Cannot reprocess: Chunk element ${reprocessingState.targetElementId} not found.`);
+      showError(`Error: UI element for chunk ${index + 1} not found for reprocessing.`);
+      throw new Error(`UI element for chunk ${index + 1} not found`);
+    }
+
+    const contentPartsDisplay = targetChunkDiv.querySelector('.content-parts');
+    if (contentPartsDisplay) contentPartsDisplay.innerHTML = '<p>Reprocessing...</p>';
+    const partButtonsDisplay = targetChunkDiv.querySelector('.part-buttons');
+    if (partButtonsDisplay) partButtonsDisplay.innerHTML = '';
+
+    showFeedback('Reprocessing chunk...', false);
+    updateAttemptProgress(1, retryCount);
+
+    const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
+    const sessionChunks = processedChunks[sessionId] || [];
+    if (sessionChunks[index]) {
+      delete sessionChunks[index];
+      processedChunks[sessionId] = sessionChunks;
+      await browser.storage.local.set({ processedChunks });
+    }
+
+    for (let attempt = 0; attempt < retryCount; attempt++) {
+      updateAttemptProgress(attempt + 1, retryCount);
+      try {
+        const result = await browser.runtime.sendMessage({
+          action: 'processChunk',
+          chunk: rawContent, // Send the original raw content for reprocessing
+          prefix: prefix,
+          suffix: suffix
+        });
+
+        if (result.error) throw new Error(result.error);
+
+        // If streaming, updateStreamingChunk will handle UI and state reset on completion.
+        // If not streaming, handle directly here.
+        if (!result.streaming) {
+          const parts = result.parts || [result.result];
+          updateChunkContent(targetChunkDiv, parts, index);
+          const newProcessedContent = { parts: parts, text: result.result };
+          await saveChunkToStorage(index, newProcessedContent, rawContent);
+          
+          // Update main progress bar
+          const { translationSessions = [] } = await browser.storage.local.get('translationSessions');
+          const currentSessionId = getSessionId();
+          const currentSessionData = translationSessions.find(s => s.id === currentSessionId);
+          if (currentSessionData && currentSessionData.chunks) {
+            updateProgress(index + 1, currentSessionData.chunks.length);
+          } else {
+             // Fallback if session data isn't readily available, might need to adjust total
+            const totalChunks = document.querySelectorAll('.chunk').length || index + 1;
+            updateProgress(index + 1, totalChunks);
+          }
+
+          updateAttemptProgress(0, retryCount, ProgressState.COMPLETED);
+          showFeedback('Chunk reprocessed successfully!');
+          reprocessingState.isActive = false;
+          return;
+        } else if (result.streaming && result.complete) {
+          // This case implies background.js handled the full stream and returned complete.
+          // updateStreamingChunk should have been called and handled the UI.
+          // reprocessingState should be reset by updateStreamingChunk's isComplete logic.
+          // If it's not, we might need to reset it here too, but ideally it's handled there.
+          console.log("Reprocess: Stream reported as complete by background.js immediately.");
+          // No explicit reset here; expecting updateStreamingChunk to handle it.
+          return;
+        }
+        // If streaming is initiated but not yet complete, loop continues or background messages will arrive.
+        return; // Exit reprocessChunk, background messages will drive UI via updateStreamingChunk
+
+      } catch (error) {
+        console.error(`Reprocessing attempt ${attempt + 1} failed:`, error);
+        if (error.message.includes("PERMISSION_DENIED") || attempt === retryCount - 1) {
+          const errorMessage = `Error reprocessing chunk ${index + 1}: ${error.message}`;
+          showError(errorMessage, true);
+          showFeedback(errorMessage, true);
+          throw error; // Propagate to outer catch for state reset
+        }
+        await new Promise(resolve => setTimeout(resolve, 7000));
+      }
+    }
+  } catch (error) {
+    console.error('Error in reprocessChunk:', error);
+    const errorMessage = `Error reprocessing chunk: ${error.message}`;
+    showError(errorMessage); // Show general error
+    showFeedback(errorMessage, true);
+  } finally {
+    // Ensure state is reset if not handled by a successful stream completion
+    // This is a fallback; ideally, successful stream completion in updateStreamingChunk resets it.
+    if (reprocessingState.isActive && !(isStreaming && reprocessingState.targetIndex === currentChunkIndex) ) {
+        // Only reset if not actively streaming for this reprocessed chunk
+        // This condition might be tricky. The primary reset should be on stream 'isComplete' or non-streamed success/final error.
+        // For now, let's rely on updateStreamingChunk for streamed reset.
+        // And non-streamed success/error in the loop above.
+        // This finally might be too aggressive if a stream is ongoing.
+        // Consider removing this or making it more conditional.
+        // For now, if an error threw out of the loop, we reset.
+         if (!isStreaming || reprocessingState.targetIndex !== currentChunkIndex) { // Avoid resetting if a stream for *this* reprocess is active
+            console.log("ReprocessChunk finally: Resetting reprocessing state due to error or non-streamed completion.");
+            reprocessingState.isActive = false;
+            reprocessingState.targetIndex = -1;
+            reprocessingState.targetElementId = null;
+            reprocessingState.originalRawContent = null;
+        }
+    }
+  }
+}
+
 
 async function updateStreamingChunk(content, rawContent, isInitial = false, isComplete = false) {
   try {
-    console.log(`updateStreamingChunk called: isInitial=${isInitial}, isComplete=${isComplete}, content length=${content?.length || 0}`);
-    
-    // If this is an initial update, don't show "processing error"
-    if (isInitial) {
-      // Just initialize without creating content yet
-      isStreaming = false;
-      streamingChunkId = null;
-      lastRawContent = rawContent;
-      return;
+    let effectiveChunkIndex;
+    let effectiveStreamingChunkId;
+    let effectiveRawContent = rawContent; // Default to message's rawContent
+
+    if (reprocessingState.isActive) {
+      effectiveChunkIndex = reprocessingState.targetIndex;
+      effectiveStreamingChunkId = reprocessingState.targetElementId;
+      effectiveRawContent = reprocessingState.originalRawContent; // Use the raw content from when reprocessing started
+      console.log(`updateStreamingChunk (REPROCESSING): index=${effectiveChunkIndex}, id=${effectiveStreamingChunkId}, isInitial=${isInitial}, isComplete=${isComplete}`);
+
+      if (isInitial) { // First packet of a reprocessing stream
+        isStreaming = true; // Mark that a stream is active
+        streamingChunkId = effectiveStreamingChunkId; // Global streaming ID points to the reprocessed chunk
+        currentChunkIndex = effectiveChunkIndex; // Align global currentChunkIndex for consistency during this stream
+        lastRawContent = effectiveRawContent; // Track raw content for this specific stream
+        
+        const targetChunkDiv = document.getElementById(effectiveStreamingChunkId);
+        if (targetChunkDiv) {
+            const targetContentParts = targetChunkDiv.querySelector('.content-parts');
+            if (targetContentParts && targetContentParts.innerHTML.includes("Reprocessing...")) {
+                 targetContentParts.innerHTML = ''; // Clear "Reprocessing..."
+            }
+            const targetPartButtons = targetChunkDiv.querySelector('.part-buttons');
+            if (targetPartButtons) targetPartButtons.innerHTML = '';
+        }
+        updateAttemptProgress(0, 0); // Show generic streaming state
+        // Do not return; proceed to update/create the div content.
+      }
+    } else { // Normal (non-reprocessing) stream
+      console.log(`updateStreamingChunk (NORMAL): isInitial=${isInitial}, isComplete=${isComplete}, globalCurrentChunkIndex=${currentChunkIndex}`);
+      if (isInitial) {
+        currentChunkIndex++; // A new distinct chunk is starting
+        effectiveChunkIndex = currentChunkIndex;
+        effectiveStreamingChunkId = `chunk-${effectiveChunkIndex}`;
+        console.log(`New chunk starting (NORMAL). EffectiveIndex: ${effectiveChunkIndex}. Raw: ${rawContent ? rawContent.substring(0,20) : 'N/A'}`);
+
+        if (effectiveChunkIndex === 0) { // Clear container only for the very first *new* chunk
+          const chunksContainer = document.getElementById('chunks-container');
+          if (chunksContainer) chunksContainer.innerHTML = '';
+        }
+        
+        // const { translationSessions = [] } = await browser.storage.local.get('translationSessions');
+        // const sessionId = getSessionId();
+        // const sessionData = translationSessions.find(s => s.id === sessionId);
+        // if (sessionData && sessionData.chunks) {
+        //   updateProgress(effectiveChunkIndex + 1, sessionData.chunks.length); // This was the bug, remove it.
+        // }
+
+        isStreaming = false; // Not actively streaming content *yet* for this new chunk
+        streamingChunkId = null;
+        lastRawContent = rawContent;
+        return; // Wait for actual content for this new chunk
+      }
+      // For subsequent packets of a normal stream
+      effectiveChunkIndex = currentChunkIndex;
+      effectiveStreamingChunkId = `chunk-${effectiveChunkIndex}`;
     }
 
-    // If this is the final update for this chunk, mark as complete and update the UI
+    // If this is the final update for this chunk
     if (isComplete) {
-      // Process the content first before completing
-      const chunkDiv = document.getElementById(streamingChunkId);
+      if (saveTimeout) clearTimeout(saveTimeout); // Clear any debounced save
+
+      const chunkDiv = document.getElementById(effectiveStreamingChunkId);
+      let finalContentToSave = { parts: [content], text: content };
+
       if (chunkDiv && content) {
         const partContent = chunkDiv.querySelector('.part-content.active');
         if (partContent) {
-          const escapedContent = escapeHtml(content);
-          partContent.innerHTML = DOMPurify.sanitize(marked.parse(escapedContent));
-          chunkDiv.dataset.rawContent = rawContent; // Update raw content
-          
-          // Save the final content
-          const processedContent = {
-            parts: [content],
-            text: content
-          };
-          await saveChunkToStorage(currentChunkIndex, processedContent, rawContent);
+          partContent.innerHTML = DOMPurify.sanitize(marked.parse(escapeHtml(content)));
+          chunkDiv.dataset.rawContent = effectiveRawContent;
         }
+        // Ensure finalContentToSave is based on the received 'content' parameter for isComplete
       }
       
-      // Turn off streaming and update progress to completed state
+      // Explicitly save the final complete content
+      await saveChunkToStorage(effectiveChunkIndex, finalContentToSave, effectiveRawContent);
+      console.log(`Saved final COMPLETED content for chunk ${effectiveChunkIndex} (ID: ${effectiveStreamingChunkId})`);
+
       isStreaming = false;
       updateAttemptProgress(1, 1, ProgressState.COMPLETED);
-      
-      // Update progress text
       const progressText = document.getElementById('attempt-progress-text');
-      if (progressText) {
-        progressText.textContent = 'Chunk completed';
+      if (progressText) progressText.textContent = 'Chunk completed';
+      
+      // Update main progress bar *after* saving the completed chunk
+      const { translationSessions = [] } = await browser.storage.local.get('translationSessions');
+      const currentSessionId = getSessionId();
+      const currentSessionData = translationSessions.find(s => s.id === currentSessionId);
+      if (currentSessionData && currentSessionData.chunks) {
+        updateProgress(effectiveChunkIndex + 1, currentSessionData.chunks.length);
+      } else {
+        // Fallback if session data isn't readily available
+        const totalSessionChunks = document.querySelectorAll('.chunk').length; // Estimate total from UI if needed
+        updateProgress(effectiveChunkIndex + 1, totalSessionChunks > 0 ? totalSessionChunks : effectiveChunkIndex + 1);
       }
       
-      console.log('Streaming complete, progress updated');
+      if (reprocessingState.isActive && reprocessingState.targetIndex === effectiveChunkIndex) {
+        console.log(`Reprocessing stream complete for index ${effectiveChunkIndex}. Resetting state.`);
+        reprocessingState.isActive = false;
+        reprocessingState.targetIndex = -1;
+        reprocessingState.targetElementId = null;
+        reprocessingState.originalRawContent = null;
+      }
+      console.log(`Streaming complete and saved for chunk ${effectiveChunkIndex}. Main progress updated.`);
       return;
     }
 
-    // Update attempt progress to show streaming state if still streaming
-    if (!isComplete) {
-      updateAttemptProgress(0, 0);
-    }
-
-    // If raw content changes, it means we're starting a new chunk
-    if (rawContent !== lastRawContent) {
-      isStreaming = false;
-      streamingChunkId = null;
-      lastRawContent = rawContent;
-      // Increment chunk index when starting a new chunk
-      currentChunkIndex++;
-      // Update progress to show correct chunk number
-      updateProgress(currentChunkIndex + 1, totalChunks);
-    }
-
-    // Create new streaming chunk ID for new chunks
+    // Setup streaming state if not already set (for the first content packet of a normal or reprocessed stream)
     if (!isStreaming) {
       isStreaming = true;
-      streamingChunkId = `chunk-${currentChunkIndex}`;
-      // Reset the container if this is the first chunk
-      if (currentChunkIndex === 0) {
-        document.getElementById('chunks-container').innerHTML = '';
+      streamingChunkId = effectiveStreamingChunkId; // Global var tracks current target
+      // If reprocessing, currentChunkIndex was already aligned. If normal, it's the current new chunk index.
+      console.log(`Starting to stream content for chunk index ${effectiveChunkIndex}. Assigned ID: ${streamingChunkId}`);
+      updateAttemptProgress(0, 0);
+    }
+    
+    // Ensure rawContent matches for ongoing stream (sanity check, primarily for non-reprocessing)
+    if (!reprocessingState.isActive && rawContent !== lastRawContent) {
+        console.warn(`Normal stream: rawContent changed unexpectedly mid-stream for chunk ${effectiveChunkIndex}.`);
+    }
+
+    let chunkDiv = document.getElementById(effectiveStreamingChunkId);
+  
+    const processedContentToSave = { parts: [content], text: content };
+    if (saveTimeout) clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(async () => {
+      await saveChunkToStorage(effectiveChunkIndex, processedContentToSave, effectiveRawContent);
+    }, 500);
+
+    if (!chunkDiv) { // Create new chunk div (should only happen for new, non-reprocessed chunks)
+      if (reprocessingState.isActive) {
+        console.error(`Error: Attempted to create a new div for a reprocessed chunk ${effectiveStreamingChunkId}. This should not happen.`);
+        // Fallback: try to find it again, or show error. For now, log and proceed cautiously.
+        // This indicates a logic flaw if reprocessChunk didn't prepare the div or it got removed.
+      }
+      const chunksContainer = document.getElementById('chunks-container');
+      chunkDiv = document.createElement('div'); // Renamed from chunkElement for consistency
+      chunkDiv.id = effectiveStreamingChunkId;
+      chunkDiv.className = 'chunk';
+
+      const card = document.createElement('div'); card.className = 'card';
+      const cardBody = document.createElement('div'); cardBody.className = 'card-body';
+      cardBody.appendChild(createChunkHeader(effectiveChunkIndex));
+
+      const partButtons = document.createElement('div'); partButtons.className = 'part-buttons';
+      cardBody.appendChild(partButtons);
+      
+      const contentParts = document.createElement('div'); contentParts.className = 'content-parts';
+      const partContentElement = document.createElement('div'); // Renamed for clarity
+      partContentElement.className = 'markdown-content part-content active';
+      partContentElement.dataset.part = '0';
+      partContentElement.innerHTML = DOMPurify.sanitize(marked.parse(escapeHtml(content)));
+      contentParts.appendChild(partContentElement);
+      cardBody.appendChild(contentParts);
+
+      const partButton = createPartButton('Part 1', true, () => switchPart(effectiveChunkIndex, 0));
+      partButtons.appendChild(partButton);
+      chunkDiv.dataset.rawContent = effectiveRawContent;
+
+      const actionButtonsContainer = document.createElement('div');
+      actionButtonsContainer.className = 'button-group';
+      Object.assign(actionButtonsContainer.style, { display: 'flex', gap: '10px', marginTop: '10px' });
+
+      const copyButton = createButton('Copy Processed Chunk', 'button copy-button', () => copyChunk(effectiveChunkIndex, chunkDiv.querySelector('.part-content.active').textContent, 'processed'));
+      const copyRawButton = createButton('Copy Raw Chunk', 'button copy-raw-button', () => copyChunk(effectiveChunkIndex, chunkDiv.dataset.rawContent, 'raw'));
+      const reprocessBtn = createButton('Reprocess Chunk', 'button reprocess-button', () => reprocessChunk(effectiveChunkIndex, chunkDiv.dataset.rawContent));
+      [copyButton, copyRawButton, reprocessBtn].forEach(button => {
+        Object.assign(button.style, { flex: '1', margin: '0' });
+        actionButtonsContainer.appendChild(button);
+      });
+      cardBody.appendChild(actionButtonsContainer);
+      const feedback = document.createElement('div'); feedback.className = 'feedback'; feedback.textContent = 'Copied!'; feedback.style.display = 'none';
+      cardBody.appendChild(feedback);
+      card.appendChild(cardBody);
+      chunkDiv.appendChild(card);
+      chunksContainer.insertBefore(chunkDiv, null); // Append at the end
+    } else { // Update existing chunk content
+      const partContent = chunkDiv.querySelector('.part-content.active');
+      if (partContent) {
+        partContent.innerHTML = DOMPurify.sanitize(marked.parse(escapeHtml(content)));
+        // Ensure rawContent dataset is updated if it somehow changed, though for streaming it should be consistent.
+        chunkDiv.dataset.rawContent = effectiveRawContent;
+      } else {
+          // If .part-content.active is missing (e.g. after clearing for reprocess), recreate it.
+          const contentPartsContainer = chunkDiv.querySelector('.content-parts');
+          if (contentPartsContainer) {
+              contentPartsContainer.innerHTML = ''; // Clear any "Reprocessing..."
+              const newPartContent = createPartContent(content, true, 0);
+              contentPartsContainer.appendChild(newPartContent);
+
+              // Also ensure part button exists
+              const partButtonsContainer = chunkDiv.querySelector('.part-buttons');
+              if (partButtonsContainer && partButtonsContainer.innerHTML === '') {
+                  const newPartButton = createPartButton('Part 1', true, () => switchPart(effectiveChunkIndex, 0));
+                  partButtonsContainer.appendChild(newPartButton);
+              }
+          }
       }
     }
-
-  const chunkDiv = document.getElementById(streamingChunkId);
-  
-  // Prepare processed content
-  const processedContent = {
-    parts: [content],
-    text: content
-  };
-
-  // Clear any existing save timeout
-  if (saveTimeout) {
-    clearTimeout(saveTimeout);
-  }
-
-  // Set a new timeout to save content after 500ms
-  saveTimeout = setTimeout(async () => {
-    await saveChunkToStorage(currentChunkIndex, processedContent, rawContent);
-  }, 500);
-
-  if (!chunkDiv) {
-    // Create new chunk div
-    const chunksContainer = document.getElementById('chunks-container');
-    const chunkElement = document.createElement('div');
-    chunkElement.id = `chunk-${currentChunkIndex}`;
-    chunkElement.className = 'chunk';
-
-    const card = document.createElement('div');
-    card.className = 'card';
-    const cardBody = document.createElement('div');
-    cardBody.className = 'card-body';
-
-    // Add chunk header
-    cardBody.appendChild(createChunkHeader(currentChunkIndex));
-
-    // Create part buttons container
-    const partButtons = document.createElement('div');
-    partButtons.className = 'part-buttons';
-    cardBody.appendChild(partButtons);
-    
-    // Create content container
-    const contentParts = document.createElement('div');
-    contentParts.className = 'content-parts';
-    const partContent = document.createElement('div');
-    partContent.className = 'markdown-content part-content active';
-    partContent.dataset.part = '0';
-    const escapedContent = escapeHtml(content);
-    partContent.innerHTML = DOMPurify.sanitize(marked.parse(escapedContent));
-    contentParts.appendChild(partContent);
-    cardBody.appendChild(contentParts);
-
-    // Create part button
-    const button = createPartButton('Part 1', true, () => switchPart(currentChunkIndex, 0));
-    partButtons.appendChild(button);
-
-    // Store raw content for reprocessing
-    chunkElement.dataset.rawContent = rawContent;
-
-    // Create action buttons container
-    const actionButtonsContainer = document.createElement('div');
-    actionButtonsContainer.className = 'button-group';
-    actionButtonsContainer.style.display = 'flex';
-    actionButtonsContainer.style.gap = '10px';
-    actionButtonsContainer.style.marginTop = '10px';
-
-    // Add action buttons
-    const copyButton = createButton('Copy Processed Chunk', 'button copy-button', () => {
-      const content = chunkElement.querySelector('.part-content.active').textContent;
-      copyChunk(currentChunkIndex, content, 'processed');
-    });
-    const copyRawButton = createButton('Copy Raw Chunk', 'button copy-raw-button', () => {
-      copyChunk(currentChunkIndex, chunkElement.dataset.rawContent, 'raw');
-    });
-    const reprocessButton = createButton('Reprocess Chunk', 'button reprocess-button', () => {
-      reprocessChunk(currentChunkIndex, chunkElement.dataset.rawContent);
-    });
-
-    // Style buttons
-    [copyButton, copyRawButton, reprocessButton].forEach(button => {
-      button.style.flex = '1';
-      button.style.margin = '0';
-      actionButtonsContainer.appendChild(button);
-    });
-
-    cardBody.appendChild(actionButtonsContainer);
-
-    // Add feedback element
-    const feedback = document.createElement('div');
-    feedback.className = 'feedback';
-    feedback.textContent = 'Copied!';
-    feedback.style.display = 'none';
-    cardBody.appendChild(feedback);
-
-    card.appendChild(cardBody);
-    chunkElement.appendChild(card);
-    // Always append new chunks at the end
-    chunksContainer.insertBefore(chunkElement, null);
-  } else {
-    // Update existing chunk content
-    const partContent = chunkDiv.querySelector('.part-content.active');
-    if (partContent) {
-      const escapedContent = escapeHtml(content);
-      partContent.innerHTML = DOMPurify.sanitize(marked.parse(escapedContent));
-      chunkDiv.dataset.rawContent = rawContent; // Update raw content for existing chunk
-    }
-  }
   } catch (error) {
     console.error('Error in updateStreamingChunk:', error);
     showError('Error updating streaming content: ' + error.message);
+    // If an error occurs during a reprocess stream, reset the state
+    if (reprocessingState.isActive && reprocessingState.targetIndex === (typeof effectiveChunkIndex !== 'undefined' ? effectiveChunkIndex : currentChunkIndex) ) {
+        console.log("Resetting reprocessing state due to error in updateStreamingChunk.");
+        reprocessingState.isActive = false;
+        reprocessingState.targetIndex = -1;
+        reprocessingState.targetElementId = null;
+        reprocessingState.originalRawContent = null;
+    }
   }
 }
 
