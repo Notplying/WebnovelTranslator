@@ -598,11 +598,14 @@ async function processChunkWithVertex(message, options) {
 }
 
 async function processChunkWithOpenRouter(message, options) {
+  // Initialize variables outside of try block so they are available in catch block
+  let tabCloseListener;
+  let fullContent = '';
+  let controller = new AbortController();
+  
   try {
-    const controller = new AbortController();
-    
     // Set up tab close listener to abort request
-    const tabCloseListener = (tabId) => {
+    tabCloseListener = (tabId) => {
       if (tabId === chunksTabId) {
         console.log('Chunks tab closed, aborting request');
         controller.abort();
@@ -610,6 +613,16 @@ async function processChunkWithOpenRouter(message, options) {
       }
     };
     browser.tabs.onRemoved.addListener(tabCloseListener);
+    
+    // Initialize progress bar first to prevent "processing error" text
+    if (options.openRouterStream) {
+      updateChunksPage({
+        action: 'updateStreamContent',
+        content: '',
+        rawContent: message.chunk,
+        isInitial: true // Flag to indicate this is the initial update
+      });
+    }
     
     const requestBody = {
       model: options.openRouterModelId || 'openai/gpt-4',
@@ -657,7 +670,6 @@ async function processChunkWithOpenRouter(message, options) {
 
       const decoder = new TextDecoder();
       let buffer = '';
-      let fullContent = '';
 
       try {
         while (true) {
@@ -682,9 +694,11 @@ async function processChunkWithOpenRouter(message, options) {
 
                 try {
                   const parsed = JSON.parse(data);
-                  const content = parsed.choices[0].delta.content;
+                  const content = parsed.choices[0]?.delta?.content;
+                  
                   if (content) {
                     fullContent += content;
+                    
                     // Debounce the UI updates
                     const now = Date.now();
                     if (now - lastUpdateTime >= UPDATE_DELAY) {
@@ -720,17 +734,17 @@ async function processChunkWithOpenRouter(message, options) {
             }
             throw error;
           }
-        }
-
-        // Don't add another chunk when streaming - the streaming UI handles it
-        // Ensure final content is delivered before returning
+        }        // Ensure final content is delivered before returning
         updateChunksPage({
           action: 'updateStreamContent',
           content: fullContent,
-          rawContent: message.chunk
+          rawContent: message.chunk,
+          isComplete: true // Flag to indicate this is the final update
         });
+        // Small delay to ensure UI updates before returning
+        await new Promise(resolve => setTimeout(resolve, 100));
         lastUpdateTime = Date.now();
-        return { result: fullContent, streaming: true };
+        return { result: fullContent, streaming: true, complete: true };
       } finally {
         reader.cancel();
         clearTimeout(debounceTimeout); // Clean up any pending debounce timeout
@@ -738,20 +752,38 @@ async function processChunkWithOpenRouter(message, options) {
     }
   } catch (error) {
     console.error('Detailed error in processChunkWithOpenRouter:', error);
-    // Remove tab close listener
-    browser.tabs.onRemoved.removeListener(tabCloseListener);
-    
-    if (error.name === 'AbortError') {
+    // Remove tab close listener if it exists
+    if (tabCloseListener) {
+      browser.tabs.onRemoved.removeListener(tabCloseListener);
+    }
+      if (error.name === 'AbortError') {
       // Ensure any pending content is delivered before returning error
       if (fullContent) {
         updateChunksPage({
           action: 'updateStreamContent',
           content: fullContent,
-          rawContent: message.chunk
+          rawContent: message.chunk,
+          isComplete: true
         });
       }
       return { error: 'Request cancelled - chunks page was closed' };
     }
+    
+    // Even for errors, make sure to signal completion to fix the progress bar
+    updateChunksPage({
+      action: 'updateStreamContent',
+      content: fullContent || '',
+      rawContent: message.chunk,
+      isComplete: true
+    });
+    
+    // For any errors related to OpenRouter, provide specific error message
+    if (error.message.includes('401')) {
+      return { error: 'OpenRouter API: Invalid API key or authentication failed' };
+    } else if (error.message.includes('429')) {
+      return { error: 'OpenRouter API: Rate limit exceeded. Please try again later.' };
+    }
+    
     return { error: `Error processing chunk with OpenRouter API: ${error.message}` };
   }
 }

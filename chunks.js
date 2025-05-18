@@ -140,18 +140,18 @@ const ErrorMessages = {
       <p>It seems that the API key is missing or invalid. Please follow these steps:</p>
       <ol>
         <li>Go to the extension settings</li>
-        <li>Enter a valid API key for the Gemini API</li>
+        <li>Enter a valid API key for the selected API provider</li>
         <li>Save the settings</li>
         <li>Try running the extension again</li>
       </ol>
-      <p>If you don't have an API key, you can obtain one from the Google AI Studio.</p>
+      <p>If you don't have an API key, you can obtain one from the appropriate service provider.</p>
     `
   },
   [ErrorTypes.CONTENT_SAFETY]: {
     title: 'Content Safety Error',
     message: `
-      <p>Gemini doesn't like the content and deems it 'unsafe' somehow (Unsafe ranges from too 'Spicy' or potential copyright issues).</p>
-      <p>Maybe change the prompt suffix or prefix?</p>
+      <p>The API provider rejected the content, possibly due to safety concerns, content policies, or potential copyright issues.</p>
+      <p>Try changing the prompt suffix or prefix to make the content more acceptable.</p>
     `
   },
   [ErrorTypes.NETWORK]: {
@@ -160,7 +160,7 @@ const ErrorMessages = {
   },
   [ErrorTypes.PROCESSING]: {
     title: 'Processing Error',
-    message: 'An error occurred while processing the chunk. Please try again.'
+    message: 'An error occurred while processing the chunk. Please check your API settings and try again.'
   },
   [ErrorTypes.FATAL]: {
     title: 'Fatal Error',
@@ -178,11 +178,23 @@ function showError(error, isFatal = false) {
   // Determine error type and get corresponding message
   let errorType = ErrorTypes.PROCESSING;
   if (typeof error === 'string') {
-    if (error.includes('PERMISSION_DENIED') || error.includes('Please use API Key')) {
+    // Handle various API key errors
+    if (error.includes('PERMISSION_DENIED') || 
+        error.includes('Please use API Key') || 
+        error.includes('Invalid API key') || 
+        error.includes('authentication failed')) {
       errorType = ErrorTypes.API_KEY;
-    } else if (error.includes('Unexpected response structure from Gemini API')) {
+    } 
+    // Handle content safety errors from different providers
+    else if (error.includes('Unexpected response structure from Gemini API') || 
+             error.includes('Unexpected response structure from OpenRouter API') ||
+             error.includes('content policy')) {
       errorType = ErrorTypes.CONTENT_SAFETY;
-    } else if (error.includes('Failed to fetch') || error.includes('Network error')) {
+    } 
+    // Handle network errors
+    else if (error.includes('Failed to fetch') || 
+             error.includes('Network error') || 
+             error.includes('Rate limit exceeded')) {
       errorType = ErrorTypes.NETWORK;
     }
   }
@@ -274,10 +286,30 @@ function updateProgress(current, total) {
   }
 }
 
-function updateAttemptProgress(current, total) {
-  // If streaming, show special state
+function updateAttemptProgress(current, total, forceState = null) {
+  // Handle forced state (typically for completion)
+  if (forceState !== null) {
+    updateProgressBar('attempt-progress-bar-fill', current, total, forceState);
+    
+    // Update text based on state
+    const progressText = document.getElementById('attempt-progress-text');
+    if (progressText) {
+      if (forceState === ProgressState.COMPLETED) {
+        progressText.textContent = 'Processing complete';
+      } else if (forceState === ProgressState.ERROR) {
+        progressText.textContent = 'Error during processing';
+      } else if (forceState === ProgressState.INITIALIZING) {
+        progressText.textContent = 'Initializing...';
+      } else {
+        progressText.textContent = `Attempt ${current} of ${total}`;
+      }
+    }
+    return;
+  }
+  
+  // If streaming, show streaming state
   if (isStreaming) {
-    updateProgressBar('attempt-progress-bar-fill', 1, 1, ProgressState.COMPLETED);
+    updateProgressBar('attempt-progress-bar-fill', 1, 1, ProgressState.PROCESSING);
     const progressText = document.getElementById('attempt-progress-text');
     if (progressText) {
       progressText.textContent = 'Currently Streaming...';
@@ -285,9 +317,9 @@ function updateAttemptProgress(current, total) {
     return;
   }
 
-  // Normal progress behavior when not streaming
+  // Default state handling
   const state = current === 0 ? ProgressState.COMPLETED :
-                current === total ? ProgressState.ERROR :
+                current === total ? ProgressState.COMPLETED :
                 ProgressState.PROCESSING;
                 
   updateProgressBar('attempt-progress-bar-fill', current, total, state);
@@ -741,31 +773,78 @@ let streamingChunkId = null;
 let lastRawContent = null;
 let saveTimeout = null; // For debouncing save operations
 
-async function updateStreamingChunk(content, rawContent) {
+async function updateStreamingChunk(content, rawContent, isInitial = false, isComplete = false) {
   try {
-    // Update attempt progress to show streaming state
-  updateAttemptProgress(0, 0);
-
-  // If raw content changes, it means we're starting a new chunk
-  if (rawContent !== lastRawContent) {
-    isStreaming = false;
-    streamingChunkId = null;
-    lastRawContent = rawContent;
-    // Increment chunk index when starting a new chunk
-    currentChunkIndex++;
-    // Update progress to show correct chunk number
-    updateProgress(currentChunkIndex + 1, totalChunks);
-  }
-
-  // Create new streaming chunk ID for new chunks
-  if (!isStreaming) {
-    isStreaming = true;
-    streamingChunkId = `chunk-${currentChunkIndex}`;
-    // Reset the container if this is the first chunk
-    if (currentChunkIndex === 0) {
-      document.getElementById('chunks-container').innerHTML = '';
+    console.log(`updateStreamingChunk called: isInitial=${isInitial}, isComplete=${isComplete}, content length=${content?.length || 0}`);
+    
+    // If this is an initial update, don't show "processing error"
+    if (isInitial) {
+      // Just initialize without creating content yet
+      isStreaming = false;
+      streamingChunkId = null;
+      lastRawContent = rawContent;
+      return;
     }
-  }
+
+    // If this is the final update for this chunk, mark as complete and update the UI
+    if (isComplete) {
+      // Process the content first before completing
+      const chunkDiv = document.getElementById(streamingChunkId);
+      if (chunkDiv && content) {
+        const partContent = chunkDiv.querySelector('.part-content.active');
+        if (partContent) {
+          const escapedContent = escapeHtml(content);
+          partContent.innerHTML = DOMPurify.sanitize(marked.parse(escapedContent));
+          chunkDiv.dataset.rawContent = rawContent; // Update raw content
+          
+          // Save the final content
+          const processedContent = {
+            parts: [content],
+            text: content
+          };
+          await saveChunkToStorage(currentChunkIndex, processedContent, rawContent);
+        }
+      }
+      
+      // Turn off streaming and update progress to completed state
+      isStreaming = false;
+      updateAttemptProgress(1, 1, ProgressState.COMPLETED);
+      
+      // Update progress text
+      const progressText = document.getElementById('attempt-progress-text');
+      if (progressText) {
+        progressText.textContent = 'Chunk completed';
+      }
+      
+      console.log('Streaming complete, progress updated');
+      return;
+    }
+
+    // Update attempt progress to show streaming state if still streaming
+    if (!isComplete) {
+      updateAttemptProgress(0, 0);
+    }
+
+    // If raw content changes, it means we're starting a new chunk
+    if (rawContent !== lastRawContent) {
+      isStreaming = false;
+      streamingChunkId = null;
+      lastRawContent = rawContent;
+      // Increment chunk index when starting a new chunk
+      currentChunkIndex++;
+      // Update progress to show correct chunk number
+      updateProgress(currentChunkIndex + 1, totalChunks);
+    }
+
+    // Create new streaming chunk ID for new chunks
+    if (!isStreaming) {
+      isStreaming = true;
+      streamingChunkId = `chunk-${currentChunkIndex}`;
+      // Reset the container if this is the first chunk
+      if (currentChunkIndex === 0) {
+        document.getElementById('chunks-container').innerHTML = '';
+      }
+    }
 
   const chunkDiv = document.getElementById(streamingChunkId);
   
@@ -920,10 +999,9 @@ browser.runtime.onMessage.addListener((message) => {
           break;
       case 'showError':
           showError(message.errorContent, message.isFatal);
-          break;
-      case 'updateStreamContent':
+          break;      case 'updateStreamContent':
           console.log('Received streaming content update:', message.content);
-          updateStreamingChunk(message.content, message.rawContent);
+          updateStreamingChunk(message.content, message.rawContent, message.isInitial, message.isComplete);
           break;
   }
 });

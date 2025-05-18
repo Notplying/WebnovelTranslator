@@ -1,3 +1,33 @@
+// Function to display status messages to the user
+function showStatus(message, duration = 3000) {
+  // Create status container if it doesn't exist
+  let statusContainer = document.getElementById('status-message');
+  if (!statusContainer) {
+    statusContainer = document.createElement('div');
+    statusContainer.id = 'status-message';
+    statusContainer.style.position = 'fixed';
+    statusContainer.style.bottom = '20px';
+    statusContainer.style.left = '50%';
+    statusContainer.style.transform = 'translateX(-50%)';
+    statusContainer.style.backgroundColor = 'rgba(0, 128, 0, 0.8)';
+    statusContainer.style.color = 'white';
+    statusContainer.style.padding = '10px 20px';
+    statusContainer.style.borderRadius = '4px';
+    statusContainer.style.zIndex = '1000';
+    statusContainer.style.display = 'none';
+    document.body.appendChild(statusContainer);
+  }
+  
+  // Update message and show
+  statusContainer.textContent = message;
+  statusContainer.style.display = 'block';
+  
+  // Hide after duration
+  setTimeout(() => {
+    statusContainer.style.display = 'none';
+  }, duration);
+}
+
 // Function to handle input focus for mobile keyboards
 function handleInputFocus() {
   // Small delay to ensure the keyboard is fully shown
@@ -99,11 +129,22 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   
   });
-
   // Export settings
   document.getElementById('export-settings').addEventListener('click', async function() {
     const settings = await browser.storage.local.get();
-    const blob = new Blob([JSON.stringify(settings, null, 2)], { type: 'application/json' });
+    
+    // Exclude specific keys from the exported settings
+    const keysToExclude = ['processedChunks', 'lastChunksData', 'translationSessions'];
+    
+    // Create a cleaned copy of the settings without the excluded keys
+    const exportSettings = {};
+    for (const key in settings) {
+      if (!keysToExclude.includes(key)) {
+        exportSettings[key] = settings[key];
+      }
+    }
+    
+    const blob = new Blob([JSON.stringify(exportSettings, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -112,6 +153,8 @@ document.addEventListener('DOMContentLoaded', function () {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    
+    showStatus('Settings exported successfully (excluding session data)');
   });
 
   // Import settings
