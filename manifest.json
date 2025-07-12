@@ -1,7 +1,7 @@
 {  "manifest_version": 2,
-  "name": "AI Webnovel Translator",
-  "version": "2.6.8",
-  "description": "Extracts text chunks from syosetsu/kakyomu/fortuneeternal/booktoki paragraphs, translates them using gemini flash (BRING YOUR OWN GEMINI API KEY [It's FREE on Google's AI Studio]) or Vertex AI (BRING YOUR OWN GOOGLE CLOUD SERVICE ACCOUNT KEY IN JSON) or OpenRouter and displays them in a new page.",
+  "name": "AI Webnovel Translator Experimental",
+  "version": "2.8.0",
+  "description": "Extracts text chunks from syosetsu/kakyomu/fortuneeternal/booktoki paragraphs, translates them using gemini flash (BRING YOUR OWN GEMINI API KEY [It's FREE on Google's AI Studio]) or Vertex AI (BRING YOUR OWN GOOGLE CLOUD SERVICE ACCOUNT KEY IN JSON) or OpenRouter or OpenAI and displays them in a new page.",
   "permissions": [
     "activeTab",
     "storage",

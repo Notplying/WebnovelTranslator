@@ -55,14 +55,15 @@ document.addEventListener('DOMContentLoaded', function () {
   const apiTypeElement = document.getElementById('api-type');
   const geminiSettings = document.getElementById('gemini-settings');
   const vertexSettings = document.getElementById('vertex-settings');
-
   const openRouterSettings = document.getElementById('openRouter-settings');
+  const openaiSettings = document.getElementById('openai-settings');
 
   // Toggle visibility of API-specific settings
   apiTypeElement.addEventListener('change', function () {
     geminiSettings.style.display = 'none';
     vertexSettings.style.display = 'none';
     openRouterSettings.style.display = 'none';
+    openaiSettings.style.display = 'none';
 
     if (apiTypeElement.value === 'gemini') {
       geminiSettings.style.display = 'block';
@@ -70,6 +71,8 @@ document.addEventListener('DOMContentLoaded', function () {
       vertexSettings.style.display = 'block';
     } else if (apiTypeElement.value === 'openRouter') {
       openRouterSettings.style.display = 'block';
+    } else if (apiTypeElement.value === 'openai') {
+      openaiSettings.style.display = 'block';
     }
   });
 
@@ -81,9 +84,9 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('prefix').value = options.prefix || '';
     document.getElementById('suffix').value = options.suffix || '';
     document.getElementById('retry-count').value = options.retryCount || 3;
-    document.getElementById('temperature').value = options.temperature || 0.9;
-    document.getElementById('top-k').value = options.topK || 1;
-    document.getElementById('top-p').value = options.topP || 0.95;
+    document.getElementById('temperature').value = options.temperature || '';
+    document.getElementById('top-k').value = options.topK || '';
+    document.getElementById('top-p').value = options.topP || '';
     document.getElementById('gemini-api-key').value = options.geminiApiKey || '';
     document.getElementById('gemini-model-id').value = options.geminiModelId || 'gemini-1.5-flash-8b-latest';
     document.getElementById('service-account-key').value = options.vertexServiceAccountKey || '';
@@ -91,8 +94,28 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('project-id').value = options.vertexProjectId || '';
     document.getElementById('model-id').value = options.vertexModelId || 'gemini-1.5-flash-002';
     document.getElementById('openRouter-api-key').value = options.openRouterApiKey || '';
-    document.getElementById('openRouter-model-id').value = options.openRouterModelId || 'openai/gpt-4';
+    document.getElementById('openRouter-model-id').value = options.openRouterModelId || 'deepseek/deepseek-chat-v3-0324:free';
+    document.getElementById('openRouter-max-tokens').value = options.openRouterMaxTokens || '';
+    document.getElementById('openRouter-context-window').value = options.openRouterContextWindow || '';
     document.getElementById('openRouter-stream').value = options.openRouterStream !== false ? 'true' : 'false';
+    
+    document.getElementById('openai-api-key').value = options.openaiApiKey || '';
+    document.getElementById('openai-model-id').value = options.openaiModelId || 'gpt-4o-mini';
+    document.getElementById('openai-base-url').value = options.openaiBaseUrl || 'https://api.openai.com/v1';
+    document.getElementById('openai-max-tokens').value = options.openaiMaxTokens || '';
+    document.getElementById('openai-context-window').value = options.openaiContextWindow || '';
+    document.getElementById('openai-stream').value = options.openaiStream !== false ? 'true' : 'false';
+    
+    document.getElementById('gemini-api-key').value = options.geminiApiKey || '';
+    document.getElementById('gemini-model-id').value = options.geminiModelId || 'gemini-2.0-flash-001';
+    document.getElementById('gemini-max-tokens').value = options.geminiMaxTokens || '';
+    document.getElementById('gemini-context-window').value = options.geminiContextWindow || '';
+    document.getElementById('gemini-stream').value = options.geminiStream !== false ? 'true' : 'false';
+    
+    document.getElementById('model-id').value = options.vertexModelId || 'gemini-2.0-flash-001';
+    document.getElementById('vertex-max-tokens').value = options.vertexMaxTokens || '';
+    document.getElementById('vertex-context-window').value = options.vertexContextWindow || '';
+    document.getElementById('vertex-stream').value = options.vertexStream !== false ? 'true' : 'false';
 
     // Trigger change event to show the correct settings
     apiTypeElement.dispatchEvent(new Event('change'));
@@ -119,9 +142,23 @@ document.addEventListener('DOMContentLoaded', function () {
       vertexLocation: document.getElementById('location').value,
       vertexProjectId: document.getElementById('project-id').value,
       vertexModelId: document.getElementById('model-id').value,
+      vertexMaxTokens: document.getElementById('vertex-max-tokens').value,
+      vertexContextWindow: document.getElementById('vertex-context-window').value,
       openRouterApiKey: document.getElementById('openRouter-api-key').value,
       openRouterModelId: document.getElementById('openRouter-model-id').value,
-      openRouterStream: document.getElementById('openRouter-stream').value === 'true'
+      openRouterMaxTokens: document.getElementById('openRouter-max-tokens').value,
+      openRouterContextWindow: document.getElementById('openRouter-context-window').value,
+      openRouterStream: document.getElementById('openRouter-stream').value === 'true',
+      openaiApiKey: document.getElementById('openai-api-key').value,
+      openaiModelId: document.getElementById('openai-model-id').value,
+      openaiBaseUrl: document.getElementById('openai-base-url').value,
+      openaiMaxTokens: document.getElementById('openai-max-tokens').value,
+      openaiContextWindow: document.getElementById('openai-context-window').value,
+      openaiStream: document.getElementById('openai-stream').value === 'true',
+      geminiMaxTokens: document.getElementById('gemini-max-tokens').value,
+      geminiContextWindow: document.getElementById('gemini-context-window').value,
+      geminiStream: document.getElementById('gemini-stream').value === 'true',
+      vertexStream: document.getElementById('vertex-stream').value === 'true'
     };
 
     browser.storage.local.set(settings).then(() => {
@@ -221,14 +258,29 @@ document.addEventListener('DOMContentLoaded', function () {
         topP: 0.95,
         geminiApiKey: "",
         geminiModelId: "gemini-2.0-flash-001",
+        geminiMaxTokens: "",
+        geminiContextWindow: "",
+        geminiStream: true,
         vertexServiceAccountKey: "",
         vertexLocation: "us-central1",
         vertexProjectId: "",
         vertexModelId: "gemini-2.0-flash-001",
+        vertexMaxTokens: "",
+        vertexContextWindow: "",
+        vertexStream: true,
         openRouterApiKey: "",
         openRouterSiteUrl: "",
         openRouterSiteName: "",
-        openRouterModelId: "deepseek/deepseek-chat-v3-0324:free"
+        openRouterModelId: "deepseek/deepseek-chat-v3-0324:free",
+        openRouterMaxTokens: "",
+        openRouterContextWindow: "",
+        openRouterStream: true,
+        openaiApiKey: "",
+        openaiModelId: "gpt-4o-mini",
+        openaiMaxTokens: "",
+        openaiContextWindow: "",
+        openaiBaseUrl: "https://api.openai.com/v1",
+        openaiStream: true
       };
 
       await browser.storage.local.set(defaultSettings);

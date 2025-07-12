@@ -230,11 +230,15 @@
   <form id="options-form">
     <div class="section">
       <div class="section-title">API Configuration</div>
-      <label for="api-type">API Type: <span style="color: red;">NEW!</span> Openrouter API with Streaming!</label>
+      <a href="https://discord.gg/kTQvSuxZ6Y" target="_blank" style="color: #7289DA; text-decoration: none; font-size: 16px;">
+      Found a bug? Thought of an improvement? Post it to my email or join the discord!
+      </a>
+      <label for="api-type">API Type: <span style="color: red;">NEW!</span> OpenAI Compatible Mode!</label>
       <select id="api-type">
         <option value="gemini">Gemini API</option>
         <option value="vertex">Vertex AI API</option>
         <option value="openRouter">OpenRouter API</option>
+        <option value="openai">OpenAI Compatible</option>
       </select>
     </div>
 
@@ -255,8 +259,8 @@
       <label for="retry-count">Retry Count:</label>
       <input type="number" id="retry-count" placeholder="e.g., 3">
 
-      <label for="temperature">Temperature:</label>
-      <input type="number" step="0.1" id="temperature" placeholder="e.g., 0.9">
+      <label for="temperature">Temperature (Optional):</label>
+      <input type="number" step="0.1" id="temperature" placeholder="Leave empty to use model default">
 
       <label for="top-k">Top K:</label>
       <input type="number" id="top-k" placeholder="e.g., 40">
@@ -271,6 +275,15 @@
       <input type="text" id="gemini-api-key" placeholder="Enter Gemini API key">
       <label for="gemini-model-id">Model ID:</label>
       <input type="text" id="gemini-model-id" placeholder="e.g., gemini-1.5-flash-002">
+      <label for="gemini-max-tokens">Max Output Tokens (Optional):</label>
+      <input type="number" id="gemini-max-tokens" placeholder="Leave empty to use model default">
+      <label for="gemini-context-window">Context Window Size (Optional):</label>
+      <input type="number" id="gemini-context-window" placeholder="Leave empty to use model default">
+      <label for="gemini-stream">Streaming:</label>
+      <select id="gemini-stream">
+        <option value="true">Streaming Enabled</option>
+        <option value="false">Streaming Disabled</option>
+      </select>
     </div>
 
     <div id="vertex-settings" class="section" style="display: none;">
@@ -287,6 +300,17 @@
 
       <label for="model-id">Model ID:</label>
       <input type="text" id="model-id" placeholder="e.g., gemini-1.5-flash-002">
+      
+      <label for="vertex-max-tokens">Max Output Tokens (Optional):</label>
+     <input type="number" id="vertex-max-tokens" placeholder="Leave empty to use model default">
+      <label for="vertex-context-window">Context Window Size (Optional):</label>
+      <input type="number" id="vertex-context-window" placeholder="Leave empty to use model default">
+      
+      <label for="vertex-stream">Streaming:</label>
+      <select id="vertex-stream">
+        <option value="true">Streaming Enabled</option>
+        <option value="false">Streaming Disabled</option>
+      </select>
     </div>
 
     <div id="openRouter-settings" class="section" style="display: none;">
@@ -297,8 +321,36 @@
       <label for="openRouter-model-id">Model ID:</label>
       <input type="text" id="openRouter-model-id" placeholder="e.g., openai/gpt-4">
 
+      <label for="openRouter-max-tokens">Max Output Tokens (Optional):</label>
+      <input type="number" id="openRouter-max-tokens" placeholder="Leave empty to use model default">
+      <label for="openRouter-context-window">Context Window Size (Optional):</label>
+      <input type="number" id="openRouter-context-window" placeholder="Leave empty to use model default">
+      
       <label for="openRouter-stream">Streaming:</label>
       <select id="openRouter-stream">
+        <option value="true">Streaming Enabled</option>
+        <option value="false">Streaming Disabled</option>
+      </select>
+    </div>
+
+    <div id="openai-settings" class="section" style="display: none;">
+      <div class="section-title">OpenAI Compatible Settings</div>
+      <label for="openai-api-key">OpenAI API Compatible Key:</label>
+      <input type="text" id="openai-api-key" placeholder="Enter OpenAI API key">
+      
+      <label for="openai-model-id">Model ID:</label>
+      <input type="text" id="openai-model-id" placeholder="e.g., gpt-4o-mini">
+
+      <label for="openai-base-url">Base URL:</label>
+      <input type="text" id="openai-base-url" placeholder="e.g., https://api.openai.com/v1">
+
+      <label for="openai-max-tokens">Max Output Tokens (Optional):</label>
+      <input type="number" id="openai-max-tokens" placeholder="Leave empty to use model default">
+      <label for="openai-context-window">Context Window Size (Optional):</label>
+      <input type="number" id="openai-context-window" placeholder="Leave empty to use model default">
+
+      <label for="openai-stream">Streaming:</label>
+      <select id="openai-stream">
         <option value="true">Streaming Enabled</option>
         <option value="false">Streaming Disabled</option>
       </select>
@@ -323,10 +375,6 @@
   </form>
 
   <script src="options.js"></script>
-  <div style="position: fixed; bottom: 20px; left: 0; right: 0; text-align: center; padding: 10px; background-color: #1e1e2f;">
-    <a href="https://discord.gg/kTQvSuxZ6Y" target="_blank" style="color: #7289DA; text-decoration: none; font-size: 16px;">
-      Found a bug? Thought of an improvement? Post it to my email or join the discord!
-    </a>
-  </div>
+
 </body>
 </html>
