@@ -75,6 +75,9 @@ async function initializeChunksPage() {
     initializeProgress(retryCount, chunks.length);
     createChunkButtons(chunks, prefix, suffix);
 
+    // Initialize scroll behavior for progress bar
+    initializeScrollBehavior();
+
     // Check for incomplete session
     const incomplete = isSessionIncomplete(sessionChunks, chunks.length);
     if (incomplete) {
@@ -1280,6 +1283,52 @@ browser.runtime.onMessage.addListener((message) => {
           updateStreamingChunk(message.content, message.rawContent, message.isInitial, message.isComplete);
           break;
   }
+});
+
+// Scroll behavior for progress bar
+let lastScrollTop = 0;
+const progressContainer = document.getElementById('progress-container');
+
+// Initialize scroll behavior
+function initializeScrollBehavior() {
+  if (!progressContainer) return;
+  
+  // Start with progress bar visible
+  progressContainer.classList.add('visible');
+  
+  // Add scroll event listener
+  window.addEventListener('scroll', handleScroll, { passive: true });
+}
+
+function handleScroll() {
+  const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+  
+  if (scrollTop > lastScrollTop && scrollTop > 100) {
+    // Scrolling down - hide progress bar
+    hideProgressBar();
+  } else if (scrollTop < lastScrollTop) {
+    // Scrolling up - show progress bar
+    showProgressBar();
+  }
+  
+  lastScrollTop = scrollTop;
+}
+
+function hideProgressBar() {
+  if (!progressContainer) return;
+  progressContainer.classList.remove('visible');
+  progressContainer.classList.add('hidden');
+}
+
+function showProgressBar() {
+  if (!progressContainer) return;
+  progressContainer.classList.remove('hidden');
+  progressContainer.classList.add('visible');
+}
+
+// Initialize scroll behavior when page loads
+document.addEventListener('DOMContentLoaded', () => {
+  initializeScrollBehavior();
 });
 
 console.log('Chunks page script loaded');
