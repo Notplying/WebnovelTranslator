@@ -1287,6 +1287,7 @@ browser.runtime.onMessage.addListener((message) => {
 
 // Scroll behavior for progress bar
 let lastScrollTop = 0;
+let scrollDirectionThreshold = 50; // Minimum pixels to scroll before triggering
 const progressContainer = document.getElementById('progress-container');
 
 // Initialize scroll behavior
@@ -1302,16 +1303,20 @@ function initializeScrollBehavior() {
 
 function handleScroll() {
   const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+  const scrollDelta = Math.abs(scrollTop - lastScrollTop);
   
-  if (scrollTop > lastScrollTop && scrollTop > 100) {
-    // Scrolling down - hide progress bar
-    hideProgressBar();
-  } else if (scrollTop < lastScrollTop) {
-    // Scrolling up - show progress bar
-    showProgressBar();
+  // Only trigger if scroll exceeds threshold
+  if (scrollDelta >= scrollDirectionThreshold) {
+    if (scrollTop > lastScrollTop && scrollTop > 100) {
+      // Scrolling down - hide progress bar
+      hideProgressBar();
+    } else if (scrollTop < lastScrollTop) {
+      // Scrolling up - show progress bar
+      showProgressBar();
+    }
+    
+    lastScrollTop = scrollTop;
   }
-  
-  lastScrollTop = scrollTop;
 }
 
 function hideProgressBar() {
