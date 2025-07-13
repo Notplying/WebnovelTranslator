@@ -136,10 +136,11 @@ async function updateSessionStorage(sessionId, sessionDataToStore) {
     ...sessionDataToStore // Includes chunks, prefix, suffix, retryCount
   };
   
-  // Add the new/updated session to the front, sort by timestamp, and keep top 3
+  // Get max sessions from settings and use it for cleanup
+  const { maxSessions = 3 } = await browser.storage.local.get('maxSessions');
   const updatedSessions = [sessionEntry, ...translationSessions]
     .sort((a, b) => b.timestamp - a.timestamp) // Sort by most recent first
-    .slice(0, 3); // Keep only the 3 most recent sessions
+    .slice(0, maxSessions); // Keep only the configured number of sessions
   
   await browser.storage.local.set({ translationSessions: updatedSessions });
   console.log(`Session storage updated. Session ID: ${sessionId}, Total sessions: ${updatedSessions.length}`);

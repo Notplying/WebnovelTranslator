@@ -20,6 +20,19 @@ function getSessionId() {
   return urlParams.get('session');
 }
 
+function isSessionIncomplete(sessionChunks, totalChunks) {
+  if (sessionChunks.length === 0) return false;
+  
+  let processedCount = 0;
+  for (let i = 0; i < totalChunks; i++) {
+    if (sessionChunks[i] && sessionChunks[i].content) {
+      processedCount++;
+    }
+  }
+  
+  return processedCount < totalChunks && processedCount > 0;
+}
+
 async function initializeChunksPage() {
   if (isInitialized) {
     console.log('Page already initialized, skipping...');
@@ -62,6 +75,23 @@ async function initializeChunksPage() {
     initializeProgress(retryCount, chunks.length);
     createChunkButtons(chunks, prefix, suffix);
 
+    // Check for incomplete session
+    const incomplete = isSessionIncomplete(sessionChunks, chunks.length);
+    if (incomplete) {
+      const warningDiv = document.getElementById('incomplete-session-warning');
+      if (warningDiv) {
+        warningDiv.style.display = 'block';
+      }
+    }
+
+    // Always set up reprocess all button event listener
+    const reprocessAllButton = document.getElementById('reprocess-all-button');
+    if (reprocessAllButton) {
+      reprocessAllButton.addEventListener('click', () => {
+        reprocessAllChunks(chunks, prefix, suffix, retryCount);
+      });
+    }
+
     if (sessionChunks.length > 0) {
       // Restore stored chunks for this session
       sessionChunks.forEach((chunk, index) => {
@@ -77,6 +107,44 @@ async function initializeChunksPage() {
   } catch (error) {
     console.error('Error initializing chunks page:', error);
     showError('Failed to initialize page: ' + error.message);
+  }
+}
+
+async function reprocessAllChunks(chunks, prefix, suffix, retryCount) {
+  try {
+    showFeedback('Starting reprocessing of all chunks...', false);
+    
+    // Clear all existing chunks from UI
+    const chunksContainer = document.getElementById('chunks-container');
+    chunksContainer.innerHTML = '';
+    
+    // Clear all saved chunks for this session
+    const sessionId = getSessionId();
+    if (!sessionId) {
+      showError('No session ID found');
+      return;
+    }
+    
+    const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
+    processedChunks[sessionId] = [];
+    await browser.storage.local.set({ processedChunks });
+    
+    // Reset progress
+    initializeProgress(retryCount, chunks.length);
+    
+    // Hide warning
+    const warningDiv = document.getElementById('incomplete-session-warning');
+    if (warningDiv) {
+      warningDiv.style.display = 'none';
+    }
+    
+    // Process all chunks from scratch
+    processStoredChunks(chunks, prefix, suffix, retryCount);
+    
+  } catch (error) {
+    console.error('Error reprocessing all chunks:', error);
+    showError('Failed to reprocess chunks: ' + error.message);
+    showFeedback('Failed to reprocess chunks: ' + error.message, true);
   }
 }
 
@@ -442,10 +510,11 @@ async function addChunk(index, content, rawContent) {
     sessionChunks[index] = { content, rawContent }; // Ensure 'content' is the structured object
     allChunks[sessionId] = sessionChunks;
 
-    // Get the 3 most recent session IDs
+    // Get the most recent session IDs based on maxSessions setting
+    const maxSessions = (await browser.storage.local.get('maxSessions')).maxSessions || 3;
     const recentSessions = (result.translationSessions || [])
       .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(0, 3)
+      .slice(0, maxSessions)
       .map(session => session.id);
 
     // Keep only chunks from recent sessions
@@ -705,10 +774,11 @@ async function saveChunkToStorage(index, content, rawContent) {
   sessionChunks[index] = { content, rawContent };
   allChunks[sessionId] = sessionChunks;
 
-  // Get the 3 most recent session IDs
+  // Get the most recent session IDs based on maxSessions setting
+  const maxSessions = (await browser.storage.local.get('maxSessions')).maxSessions || 3;
   const recentSessions = (result.translationSessions || [])
     .sort((a, b) => b.timestamp - a.timestamp)
-    .slice(0, 3)
+    .slice(0, maxSessions)
     .map(session => session.id);
 
   // Keep only chunks from recent sessions
@@ -767,12 +837,18 @@ async function reprocessChunk(index, rawContent) {
           throw new Error(result.error);
         }
 
+        // If streaming is enabled, let the streaming handler take care of updates
+        if (result.streaming) {
+          // The streaming handler will update UI and save automatically
+          return;
+        }
+
         const chunkDiv = document.getElementById(`chunk-${index}`);
         if (!chunkDiv) {
           throw new Error('Chunk element not found');
         }
 
-        // Process new content
+        // Process new content (non-streaming mode)
         const parts = result.parts || [result.result];
         const { contentParts } = updateChunkContent(chunkDiv, parts, index);
 
@@ -874,41 +950,34 @@ async function reprocessChunk(index, rawContent) {
 
         if (result.error) throw new Error(result.error);
 
-        // If streaming, updateStreamingChunk will handle UI and state reset on completion.
-        // If not streaming, handle directly here.
-        if (!result.streaming) {
-          const parts = result.parts || [result.result];
-          updateChunkContent(targetChunkDiv, parts, index);
-          const newProcessedContent = { parts: parts, text: result.result };
-          await saveChunkToStorage(index, newProcessedContent, rawContent);
-          
-          // Update main progress bar
-          const { translationSessions = [] } = await browser.storage.local.get('translationSessions');
-          const currentSessionId = getSessionId();
-          const currentSessionData = translationSessions.find(s => s.id === currentSessionId);
-          if (currentSessionData && currentSessionData.chunks) {
-            updateProgress(index + 1, currentSessionData.chunks.length);
-          } else {
-             // Fallback if session data isn't readily available, might need to adjust total
-            const totalChunks = document.querySelectorAll('.chunk').length || index + 1;
-            updateProgress(index + 1, totalChunks);
-          }
-
-          updateAttemptProgress(0, retryCount, ProgressState.COMPLETED);
-          showFeedback('Chunk reprocessed successfully!');
-          reprocessingState.isActive = false;
-          return;
-        } else if (result.streaming && result.complete) {
-          // This case implies background.js handled the full stream and returned complete.
-          // updateStreamingChunk should have been called and handled the UI.
-          // reprocessingState should be reset by updateStreamingChunk's isComplete logic.
-          // If it's not, we might need to reset it here too, but ideally it's handled there.
-          console.log("Reprocess: Stream reported as complete by background.js immediately.");
-          // No explicit reset here; expecting updateStreamingChunk to handle it.
+        // If streaming is enabled, let the streaming handler take care of updates
+        if (result.streaming) {
+          // The streaming handler will update UI and save automatically
           return;
         }
-        // If streaming is initiated but not yet complete, loop continues or background messages will arrive.
-        return; // Exit reprocessChunk, background messages will drive UI via updateStreamingChunk
+
+        // Process new content (non-streaming mode)
+        const parts = result.parts || [result.result];
+        updateChunkContent(targetChunkDiv, parts, index);
+        const newProcessedContent = { parts: parts, text: result.result };
+        await saveChunkToStorage(index, newProcessedContent, rawContent);
+         
+        // Update main progress bar
+        const { translationSessions = [] } = await browser.storage.local.get('translationSessions');
+        const currentSessionId = getSessionId();
+        const currentSessionData = translationSessions.find(s => s.id === currentSessionId);
+        if (currentSessionData && currentSessionData.chunks) {
+          updateProgress(index + 1, currentSessionData.chunks.length);
+        } else {
+           // Fallback if session data isn't readily available, might need to adjust total
+          const totalChunks = document.querySelectorAll('.chunk').length || index + 1;
+          updateProgress(index + 1, totalChunks);
+        }
+
+        updateAttemptProgress(0, retryCount, ProgressState.COMPLETED);
+        showFeedback('Chunk reprocessed successfully!');
+        reprocessingState.isActive = false;
+        return;
 
       } catch (error) {
         console.error(`Reprocessing attempt ${attempt + 1} failed:`, error);

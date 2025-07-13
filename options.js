@@ -116,6 +116,8 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('vertex-max-tokens').value = options.vertexMaxTokens || '';
     document.getElementById('vertex-context-window').value = options.vertexContextWindow || '';
     document.getElementById('vertex-stream').value = options.vertexStream !== false ? 'true' : 'false';
+    
+    document.getElementById('max-sessions').value = options.maxSessions || 3;
 
     // Trigger change event to show the correct settings
     apiTypeElement.dispatchEvent(new Event('change'));
@@ -158,7 +160,8 @@ document.addEventListener('DOMContentLoaded', function () {
       geminiMaxTokens: document.getElementById('gemini-max-tokens').value,
       geminiContextWindow: document.getElementById('gemini-context-window').value,
       geminiStream: document.getElementById('gemini-stream').value === 'true',
-      vertexStream: document.getElementById('vertex-stream').value === 'true'
+      vertexStream: document.getElementById('vertex-stream').value === 'true',
+      maxSessions: parseInt(document.getElementById('max-sessions').value) || 3
     };
 
     browser.storage.local.set(settings).then(() => {
@@ -280,12 +283,21 @@ document.addEventListener('DOMContentLoaded', function () {
         openaiMaxTokens: "",
         openaiContextWindow: "",
         openaiBaseUrl: "https://api.openai.com/v1",
-        openaiStream: true
+        openaiStream: true,
+        maxSessions: 3
       };
 
       await browser.storage.local.set(defaultSettings);
       alert('Settings reset to defaults! Reloading page...');
       location.reload();
+    }
+  });
+
+  // Clear saved results
+  document.getElementById('clear-saved-results').addEventListener('click', async function() {
+    if (confirm('Are you sure you want to clear all saved translation results? This action cannot be undone.')) {
+      await browser.storage.local.remove(['processedChunks', 'translationSessions']);
+      alert('All saved results have been cleared!');
     }
   });
 
