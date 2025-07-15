@@ -4,295 +4,455 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Processing Text Chunks</title>
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
+      :root {
+        --bg-primary: #0a0a0a;
+        --bg-secondary: #1a1a1a;
+        --bg-tertiary: #2a2a2a;
+        --text-primary: #ffffff;
+        --text-secondary: #b3b3b3;
+        --text-muted: #808080;
+        --accent-primary: #6366f1;
+        --accent-secondary: #06b6d4;
+        --accent-success: #10b981;
+        --accent-warning: #f59e0b;
+        --accent-error: #ef4444;
+        --border-color: #374151;
+        --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+        --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
       body {
-        background-color: #121212;
-        color: #e0e0e0;
-        padding-bottom: 60px;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: linear-gradient(135deg, var(--bg-primary) 0%, #111827 100%);
+        color: var(--text-primary);
+        padding-bottom: 120px;
+        min-height: 100vh;
+        line-height: 1.6;
       }
+
+      body::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: 
+          radial-gradient(circle at 20% 80%, rgba(99, 102, 241, 0.1) 0%, transparent 50%),
+          radial-gradient(circle at 80% 20%, rgba(6, 182, 212, 0.1) 0%, transparent 50%),
+          radial-gradient(circle at 40% 40%, rgba(16, 185, 129, 0.05) 0%, transparent 50%);
+        pointer-events: none;
+        z-index: -1;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 0 20px;
+      }
+
       h1 {
-        color: #bb86fc;
+        font-size: 2.5rem;
+        font-weight: 700;
+        background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
         text-align: center;
-        margin-top: 30px;
+        margin: 40px 0;
+        letter-spacing: -0.02em;
       }
+
       .chunk {
-        background-color: #1e1e1e;
+        background: rgba(42, 42, 42, 0.4);
+        backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 16px;
+        padding: 32px;
+        margin-bottom: 24px;
+        box-shadow: var(--shadow-lg);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      .chunk:hover {
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-xl);
+        border-color: rgba(99, 102, 241, 0.3);
+      }
+
+      .chunk-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .chunk-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .chunk-number {
+        font-size: 0.875rem;
+        color: var(--text-muted);
+        background: rgba(99, 102, 241, 0.1);
+        padding: 4px 12px;
+        border-radius: 20px;
+      }
+
+      .markdown-content {
+        font-size: 1rem;
+        line-height: 1.75;
+        color: var(--text-secondary);
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .button-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        justify-content: center;
+        margin: 32px 0;
+      }
+
+      .button {
+        background: rgba(99, 102, 241, 0.9);
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        border-radius: 12px;
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        min-width: 140px;
+        flex: 1 1 auto;
+        max-width: 200px;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .button:hover {
+        background: rgba(99, 102, 241, 1);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-md);
+      }
+
+      .button:active {
+        transform: translateY(0);
+      }
+
+      .button.copied {
+        background: var(--accent-success);
+        animation: pulse 0.3s ease;
+      }
+
+      @keyframes pulse {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+        100% { transform: scale(1); }
+      }
+
+      .copy-button, .copy-raw-button {
+        background: rgba(16, 185, 129, 0.9);
+      }
+
+      .copy-button:hover, .copy-raw-button:hover {
+        background: rgba(16, 185, 129, 1);
+      }
+
+      .reprocess-button {
+        background: rgba(245, 158, 11, 0.9);
+      }
+
+      .reprocess-button:hover {
+        background: rgba(245, 158, 11, 1);
+      }
+
+      .part-buttons {
+        display: flex;
+        gap: 8px;
+        margin: 20px 0;
+        flex-wrap: wrap;
+      }
+
+      .part-button {
+        background: rgba(42, 42, 42, 0.6);
+        color: var(--text-secondary);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 8px 16px;
         border-radius: 8px;
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-        margin-bottom: 25px;
-        padding: 20px;
+        cursor: pointer;
         transition: all 0.3s ease;
+        font-size: 0.875rem;
+        font-weight: 500;
       }
 
-      @media (max-width: 768px) {
-        .chunk {
-          padding: 15px;
-          margin-bottom: 20px;
-          min-width: unset;
-          width: 100%;
-        }
-
-        .container {
-          padding: 10px;
-          width: 100%;
-          max-width: 100%;
-          margin: 0;
-        }
-
-        .button-container {
-          padding: 0 10px;
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-        }
-
-        .button {
-          width: 100%;
-          margin-bottom: 10px;
-          padding: 14px 20px;
-          font-size: 16px;
-          min-width: unset;
-        }
-
-        .copy-button, .copy-raw-button, .reprocess-button {
-          width: 100%;
-          margin: 5px 0;
-          min-width: unset;
-        }
-
-        .part-buttons {
-          flex-wrap: wrap;
-          justify-content: flex-start;
-          gap: 5px;
-        }
-
-        .part-button {
-          flex: 1 1 auto;
-          min-width: 80px;
-          max-width: calc(50% - 5px);
-          margin: 0;
-        }
-
-        #progress-container {
-          padding: 15px 10px;
-          width: 100%;
-          left: 0;
-        }
-
-        .progress-bar {
-          height: 35px;
-          width: 100%;
-        }
-
-        .progress-text {
-          font-size: 14px;
-        }
+      .part-button.active {
+        background: rgba(99, 102, 241, 0.9);
+        color: white;
+        border-color: rgba(99, 102, 241, 0.5);
       }
 
-      @media (max-width: 400px) {
-        .chunk {
-          padding: 10px;
-        }
-
-        .container {
-          padding: 5px;
-        }
-
-        .button {
-          padding: 12px 16px;
-          font-size: 14px;
-        }
-
-        .part-button {
-          min-width: 60px;
-          padding: 8px 12px;
-          font-size: 14px;
-        }
-
-        #progress-container {
-          padding: 10px 5px;
-        }
-
-        .progress-bar {
-          height: 30px;
-        }
-
-        .progress-text {
-          font-size: 12px;
-        }
+      .part-button:hover:not(.active) {
+        background: rgba(42, 42, 42, 0.8);
+        border-color: rgba(255, 255, 255, 0.2);
       }
-      .card {
-        background-color: #2d2d2d;
-        border: 1px solid #3d3d3d;
+
+      .part-content {
+        display: none;
       }
-      .card-body {
-        color: #e0e0e0;
+
+      .part-content.active {
+        display: block;
+        animation: fadeIn 0.3s ease;
       }
+
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
       #progress-container {
         position: fixed;
         bottom: 0;
         left: 0;
         width: 100%;
-        background-color: #121212;
-        padding: 10px;
-        box-shadow: 0 -2px 5px rgba(0, 0, 0, 0.2);
+        background: rgba(26, 26, 26, 0.95);
+        backdrop-filter: blur(20px);
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 24px;
+        z-index: 1000;
+        box-shadow: 0 -10px 25px rgba(0, 0, 0, 0.3);
+        transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out;
       }
-      .progress-bar {
-        width: 100%;
-        background-color: #1e1e1e;
-        border-radius: 10px;
-        overflow: hidden;
-        margin-bottom: 10px;
-        position: relative;
-        height: 30px;
+
+      #progress-container.hidden {
+        transform: translateY(100%);
+        opacity: 0;
+        pointer-events: none;
       }
-      .progress-bar-fill {
-        height: 100%;
-        transition: width 500ms ease-in-out;
+
+      #progress-container.visible {
+        transform: translateY(0);
+        opacity: 1;
+        pointer-events: auto;
       }
-      .progress-text {
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
+
+      .progress-wrapper {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+
+      .progress-wrapper:last-child {
+        margin-bottom: 0;
+      }
+
+      .progress-icon {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
-        color: #ffffff;
-        font-weight: bold;
-        text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.7);
-      }
-      #attempt-progress-bar-fill {
-        background-color: #03dac6;
-      }
-      #progress-bar-fill {
-        background-color: #bb86fc;
-      }
-      .markdown-content {
-        white-space: pre-wrap;
-      }
-      .button-container {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: center;
-        gap: 10px;
-        margin-bottom: 20px;
-      }
-      .button {
-        background-color: #bb86fc;
-        color: #121212;
-        border: none;
-        padding: 12px 24px;
-        border-radius: 4px;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        font-weight: 500;
-        display: inline-block;
-        text-align: center;
-        min-width: 120px;
-      }
-      .button:hover {
-        background-color: #9a67ea;
-        transform: translateY(-1px);
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-      }
-      .button:active {
-        background-color: #7c4dff;
-        transform: translateY(0);
-      }
-      .button.copied {
-        background-color: #03dac6;
-      }
-      .button-group {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        margin-top: 10px;
-        min-width: 300px;
-      }
-      @media (max-width: 400px) {
-        .button-group {
-          min-width: unset;
-        }
-        .button-group .button {
-          flex: 1 1 100%;
-          min-width: unset;
-        }
-      }
-      .copy-button, .copy-raw-button {
-        background-color: #03dac6;
-        margin: 5px;
-        min-width: 150px;
-      }
-      .copy-button:hover, .copy-raw-button:hover {
-        background-color: #00c4b4;
-      }
-      .copy-button:active, .copy-raw-button:active {
-        background-color: #018786;
-      }
-      .copy-button.copied, .copy-raw-button.copied {
-        background-color: #7c4dff;
-      }
-      .part-buttons {
-        display: flex;
-        gap: 10px;
-        margin: 10px 0;
-      }
-      .part-button {
-        background-color: #2d2d2d;
-        color: #e0e0e0;
-        border: 1px solid #3d3d3d;
-        padding: 5px 15px;
-        border-radius: 4px;
-        cursor: pointer;
-        transition: all 0.3s;
-      }
-      .part-button.active {
-        background-color: #bb86fc;
-        color: #121212;
-        border-color: #bb86fc;
-      }
-      .part-button:hover {
-        background-color: #3d3d3d;
-      }
-      .part-button.active:hover {
-        background-color: #9a67ea;
-      }
-      .part-content {
-        display: none;
-      }
-      .part-content.active {
-        display: block;
-      }
-      .feedback {
-        position: fixed;
-        bottom: 80px;
-        left: 50%;
-        transform: translateX(-50%);
-        background-color: #03dac6;
-        color: #121212;
-        padding: 10px 20px;
-        border-radius: 4px;
-        font-weight: 500;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-        z-index: 1000;
-        animation: fadeInOut 2s ease-in-out;
+        font-size: 14px;
+        font-weight: 600;
+        flex-shrink: 0;
       }
 
-      @keyframes fadeInOut {
-        0% { opacity: 0; transform: translate(-50%, 20px); }
-        15% { opacity: 1; transform: translate(-50%, 0); }
-        85% { opacity: 1; transform: translate(-50%, 0); }
-        100% { opacity: 0; transform: translate(-50%, -20px); }
+      .progress-icon.attempt {
+        background: linear-gradient(135deg, var(--accent-secondary), #0891b2);
+        color: white;
       }
-      .reprocess-button {
-        background-color: #4CAF50;
-        margin-left: 10px;
+
+      .progress-icon.overall {
+        background: linear-gradient(135deg, var(--accent-primary), #8b5cf6);
+        color: white;
       }
-      .reprocess-button:hover {
-        background-color: #45a049;
+
+      .progress-info {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .progress-label {
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 4px;
+      }
+
+      .progress-bar {
+        width: 100%;
+        height: 6px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 3px;
+        overflow: hidden;
+        position: relative;
+        box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
+      }
+
+      .progress-bar-fill {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .progress-bar-fill::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        right: 0;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+        animation: shimmer 1.5s infinite;
+      }
+
+      .progress-text {
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: var(--text-secondary);
+        margin-top: 2px;
+      }
+
+      .feedback {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(16, 185, 129, 0.9);
+        color: white;
+        padding: 16px 24px;
+        border-radius: 12px;
+        font-weight: 500;
+        box-shadow: var(--shadow-xl);
+        z-index: 1001;
+        animation: slideIn 0.3s ease;
+      }
+
+      @keyframes slideIn {
+        from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+        to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+      }
+
+      .alert {
+        padding: 16px 20px;
+        margin: 20px 0;
+        border-radius: 12px;
+        font-weight: 500;
+      }
+
+      .alert-warning {
+        background: rgba(245, 158, 11, 0.1);
+        color: #fbbf24;
+        border: 1px solid rgba(245, 158, 11, 0.3);
+      }
+
+      @media (max-width: 768px) {
+        h1 {
+          font-size: 2rem;
+          margin: 30px 0;
+        }
+
+        .chunk {
+          padding: 24px;
+          margin-bottom: 16px;
+        }
+
+        .chunk-header {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 8px;
+        }
+
+        .button-container {
+          flex-direction: row;
+          flex-wrap: wrap;
+          gap: 8px;
+          justify-content: flex-start;
+          overflow-x: auto;
+          padding-bottom: 8px;
+          -webkit-overflow-scrolling: touch;
+        }
+
+        .button {
+          flex: 0 0 auto;
+          min-width: 120px;
+          max-width: none;
+          font-size: 0.8rem;
+          padding: 10px 16px;
+        }
+
+        .part-buttons {
+          justify-content: center;
+        }
+
+        #progress-container {
+          padding: 16px;
+        }
+
+        .progress-wrapper {
+          gap: 12px;
+        }
+
+        .progress-icon {
+          width: 28px;
+          height: 28px;
+          font-size: 12px;
+        }
+
+        .progress-label {
+          font-size: 0.8rem;
+        }
+      }
+
+      @media (max-width: 480px) {
+        .container {
+          padding: 0 16px;
+        }
+
+        .chunk {
+          padding: 20px;
+          margin-bottom: 12px;
+        }
+
+        h1 {
+          font-size: 1.75rem;
+          margin: 24px 0;
+        }
+
+        .button-container {
+          gap: 6px;
+        }
+
+        .button {
+          min-width: 100px;
+          font-size: 0.75rem;
+          padding: 8px 12px;
+        }
       }
     </style>
 </head>
@@ -302,17 +462,35 @@
       <div class="button-container">
         <!-- Individual chunk buttons will be added here dynamically -->
       </div>
+      <div class="button-container" style="margin-top: 10px;">
+        <button id="reprocess-all-button" class="button" style="background: rgba(245, 158, 11, 0.9); min-width: 200px;">Reprocess All Chunks</button>
+      </div>
+      <div id="incomplete-session-warning" class="alert alert-warning" style="display: none; margin: 20px 0; padding: 15px; border-radius: 8px; background: rgba(245, 158, 11, 0.1); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">
+        <strong>Process was interrupted before finishing!</strong> Please reprocess all chunks, or clear all results from the settings.
+      </div>
       <div id="chunks-container"></div>
     </div>
     <div id="progress-container">
-      <div class="progress-bar">
-        <div id="attempt-progress-bar-fill" class="progress-bar-fill" style="width: 0%;">
-          <span id="attempt-progress-text" class="progress-text">Attempt: 0/0</span>
+      <div class="progress-wrapper">
+        <div class="progress-icon attempt">⚡</div>
+        <div class="progress-info">
+          <div class="progress-label">Processing Attempt</div>
+          <div class="progress-bar">
+            <div id="attempt-progress-bar-fill" class="progress-bar-fill" style="width: 0%;">
+            </div>
+          </div>
+          <div class="progress-text" id="attempt-progress-text">Ready to start</div>
         </div>
       </div>
-      <div class="progress-bar">
-        <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%;">
-          <span id="progress-text" class="progress-text">0/0</span>
+      <div class="progress-wrapper">
+        <div class="progress-icon overall">📊</div>
+        <div class="progress-info">
+          <div class="progress-label">Overall Progress</div>
+          <div class="progress-bar">
+            <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%;">
+            </div>
+          </div>
+          <div class="progress-text" id="progress-text">0/0 chunks processed</div>
         </div>
       </div>
     </div>
