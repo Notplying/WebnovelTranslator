@@ -98,6 +98,8 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('openRouter-max-tokens').value = options.openRouterMaxTokens || '';
     document.getElementById('openRouter-context-window').value = options.openRouterContextWindow || '';
     document.getElementById('openRouter-stream').value = options.openRouterStream !== false ? 'true' : 'false';
+    document.getElementById('openRouter-provider-order').value = options.openRouterProviderOrder || '';
+    document.getElementById('openRouter-allow-fallback').value = options.openRouterAllowFallback !== false ? 'true' : 'false';
     
     document.getElementById('openai-api-key').value = options.openaiApiKey || '';
     document.getElementById('openai-model-id').value = options.openaiModelId || 'gpt-4o-mini';
@@ -151,6 +153,8 @@ document.addEventListener('DOMContentLoaded', function () {
       openRouterMaxTokens: document.getElementById('openRouter-max-tokens').value,
       openRouterContextWindow: document.getElementById('openRouter-context-window').value,
       openRouterStream: document.getElementById('openRouter-stream').value === 'true',
+      openRouterProviderOrder: document.getElementById('openRouter-provider-order').value,
+      openRouterAllowFallback: document.getElementById('openRouter-allow-fallback').value === 'true',
       openaiApiKey: document.getElementById('openai-api-key').value,
       openaiModelId: document.getElementById('openai-model-id').value,
       openaiBaseUrl: document.getElementById('openai-base-url').value,
@@ -278,6 +282,8 @@ document.addEventListener('DOMContentLoaded', function () {
         openRouterMaxTokens: "",
         openRouterContextWindow: "",
         openRouterStream: true,
+        openRouterProviderOrder: "",
+        openRouterAllowFallback: true,
         openaiApiKey: "",
         openaiModelId: "gpt-4o-mini",
         openaiMaxTokens: "",

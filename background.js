@@ -46,6 +46,8 @@ browser.runtime.onInstalled.addListener(function (details) {
       openRouterMaxTokens: "", // Default OpenRouter max output tokens (empty = use model default)
       openRouterContextWindow: "", // Default OpenRouter context window (empty = use model default)
       openRouterStream: true, // Default OpenRouter stream
+      openRouterProviderOrder: "", // Default OpenRouter provider order (empty = no specific provider)
+      openRouterAllowFallback: true, // Default OpenRouter allow fallback
       openaiApiKey: "", // Default OpenAI API key (empty)
       openaiModelId: "gpt-4o-mini", // Default OpenAI model
       openaiMaxTokens: "", // Default OpenAI max output tokens (empty = use model default)
@@ -728,6 +730,21 @@ async function processChunkWithOpenRouter(message, options) {
       const temperature = parseFloat(options.temperature);
       if (!isNaN(temperature) && temperature >= 0 && temperature <= 2) {
         requestBody.temperature = temperature;
+      }
+    }
+
+    // Add provider configuration if provider order is provided
+    if (options.openRouterProviderOrder && options.openRouterProviderOrder.trim() !== '') {
+      const providerOrder = options.openRouterProviderOrder
+        .split(',')
+        .map(provider => provider.trim())
+        .filter(provider => provider.length > 0);
+      
+      if (providerOrder.length > 0) {
+        requestBody.provider = {
+          order: providerOrder,
+          allow_fallbacks: options.openRouterAllowFallback !== false
+        };
       }
     }
 
