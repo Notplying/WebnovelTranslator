@@ -121,6 +121,78 @@
         word-break: break-word;
       }
 
+      .markdown-content ul,
+      .markdown-content ol {
+        margin: 1em 0;
+        padding-left: 2em;
+      }
+
+      .markdown-content ul ul,
+      .markdown-content ul ol,
+      .markdown-content ol ul,
+      .markdown-content ol ol {
+        margin: 0.5em 0;
+      }
+
+      .markdown-content li {
+        margin: 0.25em 0;
+        position: relative;
+      }
+
+      .markdown-content ul > li::before {
+        content: '•';
+        color: var(--accent-primary);
+        font-weight: bold;
+        display: inline-block;
+        width: 1em;
+        margin-left: -1em;
+      }
+
+      .markdown-content ul ul > li::before {
+        content: '◦';
+        color: var(--accent-secondary);
+      }
+
+      .markdown-content ul ul ul > li::before {
+        content: '▪';
+        color: var(--text-muted);
+      }
+
+      .markdown-content ol {
+        counter-reset: item;
+      }
+
+      .markdown-content ol > li {
+        counter-increment: item;
+      }
+
+      .markdown-content ol > li::before {
+        content: counter(item) ".";
+        color: var(--accent-primary);
+        font-weight: 600;
+        display: inline-block;
+        width: 1.5em;
+        margin-left: -1.5em;
+      }
+
+      .markdown-content ol ol {
+        counter-reset: subitem;
+      }
+
+      .markdown-content ol ol > li {
+        counter-increment: subitem;
+      }
+
+      .markdown-content ol ol > li::before {
+        content: counter(subitem, lower-alpha) ".";
+        color: var(--accent-secondary);
+      }
+
+      .markdown-content ol ol ol > li::before {
+        content: counter(subitem, lower-roman) ".";
+        color: var(--text-muted);
+      }
+
       .button-container {
         display: flex;
         flex-wrap: wrap;

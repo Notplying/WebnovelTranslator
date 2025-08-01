@@ -425,6 +425,15 @@
         <option value="true">Streaming Enabled</option>
         <option value="false">Streaming Disabled</option>
       </select>
+
+      <label for="openRouter-provider-order">Provider Order (Optional):</label>
+      <input type="text" id="openRouter-provider-order" placeholder="e.g., openai,together,anthropic - comma-separated provider slugs">
+      
+      <label for="openRouter-allow-fallback">Allow Fallback:</label>
+      <select id="openRouter-allow-fallback">
+        <option value="true">Enabled</option>
+        <option value="false">Disabled</option>
+      </select>
     </div>
 
     <div id="openai-settings" class="section" style="display: none;">
