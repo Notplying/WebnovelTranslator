@@ -577,6 +577,37 @@
           font-size: 0.75rem;
           padding: 8px 12px;
         }
+      /* Image fallback styles for .file extension */
+      .image-fallback {
+        margin: 16px auto;
+        max-width: 400px;
+      }
+
+      .image-fallback > div {
+        transition: all 0.3s ease;
+      }
+
+      .image-fallback > div:hover {
+        background: rgba(255,255,255,0.15) !important;
+        transform: translateY(-1px);
+      }
+
+      .image-loading {
+        background: linear-gradient(90deg, rgba(255,255,255,0.1) 25%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.1) 75%);
+        background-size: 200% 100%;
+        animation: loading 1.5s infinite;
+        border-radius: 12px;
+        height: 200px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-muted);
+      }
+
+      @keyframes loading {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+      }
       }
     </style>
 </head>
