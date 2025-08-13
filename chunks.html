@@ -121,6 +121,47 @@
         word-break: break-word;
       }
 
+      .markdown-content code,
+      .markdown-content pre {
+        font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace;
+        background-color: rgba(255, 255, 255, 0.05);
+        border-radius: 4px;
+        font-size: 0.875em;
+        max-width: 100%;
+        overflow-x: auto;
+      }
+
+      .markdown-content code {
+        padding: 2px 6px;
+        margin: 0 2px;
+        display: inline-block;
+      }
+
+      .markdown-content pre {
+        padding: 16px;
+        margin: 1em 0;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        overflow-x: auto;
+        white-space: pre;
+        word-wrap: normal;
+      }
+
+      .markdown-content pre code {
+        background: none;
+        border: none;
+        padding: 0;
+        margin: 0;
+        font-size: inherit;
+        display: inline;
+        overflow-x: visible;
+        white-space: pre;
+      }
+
+      .markdown-content pre > code {
+        display: block;
+        overflow-x: auto;
+      }
+
       .markdown-content ul,
       .markdown-content ol {
         margin: 1em 0;
@@ -160,6 +201,17 @@
 
       .markdown-content ol {
         counter-reset: item;
+      }
+
+      /* Ensure all content containers handle overflow properly */
+      .chunk, .card-body, .content-parts {
+        max-width: 100%;
+        overflow-x: hidden;
+      }
+
+      .markdown-content {
+        overflow-wrap: break-word;
+        overflow-x: auto;
       }
 
       .markdown-content ol > li {

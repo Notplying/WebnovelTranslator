@@ -284,21 +284,21 @@ function showError(error, isFatal = false) {
   let errorType = ErrorTypes.PROCESSING;
   if (typeof error === 'string') {
     // Handle various API key errors
-    if (error.includes('PERMISSION_DENIED') || 
-        error.includes('Please use API Key') || 
-        error.includes('Invalid API key') || 
+    if (error.includes('PERMISSION_DENIED') ||
+        error.includes('Please use API Key') ||
+        error.includes('Invalid API key') ||
         error.includes('authentication failed')) {
       errorType = ErrorTypes.API_KEY;
-    } 
+    }
     // Handle content safety errors from different providers
-    else if (error.includes('Unexpected response structure from Gemini API') || 
+    else if (error.includes('Unexpected response structure from Gemini API') ||
              error.includes('Unexpected response structure from OpenRouter API') ||
              error.includes('content policy')) {
       errorType = ErrorTypes.CONTENT_SAFETY;
-    } 
+    }
     // Handle network errors
-    else if (error.includes('Failed to fetch') || 
-             error.includes('Network error') || 
+    else if (error.includes('Failed to fetch') ||
+             error.includes('Network error') ||
              error.includes('Rate limit exceeded')) {
       errorType = ErrorTypes.NETWORK;
     }
@@ -312,29 +312,69 @@ function showError(error, isFatal = false) {
   // Create error container
   const errorContainer = document.createElement('div');
   errorContainer.className = 'container error-container';
+  errorContainer.style.cssText = `
+    margin: 20px auto;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 16px;
+    padding: 32px;
+    box-shadow: var(--shadow-lg);
+  `;
 
   // Create error content
   const errorTitle = document.createElement('h1');
   errorTitle.textContent = errorInfo.title;
+  errorTitle.style.cssText = `
+    color: #ef4444;
+    font-size: 1.5rem;
+    margin-bottom: 16px;
+    text-align: center;
+  `;
 
   const errorMessage = document.createElement('div');
   errorMessage.className = 'error-message';
-  errorMessage.innerHTML = errorInfo.message;
+  errorMessage.style.cssText = `
+    color: var(--text-secondary);
+    line-height: 1.6;
+    font-size: 1rem;
+  `;
   
   // Show the pre-programmed message first
   errorMessage.innerHTML = errorInfo.message;
 
   // Always add the raw error message if available
   if (error && typeof error === 'string') {
-    errorMessage.innerHTML += `<p>original error message: ${error}</p>`;
+    const rawErrorDiv = document.createElement('div');
+    rawErrorDiv.style.cssText = `
+      margin-top: 16px;
+      padding: 12px;
+      background: rgba(239, 68, 68, 0.05);
+      border-left: 3px solid #ef4444;
+      border-radius: 4px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.875rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-width: 100%;
+      overflow-x: auto;
+    `;
+    rawErrorDiv.textContent = error;
+    errorMessage.appendChild(rawErrorDiv);
   }
 
-  // // Assemble and show error
-  // errorContainer.appendChild(errorTitle);
-  // errorContainer.appendChild(errorMessage);
-  // document.body.appendChild(errorContainer);
+  // Assemble and show error
+  errorContainer.appendChild(errorTitle);
+  errorContainer.appendChild(errorMessage);
+  
+  // Insert after the first container (title/buttons area)
+  const container = document.querySelector('.container');
+  if (container) {
+    container.parentNode.insertBefore(errorContainer, container.nextSibling);
+  } else {
+    document.body.appendChild(errorContainer);
+  }
 
-  // Show feedback notification
+  // Also show feedback notification as backup
   showFeedback(errorInfo.title, true);
 
   // Update progress bars for fatal errors
