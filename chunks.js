@@ -524,8 +524,89 @@ function createPartContent(content, isActive, partIndex) {
   const partContent = document.createElement('div');
   partContent.className = 'markdown-content part-content' + (isActive ? ' active' : '');
   partContent.dataset.part = partIndex;
-  const escapedContent = escapeHtml(typeof content === 'string' ? content : content.text || '');
-  partContent.innerHTML = DOMPurify.sanitize(marked.parse(escapedContent));
+  
+  let htmlContent;
+  if (typeof content === 'string') {
+    htmlContent = content;
+  } else if (content && typeof content.text === 'string') {
+    htmlContent = content.text;
+  } else {
+    htmlContent = String(content);
+  }
+
+  // Check if content contains HTML (like images) but don't escape it
+  if (htmlContent.includes('<img') || htmlContent.includes('<br') || htmlContent.includes('<p>')) {
+    // Sanitize the HTML content directly instead of parsing as markdown
+    partContent.innerHTML = DOMPurify.sanitize(htmlContent, {
+      ALLOWED_TAGS: ['img', 'p', 'br', 'strong', 'em', 'b', 'i', 'u', 'a', 'div', 'span'],
+      ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style']
+    });
+    
+    // Ensure images are displayed properly
+    const images = partContent.querySelectorAll('img');
+    images.forEach(img => {
+      let src = img.getAttribute('src') || img.src;
+      
+      if (src && src.includes('.file')) {
+        // Handle .file extension images
+        img.dataset.originalSrc = src;
+        
+        // Convert relative URLs to absolute
+        if (src.startsWith('//')) {
+          src = 'https:' + src;
+        } else if (src.startsWith('/')) {
+          src = 'https://images.novelpia.com' + src;
+        }
+        
+        // Store the corrected URL
+        img.src = src;
+        
+        // Add error handling for failed loads
+        img.onerror = function() {
+          // Create a fallback container
+          const fallback = document.createElement('div');
+          fallback.className = 'image-fallback';
+          fallback.innerHTML = `
+            <div style="background: rgba(255,255,255,0.1); border: 1px dashed rgba(255,255,255,0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--text-secondary);">
+              <span>📷 Image</span><br>
+              <small>${src.split('/').pop()}</small><br>
+              <button onclick="window.open('${src}', '_blank')" style="background: var(--accent-primary); color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-top: 8px; cursor: pointer;">Open Image</button>
+            </div>
+          `;
+          img.parentNode.replaceChild(fallback, img);
+        };
+      } else {
+        // Handle regular image URLs
+        if (src && src.startsWith('//')) {
+          img.src = 'https:' + src;
+        } else if (src && src.startsWith('/')) {
+          img.src = window.location.origin + src;
+        }
+      }
+      
+      // Add styling for better display
+      img.style.maxWidth = '100%';
+      img.style.height = 'auto';
+      img.style.display = 'block';
+      img.style.margin = '10px auto';
+      img.style.borderRadius = '8px';
+      img.style.cursor = 'pointer';
+      img.style.background = 'rgba(255,255,255,0.05)';
+      
+      // Add click handler to open image in new tab
+      img.addEventListener('click', function() {
+        const originalSrc = this.dataset.originalSrc || this.src;
+        if (originalSrc) {
+          window.open(originalSrc, '_blank');
+        }
+      });
+    });
+  } else {
+    // Process as markdown for plain text
+    const escapedContent = escapeHtml(htmlContent);
+    partContent.innerHTML = DOMPurify.sanitize(marked.parse(escapedContent));
+  }
+  
   return partContent;
 }
 
@@ -1131,7 +1212,66 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
       if (chunkDiv && content) {
         const partContent = chunkDiv.querySelector('.part-content.active');
         if (partContent) {
-          partContent.innerHTML = DOMPurify.sanitize(marked.parse(escapeHtml(content)));
+          // Check if content contains HTML (like images)
+          if (content.includes('<img') || content.includes('<br') || content.includes('<p>')) {
+            partContent.innerHTML = DOMPurify.sanitize(content, {
+              ALLOWED_TAGS: ['img', 'p', 'br', 'strong', 'em', 'b', 'i', 'u', 'a', 'div', 'span'],
+              ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style']
+            });
+            
+            // Ensure images are displayed properly with .file handling
+            const images = partContent.querySelectorAll('img');
+            images.forEach(img => {
+              let src = img.getAttribute('src') || img.src;
+              
+              if (src && src.includes('.file')) {
+                img.dataset.originalSrc = src;
+                
+                if (src.startsWith('//')) {
+                  src = 'https:' + src;
+                } else if (src.startsWith('/')) {
+                  src = 'https://images.novelpia.com' + src;
+                }
+                
+                img.src = src;
+                
+                img.onerror = function() {
+                  const fallback = document.createElement('div');
+                  fallback.className = 'image-fallback';
+                  fallback.innerHTML = `
+                    <div style="background: rgba(255,255,255,0.1); border: 1px dashed rgba(255,255,255,0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--text-secondary);">
+                      <span>📷 Image</span><br>
+                      <small>${src.split('/').pop()}</small><br>
+                      <button onclick="window.open('${src}', '_blank')" style="background: var(--accent-primary); color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-top: 8px; cursor: pointer;">Open Image</button>
+                    </div>
+                  `;
+                  img.parentNode.replaceChild(fallback, img);
+                };
+              } else {
+                if (src && src.startsWith('//')) {
+                  img.src = 'https:' + src;
+                } else if (src && src.startsWith('/')) {
+                  img.src = window.location.origin + src;
+                }
+              }
+              
+              img.style.maxWidth = '100%';
+              img.style.height = 'auto';
+              img.style.display = 'block';
+              img.style.margin = '10px auto';
+              img.style.borderRadius = '8px';
+              img.style.cursor = 'pointer';
+              
+              img.addEventListener('click', function() {
+                const originalSrc = this.dataset.originalSrc || this.src;
+                if (originalSrc) {
+                  window.open(originalSrc, '_blank');
+                }
+              });
+            });
+          } else {
+            partContent.innerHTML = DOMPurify.sanitize(marked.parse(escapeHtml(content)));
+          }
           chunkDiv.dataset.rawContent = effectiveRawContent;
         }
         // Ensure finalContentToSave is based on the received 'content' parameter for isComplete
@@ -1210,10 +1350,71 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
       cardBody.appendChild(partButtons);
       
       const contentParts = document.createElement('div'); contentParts.className = 'content-parts';
-      const partContentElement = document.createElement('div'); // Renamed for clarity
+      const partContentElement = document.createElement('div');
       partContentElement.className = 'markdown-content part-content active';
       partContentElement.dataset.part = '0';
-      partContentElement.innerHTML = DOMPurify.sanitize(marked.parse(escapeHtml(content)));
+      
+      // Handle HTML content with images
+      if (content.includes('<img') || content.includes('<br') || content.includes('<p>')) {
+        partContentElement.innerHTML = DOMPurify.sanitize(content, {
+          ALLOWED_TAGS: ['img', 'p', 'br', 'strong', 'em', 'b', 'i', 'u', 'a', 'div', 'span'],
+          ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style']
+        });
+        
+        // Ensure images are displayed properly
+        const images = partContentElement.querySelectorAll('img');
+        images.forEach(img => {
+          let src = img.getAttribute('src') || img.src;
+          
+          if (src && src.includes('.file')) {
+            img.dataset.originalSrc = src;
+            
+            if (src.startsWith('//')) {
+              src = 'https:' + src;
+            } else if (src.startsWith('/')) {
+              src = 'https://images.novelpia.com' + src;
+            }
+            
+            img.src = src;
+            
+            img.onerror = function() {
+              const fallback = document.createElement('div');
+              fallback.className = 'image-fallback';
+              fallback.innerHTML = `
+                <div style="background: rgba(255,255,255,0.1); border: 1px dashed rgba(255,255,255,0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--text-secondary);">
+                  <span>📷 Image</span><br>
+                  <small>${src.split('/').pop()}</small><br>
+                  <button onclick="window.open('${src}', '_blank')" style="background: var(--accent-primary); color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-top: 8px; cursor: pointer;">Open Image</button>
+                </div>
+              `;
+              img.parentNode.replaceChild(fallback, img);
+            };
+          } else {
+            if (src && src.startsWith('//')) {
+              img.src = 'https:' + src;
+            } else if (src && src.startsWith('/')) {
+              img.src = window.location.origin + src;
+            }
+          }
+          
+          img.style.maxWidth = '100%';
+          img.style.height = 'auto';
+          img.style.display = 'block';
+          img.style.margin = '10px auto';
+          img.style.borderRadius = '8px';
+          img.style.cursor = 'pointer';
+          
+          img.addEventListener('click', function() {
+            const originalSrc = this.dataset.originalSrc || this.src;
+            if (originalSrc) {
+              window.open(originalSrc, '_blank');
+            }
+          });
+        });
+      } else {
+        partContentElement.innerHTML = DOMPurify.sanitize(marked.parse(escapeHtml(content)));
+      }
+      
       contentParts.appendChild(partContentElement);
       cardBody.appendChild(contentParts);
 
@@ -1241,8 +1442,66 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
     } else { // Update existing chunk content
       const partContent = chunkDiv.querySelector('.part-content.active');
       if (partContent) {
-        partContent.innerHTML = DOMPurify.sanitize(marked.parse(escapeHtml(content)));
-        // Ensure rawContent dataset is updated if it somehow changed, though for streaming it should be consistent.
+        // Handle HTML content with images during streaming
+        if (content.includes('<img') || content.includes('<br') || content.includes('<p>')) {
+          partContent.innerHTML = DOMPurify.sanitize(content, {
+            ALLOWED_TAGS: ['img', 'p', 'br', 'strong', 'em', 'b', 'i', 'u', 'a', 'div', 'span'],
+            ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style']
+          });
+          
+          // Ensure images are displayed properly with .file handling
+          const images = partContent.querySelectorAll('img');
+          images.forEach(img => {
+            let src = img.getAttribute('src') || img.src;
+            
+            if (src && src.includes('.file')) {
+              img.dataset.originalSrc = src;
+              
+              if (src.startsWith('//')) {
+                src = 'https:' + src;
+              } else if (src.startsWith('/')) {
+                src = 'https://images.novelpia.com' + src;
+              }
+              
+              img.src = src;
+              
+              img.onerror = function() {
+                const fallback = document.createElement('div');
+                fallback.className = 'image-fallback';
+                fallback.innerHTML = `
+                  <div style="background: rgba(255,255,255,0.1); border: 1px dashed rgba(255,255,255,0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--text-secondary);">
+                    <span>📷 Image</span><br>
+                    <small>${src.split('/').pop()}</small><br>
+                    <button onclick="window.open('${src}', '_blank')" style="background: var(--accent-primary); color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-top: 8px; cursor: pointer;">Open Image</button>
+                  </div>
+                `;
+                img.parentNode.replaceChild(fallback, img);
+              };
+            } else {
+              if (src && src.startsWith('//')) {
+                img.src = 'https:' + src;
+              } else if (src && src.startsWith('/')) {
+                img.src = window.location.origin + src;
+              }
+            }
+            
+            img.style.maxWidth = '100%';
+            img.style.height = 'auto';
+            img.style.display = 'block';
+            img.style.margin = '10px auto';
+            img.style.borderRadius = '8px';
+            img.style.cursor = 'pointer';
+            
+            img.addEventListener('click', function() {
+              const originalSrc = this.dataset.originalSrc || this.src;
+              if (originalSrc) {
+                window.open(originalSrc, '_blank');
+              }
+            });
+          });
+        } else {
+          partContent.innerHTML = DOMPurify.sanitize(marked.parse(escapeHtml(content)));
+        }
         chunkDiv.dataset.rawContent = effectiveRawContent;
       } else {
           // If .part-content.active is missing (e.g. after clearing for reprocess), recreate it.

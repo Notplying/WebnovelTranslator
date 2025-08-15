@@ -2,36 +2,55 @@ function splitParagraphText(lengthinput) {
   let maxLength = lengthinput;
   console.log('maxLength in splitParagraphText:', maxLength);
   let paragraphId = 1;
-  let combinedText = "";
+  let combinedContent = "";
 
   let textLeftDiv = document.querySelector('.text-left');
   let novel_contentDiv = document.querySelector('#novel_content');
+  
+  function extractContentWithImages(element) {
+    let content = "";
+    element.childNodes.forEach(node => {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        if (node.tagName.toLowerCase() === 'img') {
+          // Preserve img tags completely
+          content += node.outerHTML + '\n\n';
+        } else if (node.tagName.toLowerCase() === 'p') {
+          // For p tags, include both text and any img tags inside
+          content += node.innerHTML + '\n\n';
+        } else {
+          // For other elements, recursively process
+          content += extractContentWithImages(node);
+        }
+      } else if (node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== '') {
+        content += node.textContent.trim() + '\n\n';
+      }
+    });
+    return content;
+  }
+
   if (textLeftDiv) {
       let children = textLeftDiv.childNodes;
       
       children.forEach(node => {
           if (node.nodeType === Node.ELEMENT_NODE && node.tagName.toLowerCase() === 'p') {
-              combinedText += node.textContent + '\n\n';
+              combinedContent += node.innerHTML + '\n\n';
           } else if (node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== '') {
               let lines = node.textContent.trim().split(']');
               lines.forEach(line => {
                   if (line.trim() !== '') {
-                      combinedText += line.trim() + ']\n\n';
+                      combinedContent += line.trim() + ']\n\n';
                   }
               });
+          } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName.toLowerCase() === 'img') {
+              combinedContent += node.outerHTML + '\n\n';
           }
       });
-      
-      // combinedText = combinedText.trim(); // Remove trailing newlines
-  } else if (novel_contentDiv) {
+       
+  } else if (novel_contentDiv) { //booktoki
     let innerDivs = novel_contentDiv.querySelectorAll('div');
     
     innerDivs.forEach(div => {
-      let paragraphs = div.querySelectorAll('p');
-      
-      paragraphs.forEach(p => {
-        combinedText += p.textContent + '\n\n';
-      });
+      combinedContent += extractContentWithImages(div);
     });
   } else {
       while (true) {
@@ -41,12 +60,12 @@ function splitParagraphText(lengthinput) {
           }
           if (!paragraphElement) break;
 
-          combinedText += paragraphElement.textContent + '\n\n';
+          combinedContent += paragraphElement.innerHTML + '\n\n';
           paragraphId++;
       }
   }
 
-  const textChunks = splitTextIntoChunks(combinedText, maxLength);
+  const textChunks = splitTextIntoChunks(combinedContent, maxLength);
   return textChunks;
 }
 
