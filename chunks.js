@@ -539,7 +539,7 @@ function createPartContent(content, isActive, partIndex) {
     // Sanitize the HTML content directly instead of parsing as markdown
     partContent.innerHTML = DOMPurify.sanitize(htmlContent, {
       ALLOWED_TAGS: ['img', 'p', 'br', 'strong', 'em', 'b', 'i', 'u', 'a', 'div', 'span'],
-      ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style']
+      ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style', 'font-style', 'font-size']
     });
     
     // Ensure images are displayed properly
@@ -1213,10 +1213,10 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
         const partContent = chunkDiv.querySelector('.part-content.active');
         if (partContent) {
           // Check if content contains HTML (like images)
-          if (content.includes('<img') || content.includes('<br') || content.includes('<p>')) {
+          if (content.includes('<img') || content.includes('<br') || content.includes('<p>') || content.includes('<span')) {
             partContent.innerHTML = DOMPurify.sanitize(content, {
               ALLOWED_TAGS: ['img', 'p', 'br', 'strong', 'em', 'b', 'i', 'u', 'a', 'div', 'span'],
-              ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style']
+              ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style', 'font-style', 'font-size']
             });
             
             // Ensure images are displayed properly with .file handling
@@ -1354,11 +1354,11 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
       partContentElement.className = 'markdown-content part-content active';
       partContentElement.dataset.part = '0';
       
-      // Handle HTML content with images
-      if (content.includes('<img') || content.includes('<br') || content.includes('<p>')) {
+      // Handle HTML content with images and spans
+      if (content.includes('<img') || content.includes('<br') || content.includes('<p>') || content.includes('<span')) {
         partContentElement.innerHTML = DOMPurify.sanitize(content, {
           ALLOWED_TAGS: ['img', 'p', 'br', 'strong', 'em', 'b', 'i', 'u', 'a', 'div', 'span'],
-          ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style']
+          ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style', 'font-style', 'font-size']
         });
         
         // Ensure images are displayed properly
@@ -1442,11 +1442,11 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
     } else { // Update existing chunk content
       const partContent = chunkDiv.querySelector('.part-content.active');
       if (partContent) {
-        // Handle HTML content with images during streaming
-        if (content.includes('<img') || content.includes('<br') || content.includes('<p>')) {
+        // Handle HTML content with images and spans during streaming
+        if (content.includes('<img') || content.includes('<br') || content.includes('<p>') || content.includes('<span')) {
           partContent.innerHTML = DOMPurify.sanitize(content, {
             ALLOWED_TAGS: ['img', 'p', 'br', 'strong', 'em', 'b', 'i', 'u', 'a', 'div', 'span'],
-            ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style']
+            ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style', 'font-style', 'font-size']
           });
           
           // Ensure images are displayed properly with .file handling
