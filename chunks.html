@@ -121,6 +121,19 @@
         word-break: break-word;
       }
 
+      /* Support for inline styled spans */
+      .markdown-content span {
+        display: inline;
+      }
+
+      .markdown-content span[style*="font-style:italic"] {
+        font-style: italic;
+      }
+
+      .markdown-content span[style*="font-size"] {
+        /* Allow inline font-size styles to be applied */
+      }
+
       .markdown-content code,
       .markdown-content pre {
         font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace;
