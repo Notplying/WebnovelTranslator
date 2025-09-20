@@ -1270,7 +1270,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
               });
             });
           } else {
-            partContent.innerHTML = DOMPurify.sanitize(marked.parse(escapeHtml(content)));
+            partContent.innerHTML = DOMPurify.sanitize(escapeHtml(marked.parse(content)));
           }
           chunkDiv.dataset.rawContent = effectiveRawContent;
         }
@@ -1412,7 +1412,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
           });
         });
       } else {
-        partContentElement.innerHTML = DOMPurify.sanitize(marked.parse(escapeHtml(content)));
+        partContentElement.innerHTML = DOMPurify.sanitize(escapeHtml(marked.parse(content)));
       }
       
       contentParts.appendChild(partContentElement);
