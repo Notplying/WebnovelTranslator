@@ -604,7 +604,9 @@ function createPartContent(content, isActive, partIndex) {
   } else {
     // Process as markdown for plain text
     const escapedContent = escapeHtml(htmlContent);
-    partContent.innerHTML = DOMPurify.sanitize(marked.parse(escapedContent));
+    // Suppress link parsing by escaping [text](text) patterns
+    const contentWithoutLinks = escapedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
+    partContent.innerHTML = DOMPurify.sanitize(marked.parse(contentWithoutLinks));
   }
   
   return partContent;
@@ -1270,7 +1272,9 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
               });
             });
           } else {
-            partContent.innerHTML = DOMPurify.sanitize(marked.parse(escapeHtml(content)));
+            // Suppress link parsing by escaping [text](text) patterns
+            const contentWithoutLinks = escapeHtml(content).replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
+            partContent.innerHTML = DOMPurify.sanitize(marked.parse(contentWithoutLinks));
           }
           chunkDiv.dataset.rawContent = effectiveRawContent;
         }
@@ -1412,7 +1416,9 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
           });
         });
       } else {
-        partContentElement.innerHTML = DOMPurify.sanitize(marked.parse(escapeHtml(content)));
+        // Suppress link parsing by escaping [text](text) patterns
+        const contentWithoutLinks = escapeHtml(content).replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
+        partContentElement.innerHTML = DOMPurify.sanitize(marked.parse(contentWithoutLinks));
       }
       
       contentParts.appendChild(partContentElement);
@@ -1500,7 +1506,9 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
             });
           });
         } else {
-          partContent.innerHTML = DOMPurify.sanitize(marked.parse(escapeHtml(content)));
+          // Suppress link parsing by escaping [text](text) patterns
+          const contentWithoutLinks = escapeHtml(content).replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
+          partContent.innerHTML = DOMPurify.sanitize(marked.parse(contentWithoutLinks));
         }
         chunkDiv.dataset.rawContent = effectiveRawContent;
       } else {
