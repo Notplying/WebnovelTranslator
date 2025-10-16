@@ -504,6 +504,15 @@ function escapeHtml(text) {
     .replace(/'/g, "&#039;");
 }
 
+function unescapeHtml(text) {
+  return text
+    .replace(/</g, "<")
+    .replace(/>/g, ">")
+    .replace(/"/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&/g, "&");
+}
+
 // Helper functions for creating UI elements
 function createButton(text, className, clickHandler) {
   const button = document.createElement('button');
@@ -534,79 +543,138 @@ function createPartContent(content, isActive, partIndex) {
     htmlContent = String(content);
   }
 
-  // Check if content contains HTML (like images) but don't escape it
-  if (htmlContent.includes('<img') || htmlContent.includes('<br') || htmlContent.includes('<p>')) {
-    // Sanitize the HTML content directly instead of parsing as markdown
-    partContent.innerHTML = DOMPurify.sanitize(htmlContent, {
+  // Check if content contains HTML images
+  const hasImages = htmlContent.includes('<img');
+  
+  if (hasImages) {
+    // For content with images, we need to process it differently to preserve image positions
+    // Create a temporary DOM element to parse the original HTML
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = htmlContent;
+    
+    // Process text nodes while preserving image elements
+    const processNode = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        // Process text nodes as markdown
+        const textContent = node.textContent;
+        if (textContent.trim()) {
+          const escapedContent = escapeHtml(textContent);
+          // Suppress link parsing by escaping [text](text) patterns
+          const contentWithoutLinks = escapedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
+          const markdownContent = marked.parse(contentWithoutLinks);
+          // Unescape HTML entities to convert < and > back to < and >
+          const unescapedContent = unescapeHtml(markdownContent);
+          return unescapedContent;
+        }
+        return '';
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        if (node.tagName.toLowerCase() === 'img') {
+          // Process image elements
+          let src = node.getAttribute('src') || node.src;
+          const alt = node.getAttribute('alt') || '';
+          
+          // Create a new image element with proper styling
+          const newImg = document.createElement('img');
+          newImg.alt = alt;
+          
+          if (src && src.includes('.file')) {
+            // Handle .file extension images
+            newImg.dataset.originalSrc = src;
+            
+            // Convert relative URLs to absolute
+            if (src.startsWith('//')) {
+              src = 'https:' + src;
+            } else if (src.startsWith('/')) {
+              src = 'https://images.novelpia.com' + src;
+            }
+            
+            newImg.src = src;
+            
+            // Add error handling for failed loads
+            newImg.onerror = function() {
+              const fallback = document.createElement('div');
+              fallback.className = 'image-fallback';
+              fallback.innerHTML = `
+                <div style="background: rgba(255,255,255,0.1); border: 1px dashed rgba(255,255,255,0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--text-secondary);">
+                  <span>📷 Image</span><br>
+                  <small>${src.split('/').pop()}</small><br>
+                  <button onclick="window.open('${src}', '_blank')" style="background: var(--accent-primary); color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-top: 8px; cursor: pointer;">Open Image</button>
+                </div>
+              `;
+              this.parentNode.replaceChild(fallback, this);
+            };
+          } else {
+            // Handle regular image URLs
+            if (src && src.startsWith('//')) {
+              newImg.src = 'https:' + src;
+            } else if (src && src.startsWith('/')) {
+              newImg.src = window.location.origin + src;
+            } else {
+              newImg.src = src;
+            }
+          }
+          
+          // Add styling for better display
+          newImg.style.maxWidth = '100%';
+          newImg.style.height = 'auto';
+          newImg.style.display = 'block';
+          newImg.style.margin = '10px auto';
+          newImg.style.borderRadius = '8px';
+          newImg.style.cursor = 'pointer';
+          newImg.style.background = 'rgba(255,255,255,0.05)';
+          
+          // Add click handler to open image in new tab
+          newImg.addEventListener('click', function() {
+            const originalSrc = this.dataset.originalSrc || this.src;
+            if (originalSrc) {
+              window.open(originalSrc, '_blank');
+            }
+          });
+          
+          return newImg.outerHTML;
+        } else {
+          // Process other elements recursively
+          let result = `<${node.tagName.toLowerCase()}`;
+          
+          // Copy attributes
+          for (const attr of node.attributes) {
+            result += ` ${attr.name}="${attr.value}"`;
+          }
+          
+          result += '>';
+          
+          // Process child nodes
+          for (const child of node.childNodes) {
+            result += processNode(child);
+          }
+          
+          result += `</${node.tagName.toLowerCase()}>`;
+          return result;
+        }
+      }
+      return '';
+    };
+    
+    // Process all child nodes of the temporary div
+    let processedContent = '';
+    for (const child of tempDiv.childNodes) {
+      processedContent += processNode(child);
+    }
+    
+    // Sanitize and set the final content
+    partContent.innerHTML = DOMPurify.sanitize(processedContent, {
       ALLOWED_TAGS: ['img', 'p', 'br', 'strong', 'em', 'b', 'i', 'u', 'a', 'div', 'span'],
       ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style', 'font-style', 'font-size']
     });
-    
-    // Ensure images are displayed properly
-    const images = partContent.querySelectorAll('img');
-    images.forEach(img => {
-      let src = img.getAttribute('src') || img.src;
-      
-      if (src && src.includes('.file')) {
-        // Handle .file extension images
-        img.dataset.originalSrc = src;
-        
-        // Convert relative URLs to absolute
-        if (src.startsWith('//')) {
-          src = 'https:' + src;
-        } else if (src.startsWith('/')) {
-          src = 'https://images.novelpia.com' + src;
-        }
-        
-        // Store the corrected URL
-        img.src = src;
-        
-        // Add error handling for failed loads
-        img.onerror = function() {
-          // Create a fallback container
-          const fallback = document.createElement('div');
-          fallback.className = 'image-fallback';
-          fallback.innerHTML = `
-            <div style="background: rgba(255,255,255,0.1); border: 1px dashed rgba(255,255,255,0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--text-secondary);">
-              <span>📷 Image</span><br>
-              <small>${src.split('/').pop()}</small><br>
-              <button onclick="window.open('${src}', '_blank')" style="background: var(--accent-primary); color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-top: 8px; cursor: pointer;">Open Image</button>
-            </div>
-          `;
-          img.parentNode.replaceChild(fallback, img);
-        };
-      } else {
-        // Handle regular image URLs
-        if (src && src.startsWith('//')) {
-          img.src = 'https:' + src;
-        } else if (src && src.startsWith('/')) {
-          img.src = window.location.origin + src;
-        }
-      }
-      
-      // Add styling for better display
-      img.style.maxWidth = '100%';
-      img.style.height = 'auto';
-      img.style.display = 'block';
-      img.style.margin = '10px auto';
-      img.style.borderRadius = '8px';
-      img.style.cursor = 'pointer';
-      img.style.background = 'rgba(255,255,255,0.05)';
-      
-      // Add click handler to open image in new tab
-      img.addEventListener('click', function() {
-        const originalSrc = this.dataset.originalSrc || this.src;
-        if (originalSrc) {
-          window.open(originalSrc, '_blank');
-        }
-      });
-    });
   } else {
-    // Process as markdown for plain text
+    // Process as markdown for plain text content without images
     const escapedContent = escapeHtml(htmlContent);
     // Suppress link parsing by escaping [text](text) patterns
     const contentWithoutLinks = escapedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
-    partContent.innerHTML = DOMPurify.sanitize(marked.parse(contentWithoutLinks));
+    const markdownContent = marked.parse(contentWithoutLinks);
+    // Unescape HTML entities to convert < and > back to < and >
+    const unescapedContent = unescapeHtml(markdownContent);
+    partContent.innerHTML = DOMPurify.sanitize(unescapedContent);
   }
   
   return partContent;
@@ -1214,68 +1282,140 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
       if (chunkDiv && content) {
         const partContent = chunkDiv.querySelector('.part-content.active');
         if (partContent) {
-          // Check if content contains HTML (like images)
-          if (content.includes('<img') || content.includes('<br') || content.includes('<p>') || content.includes('<span')) {
-            partContent.innerHTML = DOMPurify.sanitize(content, {
+          // Check if content contains HTML images
+          const hasImages = content.includes('<img');
+          
+          if (hasImages) {
+            // For content with images, we need to process it differently to preserve image positions
+            // Create a temporary DOM element to parse the original HTML
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = content;
+            
+            // Process text nodes while preserving image elements
+            const processNode = (node) => {
+              if (node.nodeType === Node.TEXT_NODE) {
+                // Process text nodes as markdown
+                const textContent = node.textContent;
+                if (textContent.trim()) {
+                  const escapedContent = escapeHtml(textContent);
+                  // Suppress link parsing by escaping [text](text) patterns
+                  const contentWithoutLinks = escapedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
+                  const markdownContent = marked.parse(contentWithoutLinks);
+                  // Unescape HTML entities to convert < and > back to < and >
+                  const unescapedContent = unescapeHtml(markdownContent);
+                  return unescapedContent;
+                }
+                return '';
+              } else if (node.nodeType === Node.ELEMENT_NODE) {
+                if (node.tagName.toLowerCase() === 'img') {
+                  // Process image elements
+                  let src = node.getAttribute('src') || node.src;
+                  const alt = node.getAttribute('alt') || '';
+                  
+                  // Create a new image element with proper styling
+                  const newImg = document.createElement('img');
+                  newImg.alt = alt;
+                  
+                  if (src && src.includes('.file')) {
+                    // Handle .file extension images
+                    newImg.dataset.originalSrc = src;
+                    
+                    // Convert relative URLs to absolute
+                    if (src.startsWith('//')) {
+                      src = 'https:' + src;
+                    } else if (src.startsWith('/')) {
+                      src = 'https://images.novelpia.com' + src;
+                    }
+                    
+                    newImg.src = src;
+                    
+                    // Add error handling for failed loads
+                    newImg.onerror = function() {
+                      const fallback = document.createElement('div');
+                      fallback.className = 'image-fallback';
+                      fallback.innerHTML = `
+                        <div style="background: rgba(255,255,255,0.1); border: 1px dashed rgba(255,255,255,0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--text-secondary);">
+                          <span>📷 Image</span><br>
+                          <small>${src.split('/').pop()}</small><br>
+                          <button onclick="window.open('${src}', '_blank')" style="background: var(--accent-primary); color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-top: 8px; cursor: pointer;">Open Image</button>
+                        </div>
+                      `;
+                      this.parentNode.replaceChild(fallback, this);
+                    };
+                  } else {
+                    // Handle regular image URLs
+                    if (src && src.startsWith('//')) {
+                      newImg.src = 'https:' + src;
+                    } else if (src && src.startsWith('/')) {
+                      newImg.src = window.location.origin + src;
+                    } else {
+                      newImg.src = src;
+                    }
+                  }
+                  
+                  // Add styling for better display
+                  newImg.style.maxWidth = '100%';
+                  newImg.style.height = 'auto';
+                  newImg.style.display = 'block';
+                  newImg.style.margin = '10px auto';
+                  newImg.style.borderRadius = '8px';
+                  newImg.style.cursor = 'pointer';
+                  newImg.style.background = 'rgba(255,255,255,0.05)';
+                  
+                  // Add click handler to open image in new tab
+                  newImg.addEventListener('click', function() {
+                    const originalSrc = this.dataset.originalSrc || this.src;
+                    if (originalSrc) {
+                      window.open(originalSrc, '_blank');
+                    }
+                  });
+                  
+                  return newImg.outerHTML;
+                } else {
+                  // Process other elements recursively
+                  let result = `<${node.tagName.toLowerCase()}`;
+                  
+                  // Copy attributes
+                  for (const attr of node.attributes) {
+                    result += ` ${attr.name}="${attr.value}"`;
+                  }
+                  
+                  result += '>';
+                  
+                  // Process child nodes
+                  for (const child of node.childNodes) {
+                    result += processNode(child);
+                  }
+                  
+                  result += `</${node.tagName.toLowerCase()}>`;
+                  return result;
+                }
+              }
+              return '';
+            };
+            
+            // Process all child nodes of the temporary div
+            let processedContent = '';
+            for (const child of tempDiv.childNodes) {
+              processedContent += processNode(child);
+            }
+            
+            // Sanitize and set the final content
+            partContent.innerHTML = DOMPurify.sanitize(processedContent, {
               ALLOWED_TAGS: ['img', 'p', 'br', 'strong', 'em', 'b', 'i', 'u', 'a', 'div', 'span'],
               ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style', 'font-style', 'font-size']
             });
-            
-            // Ensure images are displayed properly with .file handling
-            const images = partContent.querySelectorAll('img');
-            images.forEach(img => {
-              let src = img.getAttribute('src') || img.src;
-              
-              if (src && src.includes('.file')) {
-                img.dataset.originalSrc = src;
-                
-                if (src.startsWith('//')) {
-                  src = 'https:' + src;
-                } else if (src.startsWith('/')) {
-                  src = 'https://images.novelpia.com' + src;
-                }
-                
-                img.src = src;
-                
-                img.onerror = function() {
-                  const fallback = document.createElement('div');
-                  fallback.className = 'image-fallback';
-                  fallback.innerHTML = `
-                    <div style="background: rgba(255,255,255,0.1); border: 1px dashed rgba(255,255,255,0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--text-secondary);">
-                      <span>📷 Image</span><br>
-                      <small>${src.split('/').pop()}</small><br>
-                      <button onclick="window.open('${src}', '_blank')" style="background: var(--accent-primary); color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-top: 8px; cursor: pointer;">Open Image</button>
-                    </div>
-                  `;
-                  img.parentNode.replaceChild(fallback, img);
-                };
-              } else {
-                if (src && src.startsWith('//')) {
-                  img.src = 'https:' + src;
-                } else if (src && src.startsWith('/')) {
-                  img.src = window.location.origin + src;
-                }
-              }
-              
-              img.style.maxWidth = '100%';
-              img.style.height = 'auto';
-              img.style.display = 'block';
-              img.style.margin = '10px auto';
-              img.style.borderRadius = '8px';
-              img.style.cursor = 'pointer';
-              
-              img.addEventListener('click', function() {
-                const originalSrc = this.dataset.originalSrc || this.src;
-                if (originalSrc) {
-                  window.open(originalSrc, '_blank');
-                }
-              });
-            });
           } else {
+            // Process as markdown for plain text content without images
+            const escapedContent = escapeHtml(content);
             // Suppress link parsing by escaping [text](text) patterns
-            const contentWithoutLinks = escapeHtml(content).replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
-            partContent.innerHTML = DOMPurify.sanitize(marked.parse(contentWithoutLinks));
+            const contentWithoutLinks = escapedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
+            const markdownContent = marked.parse(contentWithoutLinks);
+            // Unescape HTML entities to convert < and > back to < and >
+            const unescapedContent = unescapeHtml(markdownContent);
+            partContent.innerHTML = DOMPurify.sanitize(unescapedContent);
           }
+          
           chunkDiv.dataset.rawContent = effectiveRawContent;
         }
         // Ensure finalContentToSave is based on the received 'content' parameter for isComplete
@@ -1358,67 +1498,138 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
       partContentElement.className = 'markdown-content part-content active';
       partContentElement.dataset.part = '0';
       
-      // Handle HTML content with images and spans
-      if (content.includes('<img') || content.includes('<br') || content.includes('<p>') || content.includes('<span')) {
-        partContentElement.innerHTML = DOMPurify.sanitize(content, {
+      // Check if content contains HTML images
+      const hasImages = content.includes('<img');
+      
+      if (hasImages) {
+        // For content with images, we need to process it differently to preserve image positions
+        // Create a temporary DOM element to parse the original HTML
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = content;
+        
+        // Process text nodes while preserving image elements
+        const processNode = (node) => {
+          if (node.nodeType === Node.TEXT_NODE) {
+            // Process text nodes as markdown
+            const textContent = node.textContent;
+            if (textContent.trim()) {
+              const escapedContent = escapeHtml(textContent);
+              // Suppress link parsing by escaping [text](text) patterns
+              const contentWithoutLinks = escapedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
+              const markdownContent = marked.parse(contentWithoutLinks);
+              // Unescape HTML entities to convert < and > back to < and >
+              const unescapedContent = unescapeHtml(markdownContent);
+              return unescapedContent;
+            }
+            return '';
+          } else if (node.nodeType === Node.ELEMENT_NODE) {
+            if (node.tagName.toLowerCase() === 'img') {
+              // Process image elements
+              let src = node.getAttribute('src') || node.src;
+              const alt = node.getAttribute('alt') || '';
+              
+              // Create a new image element with proper styling
+              const newImg = document.createElement('img');
+              newImg.alt = alt;
+              
+              if (src && src.includes('.file')) {
+                // Handle .file extension images
+                newImg.dataset.originalSrc = src;
+                
+                // Convert relative URLs to absolute
+                if (src.startsWith('//')) {
+                  src = 'https:' + src;
+                } else if (src.startsWith('/')) {
+                  src = 'https://images.novelpia.com' + src;
+                }
+                
+                newImg.src = src;
+                
+                // Add error handling for failed loads
+                newImg.onerror = function() {
+                  const fallback = document.createElement('div');
+                  fallback.className = 'image-fallback';
+                  fallback.innerHTML = `
+                    <div style="background: rgba(255,255,255,0.1); border: 1px dashed rgba(255,255,255,0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--text-secondary);">
+                      <span>📷 Image</span><br>
+                      <small>${src.split('/').pop()}</small><br>
+                      <button onclick="window.open('${src}', '_blank')" style="background: var(--accent-primary); color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-top: 8px; cursor: pointer;">Open Image</button>
+                    </div>
+                  `;
+                  this.parentNode.replaceChild(fallback, this);
+                };
+              } else {
+                // Handle regular image URLs
+                if (src && src.startsWith('//')) {
+                  newImg.src = 'https:' + src;
+                } else if (src && src.startsWith('/')) {
+                  newImg.src = window.location.origin + src;
+                } else {
+                  newImg.src = src;
+                }
+              }
+              
+              // Add styling for better display
+              newImg.style.maxWidth = '100%';
+              newImg.style.height = 'auto';
+              newImg.style.display = 'block';
+              newImg.style.margin = '10px auto';
+              newImg.style.borderRadius = '8px';
+              newImg.style.cursor = 'pointer';
+              newImg.style.background = 'rgba(255,255,255,0.05)';
+              
+              // Add click handler to open image in new tab
+              newImg.addEventListener('click', function() {
+                const originalSrc = this.dataset.originalSrc || this.src;
+                if (originalSrc) {
+                  window.open(originalSrc, '_blank');
+                }
+              });
+              
+              return newImg.outerHTML;
+            } else {
+              // Process other elements recursively
+              let result = `<${node.tagName.toLowerCase()}`;
+              
+              // Copy attributes
+              for (const attr of node.attributes) {
+                result += ` ${attr.name}="${attr.value}"`;
+              }
+              
+              result += '>';
+              
+              // Process child nodes
+              for (const child of node.childNodes) {
+                result += processNode(child);
+              }
+              
+              result += `</${node.tagName.toLowerCase()}>`;
+              return result;
+            }
+          }
+          return '';
+        };
+        
+        // Process all child nodes of the temporary div
+        let processedContent = '';
+        for (const child of tempDiv.childNodes) {
+          processedContent += processNode(child);
+        }
+        
+        // Sanitize and set the final content
+        partContentElement.innerHTML = DOMPurify.sanitize(processedContent, {
           ALLOWED_TAGS: ['img', 'p', 'br', 'strong', 'em', 'b', 'i', 'u', 'a', 'div', 'span'],
           ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style', 'font-style', 'font-size']
         });
-        
-        // Ensure images are displayed properly
-        const images = partContentElement.querySelectorAll('img');
-        images.forEach(img => {
-          let src = img.getAttribute('src') || img.src;
-          
-          if (src && src.includes('.file')) {
-            img.dataset.originalSrc = src;
-            
-            if (src.startsWith('//')) {
-              src = 'https:' + src;
-            } else if (src.startsWith('/')) {
-              src = 'https://images.novelpia.com' + src;
-            }
-            
-            img.src = src;
-            
-            img.onerror = function() {
-              const fallback = document.createElement('div');
-              fallback.className = 'image-fallback';
-              fallback.innerHTML = `
-                <div style="background: rgba(255,255,255,0.1); border: 1px dashed rgba(255,255,255,0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--text-secondary);">
-                  <span>📷 Image</span><br>
-                  <small>${src.split('/').pop()}</small><br>
-                  <button onclick="window.open('${src}', '_blank')" style="background: var(--accent-primary); color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-top: 8px; cursor: pointer;">Open Image</button>
-                </div>
-              `;
-              img.parentNode.replaceChild(fallback, img);
-            };
-          } else {
-            if (src && src.startsWith('//')) {
-              img.src = 'https:' + src;
-            } else if (src && src.startsWith('/')) {
-              img.src = window.location.origin + src;
-            }
-          }
-          
-          img.style.maxWidth = '100%';
-          img.style.height = 'auto';
-          img.style.display = 'block';
-          img.style.margin = '10px auto';
-          img.style.borderRadius = '8px';
-          img.style.cursor = 'pointer';
-          
-          img.addEventListener('click', function() {
-            const originalSrc = this.dataset.originalSrc || this.src;
-            if (originalSrc) {
-              window.open(originalSrc, '_blank');
-            }
-          });
-        });
       } else {
+        // Process as markdown for plain text content without images
+        const escapedContent = escapeHtml(content);
         // Suppress link parsing by escaping [text](text) patterns
-        const contentWithoutLinks = escapeHtml(content).replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
-        partContentElement.innerHTML = DOMPurify.sanitize(marked.parse(contentWithoutLinks));
+        const contentWithoutLinks = escapedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
+        const markdownContent = marked.parse(contentWithoutLinks);
+        // Unescape HTML entities to convert < and > back to < and >
+        const unescapedContent = unescapeHtml(markdownContent);
+        partContentElement.innerHTML = DOMPurify.sanitize(unescapedContent);
       }
       
       contentParts.appendChild(partContentElement);
@@ -1448,67 +1659,138 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
     } else { // Update existing chunk content
       const partContent = chunkDiv.querySelector('.part-content.active');
       if (partContent) {
-        // Handle HTML content with images and spans during streaming
-        if (content.includes('<img') || content.includes('<br') || content.includes('<p>') || content.includes('<span')) {
-          partContent.innerHTML = DOMPurify.sanitize(content, {
+        // Check if content contains HTML images
+        const hasImages = content.includes('<img');
+        
+        if (hasImages) {
+          // For content with images, we need to process it differently to preserve image positions
+          // Create a temporary DOM element to parse the original HTML
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = content;
+          
+          // Process text nodes while preserving image elements
+          const processNode = (node) => {
+            if (node.nodeType === Node.TEXT_NODE) {
+              // Process text nodes as markdown
+              const textContent = node.textContent;
+              if (textContent.trim()) {
+                const escapedContent = escapeHtml(textContent);
+                // Suppress link parsing by escaping [text](text) patterns
+                const contentWithoutLinks = escapedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
+                const markdownContent = marked.parse(contentWithoutLinks);
+                // Unescape HTML entities to convert < and > back to < and >
+                const unescapedContent = unescapeHtml(markdownContent);
+                return unescapedContent;
+              }
+              return '';
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+              if (node.tagName.toLowerCase() === 'img') {
+                // Process image elements
+                let src = node.getAttribute('src') || node.src;
+                const alt = node.getAttribute('alt') || '';
+                
+                // Create a new image element with proper styling
+                const newImg = document.createElement('img');
+                newImg.alt = alt;
+                
+                if (src && src.includes('.file')) {
+                  // Handle .file extension images
+                  newImg.dataset.originalSrc = src;
+                  
+                  // Convert relative URLs to absolute
+                  if (src.startsWith('//')) {
+                    src = 'https:' + src;
+                  } else if (src.startsWith('/')) {
+                    src = 'https://images.novelpia.com' + src;
+                  }
+                  
+                  newImg.src = src;
+                  
+                  // Add error handling for failed loads
+                  newImg.onerror = function() {
+                    const fallback = document.createElement('div');
+                    fallback.className = 'image-fallback';
+                    fallback.innerHTML = `
+                      <div style="background: rgba(255,255,255,0.1); border: 1px dashed rgba(255,255,255,0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--text-secondary);">
+                        <span>📷 Image</span><br>
+                        <small>${src.split('/').pop()}</small><br>
+                        <button onclick="window.open('${src}', '_blank')" style="background: var(--accent-primary); color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-top: 8px; cursor: pointer;">Open Image</button>
+                      </div>
+                    `;
+                    this.parentNode.replaceChild(fallback, this);
+                  };
+                } else {
+                  // Handle regular image URLs
+                  if (src && src.startsWith('//')) {
+                    newImg.src = 'https:' + src;
+                  } else if (src && src.startsWith('/')) {
+                    newImg.src = window.location.origin + src;
+                  } else {
+                    newImg.src = src;
+                  }
+                }
+                
+                // Add styling for better display
+                newImg.style.maxWidth = '100%';
+                newImg.style.height = 'auto';
+                newImg.style.display = 'block';
+                newImg.style.margin = '10px auto';
+                newImg.style.borderRadius = '8px';
+                newImg.style.cursor = 'pointer';
+                newImg.style.background = 'rgba(255,255,255,0.05)';
+                
+                // Add click handler to open image in new tab
+                newImg.addEventListener('click', function() {
+                  const originalSrc = this.dataset.originalSrc || this.src;
+                  if (originalSrc) {
+                    window.open(originalSrc, '_blank');
+                  }
+                });
+                
+                return newImg.outerHTML;
+              } else {
+                // Process other elements recursively
+                let result = `<${node.tagName.toLowerCase()}`;
+                
+                // Copy attributes
+                for (const attr of node.attributes) {
+                  result += ` ${attr.name}="${attr.value}"`;
+                }
+                
+                result += '>';
+                
+                // Process child nodes
+                for (const child of node.childNodes) {
+                  result += processNode(child);
+                }
+                
+                result += `</${node.tagName.toLowerCase()}>`;
+                return result;
+              }
+            }
+            return '';
+          };
+          
+          // Process all child nodes of the temporary div
+          let processedContent = '';
+          for (const child of tempDiv.childNodes) {
+            processedContent += processNode(child);
+          }
+          
+          // Sanitize and set the final content
+          partContent.innerHTML = DOMPurify.sanitize(processedContent, {
             ALLOWED_TAGS: ['img', 'p', 'br', 'strong', 'em', 'b', 'i', 'u', 'a', 'div', 'span'],
             ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style', 'font-style', 'font-size']
           });
-          
-          // Ensure images are displayed properly with .file handling
-          const images = partContent.querySelectorAll('img');
-          images.forEach(img => {
-            let src = img.getAttribute('src') || img.src;
-            
-            if (src && src.includes('.file')) {
-              img.dataset.originalSrc = src;
-              
-              if (src.startsWith('//')) {
-                src = 'https:' + src;
-              } else if (src.startsWith('/')) {
-                src = 'https://images.novelpia.com' + src;
-              }
-              
-              img.src = src;
-              
-              img.onerror = function() {
-                const fallback = document.createElement('div');
-                fallback.className = 'image-fallback';
-                fallback.innerHTML = `
-                  <div style="background: rgba(255,255,255,0.1); border: 1px dashed rgba(255,255,255,0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--text-secondary);">
-                    <span>📷 Image</span><br>
-                    <small>${src.split('/').pop()}</small><br>
-                    <button onclick="window.open('${src}', '_blank')" style="background: var(--accent-primary); color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-top: 8px; cursor: pointer;">Open Image</button>
-                  </div>
-                `;
-                img.parentNode.replaceChild(fallback, img);
-              };
-            } else {
-              if (src && src.startsWith('//')) {
-                img.src = 'https:' + src;
-              } else if (src && src.startsWith('/')) {
-                img.src = window.location.origin + src;
-              }
-            }
-            
-            img.style.maxWidth = '100%';
-            img.style.height = 'auto';
-            img.style.display = 'block';
-            img.style.margin = '10px auto';
-            img.style.borderRadius = '8px';
-            img.style.cursor = 'pointer';
-            
-            img.addEventListener('click', function() {
-              const originalSrc = this.dataset.originalSrc || this.src;
-              if (originalSrc) {
-                window.open(originalSrc, '_blank');
-              }
-            });
-          });
         } else {
+          // Process as markdown for plain text content without images
+          const escapedContent = escapeHtml(content);
           // Suppress link parsing by escaping [text](text) patterns
-          const contentWithoutLinks = escapeHtml(content).replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
-          partContent.innerHTML = DOMPurify.sanitize(marked.parse(contentWithoutLinks));
+          const contentWithoutLinks = escapedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
+          const markdownContent = marked.parse(contentWithoutLinks);
+          // Unescape HTML entities to convert < and > back to < and >
+          const unescapedContent = unescapeHtml(markdownContent);
+          partContent.innerHTML = DOMPurify.sanitize(unescapedContent);
         }
         chunkDiv.dataset.rawContent = effectiveRawContent;
       } else {
