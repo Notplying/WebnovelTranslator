@@ -3,7 +3,7 @@
   "version": "2.10.1",
   "browser_specific_settings": {
     "gecko": {
-      "id": "@extension-without-data-collection",
+      "id": "{4c5a03a4-c0a1-4978-b840-9cbd90a43e18}",
       "data_collection_permissions": {
         "required": ["none"]
       }
