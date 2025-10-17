@@ -95,6 +95,14 @@ async function initializeChunksPage() {
       });
     }
 
+    // Set up terminate request button event listener
+    const terminateRequestButton = document.getElementById('terminate-request-button');
+    if (terminateRequestButton) {
+      terminateRequestButton.addEventListener('click', () => {
+        terminateRequest();
+      });
+    }
+
     if (sessionChunks.length > 0) {
       // Restore stored chunks for this session
       sessionChunks.forEach((chunk, index) => {
@@ -151,6 +159,42 @@ async function reprocessAllChunks(chunks, prefix, suffix, retryCount) {
   }
 }
 
+async function terminateRequest() {
+  try {
+    const sessionId = getSessionId();
+    if (!sessionId) {
+      showError('No session ID found');
+      return;
+    }
+
+    showFeedback('Terminating request...', false);
+    
+    // Send termination message to background script
+    const response = await browser.runtime.sendMessage({
+      action: 'terminateRequest',
+      sessionId: sessionId
+    });
+    
+    if (response && response.success) {
+      showFeedback('Request terminated successfully!');
+      
+      // Reset streaming state
+      isStreaming = false;
+      streamingChunkId = null;
+      
+      // Update progress bar to show termination
+      updateAttemptProgress(0, 1, ProgressState.COMPLETED);
+      const progressText = document.getElementById('attempt-progress-text');
+      if (progressText) progressText.textContent = 'Request terminated';
+    } else {
+      showError('Failed to terminate request');
+    }
+  } catch (error) {
+    console.error('Error terminating request:', error);
+    showError('Error terminating request: ' + error.message);
+  }
+}
+
 function createChunkButtons(chunks, prefix, suffix) {
   const buttonContainer = document.querySelector('.button-container');
   chunks.forEach((chunk, index) => {
@@ -174,7 +218,8 @@ async function processStoredChunks(chunks, prefix, suffix, retryCount) {
         action: 'processChunk',
         chunk: chunks[i],
         prefix: prefix,
-        suffix: suffix
+        suffix: suffix,
+        sessionId: getSessionId()
       });
 
       if (response.error) {
@@ -1024,7 +1069,8 @@ async function reprocessChunk(index, rawContent) {
           action: 'processChunk',
           chunk: rawContent,
           prefix: prefix,
-          suffix: suffix
+          suffix: suffix,
+          sessionId: getSessionId()
         });
 
         if (result.error) {
@@ -1139,7 +1185,8 @@ async function reprocessChunk(index, rawContent) {
           action: 'processChunk',
           chunk: rawContent, // Send the original raw content for reprocessing
           prefix: prefix,
-          suffix: suffix
+          suffix: suffix,
+          sessionId: getSessionId()
         });
 
         if (result.error) throw new Error(result.error);
@@ -1867,9 +1914,20 @@ browser.runtime.onMessage.addListener((message) => {
           break;
       case 'showError':
           showError(message.errorContent, message.isFatal);
-          break;      case 'updateStreamContent':
+          break;
+      case 'updateStreamContent':
           console.log('Received streaming content update:', message.content);
-          updateStreamingChunk(message.content, message.rawContent, message.isInitial, message.isComplete);
+          if (message.terminated) {
+            // Handle terminated state
+            isStreaming = false;
+            streamingChunkId = null;
+            showFeedback('Request terminated by user');
+            updateAttemptProgress(0, 1, ProgressState.COMPLETED);
+            const progressText = document.getElementById('attempt-progress-text');
+            if (progressText) progressText.textContent = 'Request terminated';
+          } else {
+            updateStreamingChunk(message.content, message.rawContent, message.isInitial, message.isComplete);
+          }
           break;
   }
 });

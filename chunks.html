@@ -324,6 +324,14 @@
         background: rgba(245, 158, 11, 1);
       }
 
+      .terminate-button {
+        background: rgba(239, 68, 68, 0.9);
+      }
+
+      .terminate-button:hover {
+        background: rgba(239, 68, 68, 1);
+      }
+
       .part-buttons {
         display: flex;
         gap: 8px;
@@ -632,6 +640,7 @@
       </div>
       <div class="button-container" style="margin-top: 10px;">
         <button id="reprocess-all-button" class="button" style="background: rgba(245, 158, 11, 0.9); min-width: 200px;">Reprocess All Chunks</button>
+        <button id="terminate-request-button" class="button terminate-button" style="min-width: 200px;">Terminate Request</button>
       </div>
       <div id="incomplete-session-warning" class="alert alert-warning" style="display: none; margin: 20px 0; padding: 15px; border-radius: 8px; background: rgba(245, 158, 11, 0.1); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">
         <strong>Process was interrupted before finishing!</strong> Please reprocess all chunks, or clear all results from the settings.
