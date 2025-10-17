@@ -1,9 +1,9 @@
 {  "manifest_version": 2,
-  "name": "AI Webnovel Translator Experimental",
+  "name": "AI Webnovel Translator",
   "version": "2.10.2",
   "browser_specific_settings": {
     "gecko": {
-      "id": "{4c5a03a4-c0a1-4978-b840-9cbd90a43e18}",
+      "id": "{5be2f011-6da9-4c6f-a1ac-4c628584e78d}",
       "data_collection_permissions": {
         "required": ["none"]
       }
