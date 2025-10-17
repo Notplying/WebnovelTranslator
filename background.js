@@ -924,7 +924,7 @@ async function processChunkWithOpenRouter(message, options) {
             throw error;
           }
         }        // Ensure final content is delivered before returning
-        updateChunksPage({
+        updateChunksPage(sessionId, {
           action: 'updateStreamContent',
           content: fullContent,
           rawContent: message.chunk,
