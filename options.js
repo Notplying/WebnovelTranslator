@@ -57,6 +57,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const vertexSettings = document.getElementById('vertex-settings');
   const openRouterSettings = document.getElementById('openRouter-settings');
   const openaiSettings = document.getElementById('openai-settings');
+  const glmCodingSettings = document.getElementById('glmCoding-settings');
 
   // Toggle visibility of API-specific settings
   apiTypeElement.addEventListener('change', function () {
@@ -64,6 +65,7 @@ document.addEventListener('DOMContentLoaded', function () {
     vertexSettings.style.display = 'none';
     openRouterSettings.style.display = 'none';
     openaiSettings.style.display = 'none';
+    glmCodingSettings.style.display = 'none';
 
     if (apiTypeElement.value === 'gemini') {
       geminiSettings.style.display = 'block';
@@ -73,6 +75,8 @@ document.addEventListener('DOMContentLoaded', function () {
       openRouterSettings.style.display = 'block';
     } else if (apiTypeElement.value === 'openai') {
       openaiSettings.style.display = 'block';
+    } else if (apiTypeElement.value === 'glmCoding') {
+      glmCodingSettings.style.display = 'block';
     }
   });
 
@@ -94,7 +98,7 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('project-id').value = options.vertexProjectId || '';
     document.getElementById('model-id').value = options.vertexModelId || 'gemini-1.5-flash-002';
     document.getElementById('openRouter-api-key').value = options.openRouterApiKey || '';
-    document.getElementById('openRouter-model-id').value = options.openRouterModelId || 'deepseek/deepseek-chat-v3-0324:free';
+    document.getElementById('openRouter-model-id').value = options.openRouterModelId || 'deepseek/deepseek-chat-v3-0324';
     document.getElementById('openRouter-max-tokens').value = options.openRouterMaxTokens || '';
     document.getElementById('openRouter-context-window').value = options.openRouterContextWindow || '';
     document.getElementById('openRouter-stream').value = options.openRouterStream !== false ? 'true' : 'false';
@@ -107,6 +111,13 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('openai-max-tokens').value = options.openaiMaxTokens || '';
     document.getElementById('openai-context-window').value = options.openaiContextWindow || '';
     document.getElementById('openai-stream').value = options.openaiStream !== false ? 'true' : 'false';
+    
+    // GLM Coding Plan settings
+    document.getElementById('glmCoding-api-key').value = options.glmCodingApiKey || '';
+    document.getElementById('glmCoding-model-id').value = options.glmCodingModelId || 'GLM-5-air';
+    document.getElementById('glmCoding-max-tokens').value = options.glmCodingMaxTokens || '';
+    document.getElementById('glmCoding-context-window').value = options.glmCodingContextWindow || '';
+    document.getElementById('glmCoding-stream').value = options.glmCodingStream !== false ? 'true' : 'false';
     
     document.getElementById('gemini-api-key').value = options.geminiApiKey || '';
     document.getElementById('gemini-model-id').value = options.geminiModelId || 'gemini-2.0-flash-001';
@@ -165,6 +176,11 @@ document.addEventListener('DOMContentLoaded', function () {
       geminiContextWindow: document.getElementById('gemini-context-window').value,
       geminiStream: document.getElementById('gemini-stream').value === 'true',
       vertexStream: document.getElementById('vertex-stream').value === 'true',
+      glmCodingApiKey: document.getElementById('glmCoding-api-key').value,
+      glmCodingModelId: document.getElementById('glmCoding-model-id').value,
+      glmCodingMaxTokens: document.getElementById('glmCoding-max-tokens').value,
+      glmCodingContextWindow: document.getElementById('glmCoding-context-window').value,
+      glmCodingStream: document.getElementById('glmCoding-stream').value === 'true',
       maxSessions: parseInt(document.getElementById('max-sessions').value) || 3
     };
 
@@ -278,7 +294,7 @@ document.addEventListener('DOMContentLoaded', function () {
         openRouterApiKey: "",
         openRouterSiteUrl: "",
         openRouterSiteName: "",
-        openRouterModelId: "deepseek/deepseek-chat-v3-0324:free",
+        openRouterModelId: "deepseek/deepseek-chat-v3-0324",
         openRouterMaxTokens: "",
         openRouterContextWindow: "",
         openRouterStream: true,
@@ -290,6 +306,11 @@ document.addEventListener('DOMContentLoaded', function () {
         openaiContextWindow: "",
         openaiBaseUrl: "https://api.openai.com/v1",
         openaiStream: true,
+        glmCodingApiKey: "",
+        glmCodingModelId: "GLM-4.5-air",
+        glmCodingMaxTokens: "",
+        glmCodingContextWindow: "",
+        glmCodingStream: true,
         maxSessions: 3
       };
 

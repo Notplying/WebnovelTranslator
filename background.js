@@ -42,7 +42,7 @@ browser.runtime.onInstalled.addListener(function (details) {
       vertexContextWindow: "", // Default Vertex context window (empty = use model default)
       vertexStream: true, // Default Vertex stream
       openRouterApiKey: "", // Default OpenRouter API key (empty)
-      openRouterModelId: "deepseek/deepseek-chat-v3-0324:free", // Default OpenRouter model
+      openRouterModelId: "deepseek/deepseek-chat-v3-0324", // Default OpenRouter model
       openRouterMaxTokens: "", // Default OpenRouter max output tokens (empty = use model default)
       openRouterContextWindow: "", // Default OpenRouter context window (empty = use model default)
       openRouterStream: true, // Default OpenRouter stream
@@ -53,7 +53,12 @@ browser.runtime.onInstalled.addListener(function (details) {
       openaiMaxTokens: "", // Default OpenAI max output tokens (empty = use model default)
       openaiContextWindow: "", // Default OpenAI context window (empty = use model default)
       openaiBaseUrl: "https://api.openai.com/v1", // Default OpenAI base URL
-      openaiStream: true // Default OpenAI stream
+      openaiStream: true, // Default OpenAI stream
+      glmCodingApiKey: "", // Default GLM Coding Plan API key (empty)
+      glmCodingModelId: "GLM-4.5-air", // Default GLM Coding Plan model
+      glmCodingMaxTokens: "", // Default GLM Coding Plan max output tokens (empty = use model default)
+      glmCodingContextWindow: "", // Default GLM Coding Plan context window (empty = use model default)
+      glmCodingStream: true // Default GLM Coding Plan stream
     });
   }
 });
@@ -315,6 +320,8 @@ async function processChunk(message) {
     return processChunkWithOpenRouter(message, options);
   } else if (options.apiType === 'openai') {
     return processChunkWithOpenAI(message, options);
+  } else if (options.apiType === 'glmCoding') {
+    return processChunkWithGLMCoding(message, options);
   } else {
     throw new Error('Invalid API type selected');
   }
@@ -1207,5 +1214,246 @@ async function processChunkWithOpenAI(message, options) {
     }
     
     return { error: `Error processing chunk with OpenAI API: ${error.message}` };
+  }
+}
+
+async function processChunkWithGLMCoding(message, options) {
+  // Initialize variables outside of try block so they are available in catch block
+  let tabCloseListener;
+  let fullContent = '';
+  let controller = new AbortController();
+  const sessionId = message.sessionId;
+  
+  // Store the controller for this session to allow termination
+  sessionControllers[sessionId] = controller;
+  
+  try {
+    // Set up tab close listener to abort request
+    tabCloseListener = (tabId) => {
+      if (tabId === sessionTabIds[sessionId]) {
+        console.log(`Chunks tab for session ${sessionId} closed, aborting GLM Coding Plan request`);
+        controller.abort();
+        browser.tabs.onRemoved.removeListener(tabCloseListener);
+        delete sessionTabIds[sessionId]; // Clean up the session tracking
+      }
+    };
+    browser.tabs.onRemoved.addListener(tabCloseListener);
+    
+    // Initialize progress bar first to prevent "processing error" text
+    if (options.glmCodingStream !== false) {
+      updateChunksPage(sessionId, {
+        action: 'updateStreamContent',
+        content: '',
+        rawContent: message.chunk,
+        isInitial: true // Flag to indicate this is the initial update
+      });
+    }
+    
+    const requestBody = {
+      model: options.glmCodingModelId || 'GLM-4.5-air',
+      messages: [
+        {
+          role: 'user',
+          content: `${message.prefix}\n${message.chunk}\n${message.suffix}`,
+        },
+      ],
+      stream: options.glmCodingStream !== false,
+      extra_body: {
+        "thinking": {
+          "type": "disabled",
+        },
+      }
+    };
+
+    // Add max_tokens only if provided and valid
+    if (options.glmCodingMaxTokens && options.glmCodingMaxTokens.trim() !== '') {
+      const maxTokens = parseInt(options.glmCodingMaxTokens);
+      if (!isNaN(maxTokens) && maxTokens > 0) {
+        requestBody.max_tokens = maxTokens;
+      }
+    }
+
+    // Add temperature only if provided and valid
+    if (options.temperature && options.temperature.trim() !== '') {
+      const temperature = parseFloat(options.temperature);
+      if (!isNaN(temperature) && temperature >= 0 && temperature <= 2) {
+        requestBody.temperature = temperature;
+      }
+    }
+
+    // Add top_p only if provided and valid
+    if (options.topP && options.topP.trim() !== '') {
+      const topP = parseFloat(options.topP);
+      if (!isNaN(topP) && topP >= 0 && topP <= 1) {
+        requestBody.top_p = topP;
+      }
+    }
+
+    const response = await fetch('https://api.z.ai/api/coding/paas/v4/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${options.glmCodingApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => `HTTP error! status: ${response.status}`);
+      let parsedError;
+      try { parsedError = JSON.parse(errorText); } catch (e) { /* ignore */ }
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      if (parsedError && parsedError.error && parsedError.error.message) {
+        errorMessage += `, message: ${parsedError.error.message}`;
+      } else {
+        errorMessage += `, body: ${errorText.substring(0, 200)}`;
+      }
+      throw new Error(errorMessage);
+    }
+
+    if (!options.glmCodingStream) {
+      // Non-streaming mode
+      const responseData = await response.json();
+      console.log('Parsed GLM Coding Plan response:', JSON.stringify(responseData, null, 2));
+
+      if (!responseData.choices || !responseData.choices[0] || !responseData.choices[0].message) {
+        throw new Error('Unexpected response structure from GLM Coding Plan API: ' + JSON.stringify(responseData));
+      }
+
+      return { result: responseData.choices[0].message.content };
+    } else {
+      // Streaming mode
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('Response body is not readable');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      try {
+        while (true) {
+          try {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            // Append new chunk to buffer
+            buffer += decoder.decode(value, { stream: true });
+
+            // Process complete lines from buffer
+            while (true) {
+              const lineEnd = buffer.indexOf('\n');
+              if (lineEnd === -1) break;
+
+              const line = buffer.slice(0, lineEnd).trim();
+              buffer = buffer.slice(lineEnd + 1);
+
+              if (line.startsWith('data: ')) {
+                const data = line.slice(6);
+                if (data === '[DONE]') break;
+
+                try {
+                  const parsed = JSON.parse(data);
+                  const content = parsed.choices[0]?.delta?.content;
+                  
+                  if (content) {
+                    fullContent += content;
+                    
+                    // Debounce the UI updates
+                    const now = Date.now();
+                    if (now - lastUpdateTime >= UPDATE_DELAY) {
+                      clearTimeout(debounceTimeout);
+                      updateChunksPage(sessionId, {
+                        action: 'updateStreamContent',
+                        content: fullContent,
+                        rawContent: message.chunk
+                      });
+                      lastUpdateTime = now;
+                    } else {
+                      clearTimeout(debounceTimeout);
+                      debounceTimeout = setTimeout(() => {
+                        updateChunksPage(sessionId, {
+                          action: 'updateStreamContent',
+                          content: fullContent,
+                          rawContent: message.chunk
+                        });
+                        lastUpdateTime = Date.now();
+                      }, UPDATE_DELAY);
+                    }
+                  }
+                } catch (e) {
+                  // Ignore invalid JSON
+                  console.log('Error parsing JSON:', e);
+                }
+              }
+            }
+          } catch (error) {
+            if (error.name === 'AbortError') {
+              console.log('GLM Coding Plan stream aborted');
+              break;
+            }
+            throw error;
+          }
+        }
+        
+        // Ensure final content is delivered before returning
+        updateChunksPage(sessionId, {
+          action: 'updateStreamContent',
+          content: fullContent,
+          rawContent: message.chunk,
+          isComplete: true // Flag to indicate this is the final update
+        });
+        // Small delay to ensure UI updates before returning
+        await new Promise(resolve => setTimeout(resolve, 100));
+        lastUpdateTime = Date.now();
+        return { result: fullContent, streaming: true, complete: true };
+      } finally {
+        reader.cancel();
+        clearTimeout(debounceTimeout); // Clean up any pending debounce timeout
+        // Clean up the controller reference
+        delete sessionControllers[sessionId];
+      }
+    }
+  } catch (error) {
+    console.error('Detailed error in processChunkWithGLMCoding:', error);
+    // Remove tab close listener if it exists
+    if (tabCloseListener) {
+      browser.tabs.onRemoved.removeListener(tabCloseListener);
+    }
+    // Clean up the controller reference on error
+    delete sessionControllers[sessionId];
+    
+    if (error.name === 'AbortError') {
+      // Ensure any pending content is delivered before returning error
+      if (fullContent) {
+        updateChunksPage(sessionId, {
+          action: 'updateStreamContent',
+          content: fullContent,
+          rawContent: message.chunk,
+          isComplete: true
+        });
+      }
+      return { error: 'GLM Coding Plan request cancelled - chunks page was closed' };
+    }
+    
+    // Even for errors, make sure to signal completion to fix the progress bar
+    updateChunksPage(sessionId, {
+      action: 'updateStreamContent',
+      content: fullContent || '',
+      rawContent: message.chunk,
+      isComplete: true
+    });
+    
+    // For any errors related to GLM Coding Plan, provide specific error message
+    if (error.message.includes('401')) {
+      return { error: 'GLM Coding Plan API: Invalid API key or authentication failed' };
+    } else if (error.message.includes('429')) {
+      return { error: 'GLM Coding Plan API: Rate limit exceeded. Please try again later.' };
+    } else if (error.message.includes('404')) {
+      return { error: 'GLM Coding Plan API: Model not found or invalid endpoint' };
+    }
+    
+    return { error: `Error processing chunk with GLM Coding Plan API: ${error.message}` };
   }
 }

@@ -592,134 +592,141 @@ function createPartContent(content, isActive, partIndex) {
   const hasImages = htmlContent.includes('<img');
   
   if (hasImages) {
-    // For content with images, we need to process it differently to preserve image positions
-    // Create a temporary DOM element to parse the original HTML
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = htmlContent;
+    // For content with images, let's try a simpler approach
+    // First, let's process the entire content as markdown to see what happens
+    const escapedContent = escapeHtml(htmlContent);
+    const markdownContent = marked.parse(escapedContent);
+    const unescapedContent = unescapeHtml(markdownContent);
     
-    // Process text nodes while preserving image elements
-    const processNode = (node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        // Process text nodes as markdown
-        const textContent = node.textContent;
-        if (textContent.trim()) {
-          const escapedContent = escapeHtml(textContent);
-          // Suppress link parsing by escaping [text](text) patterns
-          const contentWithoutLinks = escapedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
-          const markdownContent = marked.parse(contentWithoutLinks);
-          // Unescape HTML entities to convert < and > back to < and >
-          const unescapedContent = unescapeHtml(markdownContent);
-          return unescapedContent;
+    // Now let's check if images are still present in the markdown output
+    if (unescapedContent.includes('<img')) {
+      // If images are preserved, just use the markdown output
+      partContent.innerHTML = unescapedContent;
+    } else {
+      // If images are lost, we need to handle them differently
+      // Create a temporary DOM element to parse the original HTML
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = htmlContent;
+      
+      // Process text nodes while preserving image elements
+      const processNode = (node) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+          // Process text nodes as markdown
+          const textContent = node.textContent;
+          if (textContent.trim()) {
+            const escapedContent = escapeHtml(textContent);
+            // Apply markdown parsing (without suppressing links)
+            const markdownContent = marked.parse(escapedContent);
+            // Unescape HTML entities to convert < and > back to < and >
+            const unescapedContent = unescapeHtml(markdownContent);
+            return unescapedContent;
+          }
+          return '';
+        } else if (node.nodeType === Node.ELEMENT_NODE) {
+          if (node.tagName.toLowerCase() === 'img') {
+            // Process image elements
+            let src = node.getAttribute('src') || node.src;
+            const alt = node.getAttribute('alt') || '';
+            
+            // Create a new image element with proper styling
+            const newImg = document.createElement('img');
+            newImg.alt = alt;
+            
+            if (src && src.includes('.file')) {
+              // Handle .file extension images
+              newImg.dataset.originalSrc = src;
+              
+              // Convert relative URLs to absolute
+              if (src.startsWith('//')) {
+                src = 'https:' + src;
+              } else if (src.startsWith('/')) {
+                src = 'https://images.novelpia.com' + src;
+              }
+              
+              newImg.src = src;
+              
+              // Add error handling for failed loads
+              newImg.onerror = function() {
+                const fallback = document.createElement('div');
+                fallback.className = 'image-fallback';
+                fallback.innerHTML = `
+                  <div style="background: rgba(255,255,255,0.1); border: 1px dashed rgba(255,255,255,0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--text-secondary);">
+                    <span>📷 Image</span><br>
+                    <small>${src.split('/').pop()}</small><br>
+                    <button onclick="window.open('${src}', '_blank')" style="background: var(--accent-primary); color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-top: 8px; cursor: pointer;">Open Image</button>
+                  </div>
+                `;
+                this.parentNode.replaceChild(fallback, this);
+              };
+            } else {
+              // Handle regular image URLs
+              if (src && src.startsWith('//')) {
+                newImg.src = 'https:' + src;
+              } else if (src && src.startsWith('/')) {
+                newImg.src = window.location.origin + src;
+              } else {
+                newImg.src = src;
+              }
+            }
+            
+            // Add styling for better display
+            newImg.style.maxWidth = '100%';
+            newImg.style.height = 'auto';
+            newImg.style.display = 'block';
+            newImg.style.margin = '10px auto';
+            newImg.style.borderRadius = '8px';
+            newImg.style.cursor = 'pointer';
+            newImg.style.background = 'rgba(255,255,255,0.05)';
+            
+            // Add click handler to open image in new tab
+            newImg.addEventListener('click', function() {
+              const originalSrc = this.dataset.originalSrc || this.src;
+              if (originalSrc) {
+                window.open(originalSrc, '_blank');
+              }
+            });
+            
+            return newImg.outerHTML;
+          } else {
+            // Process other elements recursively
+            let result = `<${node.tagName.toLowerCase()}`;
+            
+            // Copy attributes
+            for (const attr of node.attributes) {
+              result += ` ${attr.name}="${attr.value}"`;
+            }
+            
+            result += '>';
+            
+            // Process child nodes
+            for (const child of node.childNodes) {
+              result += processNode(child);
+            }
+            
+            result += `</${node.tagName.toLowerCase()}>`;
+            return result;
+          }
         }
         return '';
-      } else if (node.nodeType === Node.ELEMENT_NODE) {
-        if (node.tagName.toLowerCase() === 'img') {
-          // Process image elements
-          let src = node.getAttribute('src') || node.src;
-          const alt = node.getAttribute('alt') || '';
-          
-          // Create a new image element with proper styling
-          const newImg = document.createElement('img');
-          newImg.alt = alt;
-          
-          if (src && src.includes('.file')) {
-            // Handle .file extension images
-            newImg.dataset.originalSrc = src;
-            
-            // Convert relative URLs to absolute
-            if (src.startsWith('//')) {
-              src = 'https:' + src;
-            } else if (src.startsWith('/')) {
-              src = 'https://images.novelpia.com' + src;
-            }
-            
-            newImg.src = src;
-            
-            // Add error handling for failed loads
-            newImg.onerror = function() {
-              const fallback = document.createElement('div');
-              fallback.className = 'image-fallback';
-              fallback.innerHTML = `
-                <div style="background: rgba(255,255,255,0.1); border: 1px dashed rgba(255,255,255,0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--text-secondary);">
-                  <span>📷 Image</span><br>
-                  <small>${src.split('/').pop()}</small><br>
-                  <button onclick="window.open('${src}', '_blank')" style="background: var(--accent-primary); color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-top: 8px; cursor: pointer;">Open Image</button>
-                </div>
-              `;
-              this.parentNode.replaceChild(fallback, this);
-            };
-          } else {
-            // Handle regular image URLs
-            if (src && src.startsWith('//')) {
-              newImg.src = 'https:' + src;
-            } else if (src && src.startsWith('/')) {
-              newImg.src = window.location.origin + src;
-            } else {
-              newImg.src = src;
-            }
-          }
-          
-          // Add styling for better display
-          newImg.style.maxWidth = '100%';
-          newImg.style.height = 'auto';
-          newImg.style.display = 'block';
-          newImg.style.margin = '10px auto';
-          newImg.style.borderRadius = '8px';
-          newImg.style.cursor = 'pointer';
-          newImg.style.background = 'rgba(255,255,255,0.05)';
-          
-          // Add click handler to open image in new tab
-          newImg.addEventListener('click', function() {
-            const originalSrc = this.dataset.originalSrc || this.src;
-            if (originalSrc) {
-              window.open(originalSrc, '_blank');
-            }
-          });
-          
-          return newImg.outerHTML;
-        } else {
-          // Process other elements recursively
-          let result = `<${node.tagName.toLowerCase()}`;
-          
-          // Copy attributes
-          for (const attr of node.attributes) {
-            result += ` ${attr.name}="${attr.value}"`;
-          }
-          
-          result += '>';
-          
-          // Process child nodes
-          for (const child of node.childNodes) {
-            result += processNode(child);
-          }
-          
-          result += `</${node.tagName.toLowerCase()}>`;
-          return result;
-        }
+      };
+      
+      // Process all child nodes of the temporary div
+      let processedContent = '';
+      for (const child of tempDiv.childNodes) {
+        processedContent += processNode(child);
       }
-      return '';
-    };
-    
-    // Process all child nodes of the temporary div
-    let processedContent = '';
-    for (const child of tempDiv.childNodes) {
-      processedContent += processNode(child);
+      
+      // Set the content without sanitization for testing
+      partContent.innerHTML = processedContent;
     }
-    
-    // Sanitize and set the final content
-    partContent.innerHTML = DOMPurify.sanitize(processedContent, {
-      ALLOWED_TAGS: ['img', 'p', 'br', 'strong', 'em', 'b', 'i', 'u', 'a', 'div', 'span'],
-      ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style', 'font-style', 'font-size']
-    });
   } else {
     // Process as markdown for plain text content without images
     const escapedContent = escapeHtml(htmlContent);
-    // Suppress link parsing by escaping [text](text) patterns
-    const contentWithoutLinks = escapedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
-    const markdownContent = marked.parse(contentWithoutLinks);
+    // Apply markdown parsing (without suppressing links)
+    const markdownContent = marked.parse(escapedContent);
     // Unescape HTML entities to convert < and > back to < and >
     const unescapedContent = unescapeHtml(markdownContent);
-    partContent.innerHTML = DOMPurify.sanitize(unescapedContent);
+    partContent.innerHTML = unescapedContent;
   }
   
   return partContent;
@@ -1333,134 +1340,141 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
           const hasImages = content.includes('<img');
           
           if (hasImages) {
-            // For content with images, we need to process it differently to preserve image positions
-            // Create a temporary DOM element to parse the original HTML
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = content;
+            // For content with images, let's try a simpler approach
+            // First, let's process the entire content as markdown to see what happens
+            const escapedContent = escapeHtml(content);
+            const markdownContent = marked.parse(escapedContent);
+            const unescapedContent = unescapeHtml(markdownContent);
             
-            // Process text nodes while preserving image elements
-            const processNode = (node) => {
-              if (node.nodeType === Node.TEXT_NODE) {
-                // Process text nodes as markdown
-                const textContent = node.textContent;
-                if (textContent.trim()) {
-                  const escapedContent = escapeHtml(textContent);
-                  // Suppress link parsing by escaping [text](text) patterns
-                  const contentWithoutLinks = escapedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
-                  const markdownContent = marked.parse(contentWithoutLinks);
-                  // Unescape HTML entities to convert < and > back to < and >
-                  const unescapedContent = unescapeHtml(markdownContent);
-                  return unescapedContent;
+            // Now let's check if images are still present in the markdown output
+            if (unescapedContent.includes('<img')) {
+              // If images are preserved, just use the markdown output
+              partContent.innerHTML = unescapedContent;
+            } else {
+              // If images are lost, we need to handle them differently
+              // Create a temporary DOM element to parse the original HTML
+              const tempDiv = document.createElement('div');
+              tempDiv.innerHTML = content;
+              
+              // Process text nodes while preserving image elements
+              const processNode = (node) => {
+                if (node.nodeType === Node.TEXT_NODE) {
+                  // Process text nodes as markdown
+                  const textContent = node.textContent;
+                  if (textContent.trim()) {
+                    const escapedContent = escapeHtml(textContent);
+                    // Apply markdown parsing (without suppressing links)
+                    const markdownContent = marked.parse(escapedContent);
+                    // Unescape HTML entities to convert < and > back to < and >
+                    const unescapedContent = unescapeHtml(markdownContent);
+                    return unescapedContent;
+                  }
+                  return '';
+                } else if (node.nodeType === Node.ELEMENT_NODE) {
+                  if (node.tagName.toLowerCase() === 'img') {
+                    // Process image elements
+                    let src = node.getAttribute('src') || node.src;
+                    const alt = node.getAttribute('alt') || '';
+                    
+                    // Create a new image element with proper styling
+                    const newImg = document.createElement('img');
+                    newImg.alt = alt;
+                    
+                    if (src && src.includes('.file')) {
+                      // Handle .file extension images
+                      newImg.dataset.originalSrc = src;
+                      
+                      // Convert relative URLs to absolute
+                      if (src.startsWith('//')) {
+                        src = 'https:' + src;
+                      } else if (src.startsWith('/')) {
+                        src = 'https://images.novelpia.com' + src;
+                      }
+                      
+                      newImg.src = src;
+                      
+                      // Add error handling for failed loads
+                      newImg.onerror = function() {
+                        const fallback = document.createElement('div');
+                        fallback.className = 'image-fallback';
+                        fallback.innerHTML = `
+                          <div style="background: rgba(255,255,255,0.1); border: 1px dashed rgba(255,255,255,0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--text-secondary);">
+                            <span>📷 Image</span><br>
+                            <small>${src.split('/').pop()}</small><br>
+                            <button onclick="window.open('${src}', '_blank')" style="background: var(--accent-primary); color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-top: 8px; cursor: pointer;">Open Image</button>
+                          </div>
+                        `;
+                        this.parentNode.replaceChild(fallback, this);
+                      };
+                    } else {
+                      // Handle regular image URLs
+                      if (src && src.startsWith('//')) {
+                        newImg.src = 'https:' + src;
+                      } else if (src && src.startsWith('/')) {
+                        newImg.src = window.location.origin + src;
+                      } else {
+                        newImg.src = src;
+                      }
+                    }
+                    
+                    // Add styling for better display
+                    newImg.style.maxWidth = '100%';
+                    newImg.style.height = 'auto';
+                    newImg.style.display = 'block';
+                    newImg.style.margin = '10px auto';
+                    newImg.style.borderRadius = '8px';
+                    newImg.style.cursor = 'pointer';
+                    newImg.style.background = 'rgba(255,255,255,0.05)';
+                    
+                    // Add click handler to open image in new tab
+                    newImg.addEventListener('click', function() {
+                      const originalSrc = this.dataset.originalSrc || this.src;
+                      if (originalSrc) {
+                        window.open(originalSrc, '_blank');
+                      }
+                    });
+                    
+                    return newImg.outerHTML;
+                  } else {
+                    // Process other elements recursively
+                    let result = `<${node.tagName.toLowerCase()}`;
+                    
+                    // Copy attributes
+                    for (const attr of node.attributes) {
+                      result += ` ${attr.name}="${attr.value}"`;
+                    }
+                    
+                    result += '>';
+                    
+                    // Process child nodes
+                    for (const child of node.childNodes) {
+                      result += processNode(child);
+                    }
+                    
+                    result += `</${node.tagName.toLowerCase()}>`;
+                    return result;
+                  }
                 }
                 return '';
-              } else if (node.nodeType === Node.ELEMENT_NODE) {
-                if (node.tagName.toLowerCase() === 'img') {
-                  // Process image elements
-                  let src = node.getAttribute('src') || node.src;
-                  const alt = node.getAttribute('alt') || '';
-                  
-                  // Create a new image element with proper styling
-                  const newImg = document.createElement('img');
-                  newImg.alt = alt;
-                  
-                  if (src && src.includes('.file')) {
-                    // Handle .file extension images
-                    newImg.dataset.originalSrc = src;
-                    
-                    // Convert relative URLs to absolute
-                    if (src.startsWith('//')) {
-                      src = 'https:' + src;
-                    } else if (src.startsWith('/')) {
-                      src = 'https://images.novelpia.com' + src;
-                    }
-                    
-                    newImg.src = src;
-                    
-                    // Add error handling for failed loads
-                    newImg.onerror = function() {
-                      const fallback = document.createElement('div');
-                      fallback.className = 'image-fallback';
-                      fallback.innerHTML = `
-                        <div style="background: rgba(255,255,255,0.1); border: 1px dashed rgba(255,255,255,0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--text-secondary);">
-                          <span>📷 Image</span><br>
-                          <small>${src.split('/').pop()}</small><br>
-                          <button onclick="window.open('${src}', '_blank')" style="background: var(--accent-primary); color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-top: 8px; cursor: pointer;">Open Image</button>
-                        </div>
-                      `;
-                      this.parentNode.replaceChild(fallback, this);
-                    };
-                  } else {
-                    // Handle regular image URLs
-                    if (src && src.startsWith('//')) {
-                      newImg.src = 'https:' + src;
-                    } else if (src && src.startsWith('/')) {
-                      newImg.src = window.location.origin + src;
-                    } else {
-                      newImg.src = src;
-                    }
-                  }
-                  
-                  // Add styling for better display
-                  newImg.style.maxWidth = '100%';
-                  newImg.style.height = 'auto';
-                  newImg.style.display = 'block';
-                  newImg.style.margin = '10px auto';
-                  newImg.style.borderRadius = '8px';
-                  newImg.style.cursor = 'pointer';
-                  newImg.style.background = 'rgba(255,255,255,0.05)';
-                  
-                  // Add click handler to open image in new tab
-                  newImg.addEventListener('click', function() {
-                    const originalSrc = this.dataset.originalSrc || this.src;
-                    if (originalSrc) {
-                      window.open(originalSrc, '_blank');
-                    }
-                  });
-                  
-                  return newImg.outerHTML;
-                } else {
-                  // Process other elements recursively
-                  let result = `<${node.tagName.toLowerCase()}`;
-                  
-                  // Copy attributes
-                  for (const attr of node.attributes) {
-                    result += ` ${attr.name}="${attr.value}"`;
-                  }
-                  
-                  result += '>';
-                  
-                  // Process child nodes
-                  for (const child of node.childNodes) {
-                    result += processNode(child);
-                  }
-                  
-                  result += `</${node.tagName.toLowerCase()}>`;
-                  return result;
-                }
+              };
+              
+              // Process all child nodes of the temporary div
+              let processedContent = '';
+              for (const child of tempDiv.childNodes) {
+                processedContent += processNode(child);
               }
-              return '';
-            };
-            
-            // Process all child nodes of the temporary div
-            let processedContent = '';
-            for (const child of tempDiv.childNodes) {
-              processedContent += processNode(child);
+              
+              // Set the content without sanitization for testing
+              partContent.innerHTML = processedContent;
             }
-            
-            // Sanitize and set the final content
-            partContent.innerHTML = DOMPurify.sanitize(processedContent, {
-              ALLOWED_TAGS: ['img', 'p', 'br', 'strong', 'em', 'b', 'i', 'u', 'a', 'div', 'span'],
-              ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style', 'font-style', 'font-size']
-            });
           } else {
             // Process as markdown for plain text content without images
             const escapedContent = escapeHtml(content);
-            // Suppress link parsing by escaping [text](text) patterns
-            const contentWithoutLinks = escapedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
-            const markdownContent = marked.parse(contentWithoutLinks);
+            // Apply markdown parsing (without suppressing links)
+            const markdownContent = marked.parse(escapedContent);
             // Unescape HTML entities to convert < and > back to < and >
             const unescapedContent = unescapeHtml(markdownContent);
-            partContent.innerHTML = DOMPurify.sanitize(unescapedContent);
+            partContent.innerHTML = unescapedContent;
           }
           
           chunkDiv.dataset.rawContent = effectiveRawContent;
@@ -1549,168 +1563,18 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
       const hasImages = content.includes('<img');
       
       if (hasImages) {
-        // For content with images, we need to process it differently to preserve image positions
-        // Create a temporary DOM element to parse the original HTML
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = content;
-        
-        // Process text nodes while preserving image elements
-        const processNode = (node) => {
-          if (node.nodeType === Node.TEXT_NODE) {
-            // Process text nodes as markdown
-            const textContent = node.textContent;
-            if (textContent.trim()) {
-              const escapedContent = escapeHtml(textContent);
-              // Suppress link parsing by escaping [text](text) patterns
-              const contentWithoutLinks = escapedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
-              const markdownContent = marked.parse(contentWithoutLinks);
-              // Unescape HTML entities to convert < and > back to < and >
-              const unescapedContent = unescapeHtml(markdownContent);
-              return unescapedContent;
-            }
-            return '';
-          } else if (node.nodeType === Node.ELEMENT_NODE) {
-            if (node.tagName.toLowerCase() === 'img') {
-              // Process image elements
-              let src = node.getAttribute('src') || node.src;
-              const alt = node.getAttribute('alt') || '';
-              
-              // Create a new image element with proper styling
-              const newImg = document.createElement('img');
-              newImg.alt = alt;
-              
-              if (src && src.includes('.file')) {
-                // Handle .file extension images
-                newImg.dataset.originalSrc = src;
-                
-                // Convert relative URLs to absolute
-                if (src.startsWith('//')) {
-                  src = 'https:' + src;
-                } else if (src.startsWith('/')) {
-                  src = 'https://images.novelpia.com' + src;
-                }
-                
-                newImg.src = src;
-                
-                // Add error handling for failed loads
-                newImg.onerror = function() {
-                  const fallback = document.createElement('div');
-                  fallback.className = 'image-fallback';
-                  fallback.innerHTML = `
-                    <div style="background: rgba(255,255,255,0.1); border: 1px dashed rgba(255,255,255,0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--text-secondary);">
-                      <span>📷 Image</span><br>
-                      <small>${src.split('/').pop()}</small><br>
-                      <button onclick="window.open('${src}', '_blank')" style="background: var(--accent-primary); color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-top: 8px; cursor: pointer;">Open Image</button>
-                    </div>
-                  `;
-                  this.parentNode.replaceChild(fallback, this);
-                };
-              } else {
-                // Handle regular image URLs
-                if (src && src.startsWith('//')) {
-                  newImg.src = 'https:' + src;
-                } else if (src && src.startsWith('/')) {
-                  newImg.src = window.location.origin + src;
-                } else {
-                  newImg.src = src;
-                }
-              }
-              
-              // Add styling for better display
-              newImg.style.maxWidth = '100%';
-              newImg.style.height = 'auto';
-              newImg.style.display = 'block';
-              newImg.style.margin = '10px auto';
-              newImg.style.borderRadius = '8px';
-              newImg.style.cursor = 'pointer';
-              newImg.style.background = 'rgba(255,255,255,0.05)';
-              
-              // Add click handler to open image in new tab
-              newImg.addEventListener('click', function() {
-                const originalSrc = this.dataset.originalSrc || this.src;
-                if (originalSrc) {
-                  window.open(originalSrc, '_blank');
-                }
-              });
-              
-              return newImg.outerHTML;
-            } else {
-              // Process other elements recursively
-              let result = `<${node.tagName.toLowerCase()}`;
-              
-              // Copy attributes
-              for (const attr of node.attributes) {
-                result += ` ${attr.name}="${attr.value}"`;
-              }
-              
-              result += '>';
-              
-              // Process child nodes
-              for (const child of node.childNodes) {
-                result += processNode(child);
-              }
-              
-              result += `</${node.tagName.toLowerCase()}>`;
-              return result;
-            }
-          }
-          return '';
-        };
-        
-        // Process all child nodes of the temporary div
-        let processedContent = '';
-        for (const child of tempDiv.childNodes) {
-          processedContent += processNode(child);
-        }
-        
-        // Sanitize and set the final content
-        partContentElement.innerHTML = DOMPurify.sanitize(processedContent, {
-          ALLOWED_TAGS: ['img', 'p', 'br', 'strong', 'em', 'b', 'i', 'u', 'a', 'div', 'span'],
-          ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style', 'font-style', 'font-size']
-        });
-      } else {
-        // Process as markdown for plain text content without images
+        // For content with images, let's try a simpler approach
+        // First, let's process the entire content as markdown to see what happens
         const escapedContent = escapeHtml(content);
-        // Suppress link parsing by escaping [text](text) patterns
-        const contentWithoutLinks = escapedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
-        const markdownContent = marked.parse(contentWithoutLinks);
-        // Unescape HTML entities to convert < and > back to < and >
+        const markdownContent = marked.parse(escapedContent);
         const unescapedContent = unescapeHtml(markdownContent);
-        partContentElement.innerHTML = DOMPurify.sanitize(unescapedContent);
-      }
-      
-      contentParts.appendChild(partContentElement);
-      cardBody.appendChild(contentParts);
-
-      const partButton = createPartButton('Part 1', true, () => switchPart(effectiveChunkIndex, 0));
-      partButtons.appendChild(partButton);
-      chunkDiv.dataset.rawContent = effectiveRawContent;
-
-      const actionButtonsContainer = document.createElement('div');
-      actionButtonsContainer.className = 'button-group';
-      Object.assign(actionButtonsContainer.style, { display: 'flex', gap: '10px', marginTop: '10px' });
-
-      const copyButton = createButton('Copy Processed Chunk', 'button copy-button', () => copyChunk(effectiveChunkIndex, chunkDiv.querySelector('.part-content.active').textContent, 'processed'));
-      const copyRawButton = createButton('Copy Raw Chunk', 'button copy-raw-button', () => copyChunk(effectiveChunkIndex, chunkDiv.dataset.rawContent, 'raw'));
-      const reprocessBtn = createButton('Reprocess Chunk', 'button reprocess-button', () => reprocessChunk(effectiveChunkIndex, chunkDiv.dataset.rawContent));
-      [copyButton, copyRawButton, reprocessBtn].forEach(button => {
-        Object.assign(button.style, { flex: '1', margin: '0' });
-        actionButtonsContainer.appendChild(button);
-      });
-      cardBody.appendChild(actionButtonsContainer);
-      const feedback = document.createElement('div'); feedback.className = 'feedback'; feedback.textContent = 'Copied!'; feedback.style.display = 'none';
-      cardBody.appendChild(feedback);
-      card.appendChild(cardBody);
-      chunkDiv.appendChild(card);
-      chunksContainer.insertBefore(chunkDiv, null); // Append at the end
-    } else { // Update existing chunk content
-      const partContent = chunkDiv.querySelector('.part-content.active');
-      if (partContent) {
-        // Check if content contains HTML images
-        const hasImages = content.includes('<img');
         
-        if (hasImages) {
-          // For content with images, we need to process it differently to preserve image positions
+        // Now let's check if images are still present in the markdown output
+        if (unescapedContent.includes('<img')) {
+          // If images are preserved, just use the markdown output
+          partContentElement.innerHTML = unescapedContent;
+        } else {
+          // If images are lost, we need to handle them differently
           // Create a temporary DOM element to parse the original HTML
           const tempDiv = document.createElement('div');
           tempDiv.innerHTML = content;
@@ -1722,9 +1586,8 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
               const textContent = node.textContent;
               if (textContent.trim()) {
                 const escapedContent = escapeHtml(textContent);
-                // Suppress link parsing by escaping [text](text) patterns
-                const contentWithoutLinks = escapedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
-                const markdownContent = marked.parse(contentWithoutLinks);
+                // Apply markdown parsing (without suppressing links)
+                const markdownContent = marked.parse(escapedContent);
                 // Unescape HTML entities to convert < and > back to < and >
                 const unescapedContent = unescapeHtml(markdownContent);
                 return unescapedContent;
@@ -1824,20 +1687,185 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
             processedContent += processNode(child);
           }
           
-          // Sanitize and set the final content
-          partContent.innerHTML = DOMPurify.sanitize(processedContent, {
-            ALLOWED_TAGS: ['img', 'p', 'br', 'strong', 'em', 'b', 'i', 'u', 'a', 'div', 'span'],
-            ALLOWED_ATTR: ['src', 'alt', 'title', 'href', 'class', 'style', 'font-style', 'font-size']
-          });
+          // Set the content without sanitization for testing
+          partContentElement.innerHTML = processedContent;
+        }
+      } else {
+        // Process as markdown for plain text content without images
+        const escapedContent = escapeHtml(content);
+        // Apply markdown parsing (without suppressing links)
+        const markdownContent = marked.parse(escapedContent);
+        // Unescape HTML entities to convert < and > back to < and >
+        const unescapedContent = unescapeHtml(markdownContent);
+        partContentElement.innerHTML = unescapedContent;
+      }
+      
+      contentParts.appendChild(partContentElement);
+      cardBody.appendChild(contentParts);
+
+      const partButton = createPartButton('Part 1', true, () => switchPart(effectiveChunkIndex, 0));
+      partButtons.appendChild(partButton);
+      chunkDiv.dataset.rawContent = effectiveRawContent;
+
+      const actionButtonsContainer = document.createElement('div');
+      actionButtonsContainer.className = 'button-group';
+      Object.assign(actionButtonsContainer.style, { display: 'flex', gap: '10px', marginTop: '10px' });
+
+      const copyButton = createButton('Copy Processed Chunk', 'button copy-button', () => copyChunk(effectiveChunkIndex, chunkDiv.querySelector('.part-content.active').textContent, 'processed'));
+      const copyRawButton = createButton('Copy Raw Chunk', 'button copy-raw-button', () => copyChunk(effectiveChunkIndex, chunkDiv.dataset.rawContent, 'raw'));
+      const reprocessBtn = createButton('Reprocess Chunk', 'button reprocess-button', () => reprocessChunk(effectiveChunkIndex, chunkDiv.dataset.rawContent));
+      [copyButton, copyRawButton, reprocessBtn].forEach(button => {
+        Object.assign(button.style, { flex: '1', margin: '0' });
+        actionButtonsContainer.appendChild(button);
+      });
+      cardBody.appendChild(actionButtonsContainer);
+      const feedback = document.createElement('div'); feedback.className = 'feedback'; feedback.textContent = 'Copied!'; feedback.style.display = 'none';
+      cardBody.appendChild(feedback);
+      card.appendChild(cardBody);
+      chunkDiv.appendChild(card);
+      chunksContainer.insertBefore(chunkDiv, null); // Append at the end
+    } else { // Update existing chunk content
+      const partContent = chunkDiv.querySelector('.part-content.active');
+      if (partContent) {
+        // Check if content contains HTML images
+        const hasImages = content.includes('<img');
+        
+        if (hasImages) {
+          // For content with images, let's try a simpler approach
+          // First, let's process the entire content as markdown to see what happens
+          const escapedContent = escapeHtml(content);
+          const markdownContent = marked.parse(escapedContent);
+          const unescapedContent = unescapeHtml(markdownContent);
+          
+          // Now let's check if images are still present in the markdown output
+          if (unescapedContent.includes('<img')) {
+            // If images are preserved, just use the markdown output
+            partContent.innerHTML = unescapedContent;
+          } else {
+            // If images are lost, we need to handle them differently
+            // Create a temporary DOM element to parse the original HTML
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = content;
+            
+            // Process text nodes while preserving image elements
+            const processNode = (node) => {
+              if (node.nodeType === Node.TEXT_NODE) {
+                // Process text nodes as markdown
+                const textContent = node.textContent;
+                if (textContent.trim()) {
+                  const escapedContent = escapeHtml(textContent);
+                  // Apply markdown parsing (without suppressing links)
+                  const markdownContent = marked.parse(escapedContent);
+                  // Unescape HTML entities to convert < and > back to < and >
+                  const unescapedContent = unescapeHtml(markdownContent);
+                  return unescapedContent;
+                }
+                return '';
+              } else if (node.nodeType === Node.ELEMENT_NODE) {
+                if (node.tagName.toLowerCase() === 'img') {
+                  // Process image elements
+                  let src = node.getAttribute('src') || node.src;
+                  const alt = node.getAttribute('alt') || '';
+                  
+                  // Create a new image element with proper styling
+                  const newImg = document.createElement('img');
+                  newImg.alt = alt;
+                  
+                  if (src && src.includes('.file')) {
+                    // Handle .file extension images
+                    newImg.dataset.originalSrc = src;
+                    
+                    // Convert relative URLs to absolute
+                    if (src.startsWith('//')) {
+                      src = 'https:' + src;
+                    } else if (src.startsWith('/')) {
+                      src = 'https://images.novelpia.com' + src;
+                    }
+                    
+                    newImg.src = src;
+                    
+                    // Add error handling for failed loads
+                    newImg.onerror = function() {
+                      const fallback = document.createElement('div');
+                      fallback.className = 'image-fallback';
+                      fallback.innerHTML = `
+                        <div style="background: rgba(255,255,255,0.1); border: 1px dashed rgba(255,255,255,0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--text-secondary);">
+                          <span>📷 Image</span><br>
+                          <small>${src.split('/').pop()}</small><br>
+                          <button onclick="window.open('${src}', '_blank')" style="background: var(--accent-primary); color: white; border: none; padding: 4px 8px; border-radius: 4px; margin-top: 8px; cursor: pointer;">Open Image</button>
+                        </div>
+                      `;
+                      this.parentNode.replaceChild(fallback, this);
+                    };
+                  } else {
+                    // Handle regular image URLs
+                    if (src && src.startsWith('//')) {
+                      newImg.src = 'https:' + src;
+                    } else if (src && src.startsWith('/')) {
+                      newImg.src = window.location.origin + src;
+                    } else {
+                      newImg.src = src;
+                    }
+                  }
+                  
+                  // Add styling for better display
+                  newImg.style.maxWidth = '100%';
+                  newImg.style.height = 'auto';
+                  newImg.style.display = 'block';
+                  newImg.style.margin = '10px auto';
+                  newImg.style.borderRadius = '8px';
+                  newImg.style.cursor = 'pointer';
+                  newImg.style.background = 'rgba(255,255,255,0.05)';
+                  
+                  // Add click handler to open image in new tab
+                  newImg.addEventListener('click', function() {
+                    const originalSrc = this.dataset.originalSrc || this.src;
+                    if (originalSrc) {
+                      window.open(originalSrc, '_blank');
+                    }
+                  });
+                  
+                  return newImg.outerHTML;
+                } else {
+                  // Process other elements recursively
+                  let result = `<${node.tagName.toLowerCase()}`;
+                  
+                  // Copy attributes
+                  for (const attr of node.attributes) {
+                    result += ` ${attr.name}="${attr.value}"`;
+                  }
+                  
+                  result += '>';
+                  
+                  // Process child nodes
+                  for (const child of node.childNodes) {
+                    result += processNode(child);
+                  }
+                  
+                  result += `</${node.tagName.toLowerCase()}>`;
+                  return result;
+                }
+              }
+              return '';
+            };
+            
+            // Process all child nodes of the temporary div
+            let processedContent = '';
+            for (const child of tempDiv.childNodes) {
+              processedContent += processNode(child);
+            }
+            
+            // Set the content without sanitization for testing
+            partContent.innerHTML = processedContent;
+          }
         } else {
           // Process as markdown for plain text content without images
           const escapedContent = escapeHtml(content);
-          // Suppress link parsing by escaping [text](text) patterns
-          const contentWithoutLinks = escapedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '\\[$1\\]\\($2\\)');
-          const markdownContent = marked.parse(contentWithoutLinks);
+          // Apply markdown parsing (without suppressing links)
+          const markdownContent = marked.parse(escapedContent);
           // Unescape HTML entities to convert < and > back to < and >
           const unescapedContent = unescapeHtml(markdownContent);
-          partContent.innerHTML = DOMPurify.sanitize(unescapedContent);
+          partContent.innerHTML = unescapedContent;
         }
         chunkDiv.dataset.rawContent = effectiveRawContent;
       } else {

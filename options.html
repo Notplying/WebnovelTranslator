@@ -322,11 +322,12 @@
       <a href="https://discord.gg/kTQvSuxZ6Y" target="_blank" class="discord-link">
         Found a bug? Thought of an improvement? Post it to my email or join the discord!
       </a>
-      <label for="api-type">API Type: <span class="highlight">NEW!</span> OpenAI Compatible Mode!</label>
+      <label for="api-type">API Type: <span class="highlight">NEW!</span> GLM Coding Plan API!</label>
       <select id="api-type">
         <option value="gemini">Gemini API</option>
         <option value="vertex">Vertex AI API</option>
         <option value="openRouter">OpenRouter API</option>
+        <option value="glmCoding">GLM Coding Plan API</option>
         <option value="openai">OpenAI Compatible</option>
       </select>
     </div>
@@ -454,6 +455,27 @@
 
       <label for="openai-stream">Streaming:</label>
       <select id="openai-stream">
+        <option value="true">Streaming Enabled</option>
+        <option value="false">Streaming Disabled</option>
+      </select>
+    </div>
+
+    <div id="glmCoding-settings" class="section" style="display: none;">
+      <div class="section-title">GLM Coding Plan Settings</div>
+      <label for="glmCoding-api-key">GLM Coding Plan API Key:</label>
+      <input type="text" id="glmCoding-api-key" placeholder="Enter your Z.AI API key">
+      
+      <label for="glmCoding-model-id">Model ID:</label>
+      <input type="text" id="glmCoding-model-id" placeholder="e.g., GLM-4.5-air">
+
+      <label for="glmCoding-max-tokens">Max Output Tokens (Optional):</label>
+      <input type="number" id="glmCoding-max-tokens" placeholder="Leave empty to use model default">
+      
+      <label for="glmCoding-context-window">Context Window Size (Optional):</label>
+      <input type="number" id="glmCoding-context-window" placeholder="Leave empty to use model default">
+
+      <label for="glmCoding-stream">Streaming:</label>
+      <select id="glmCoding-stream">
         <option value="true">Streaming Enabled</option>
         <option value="false">Streaming Disabled</option>
       </select>
