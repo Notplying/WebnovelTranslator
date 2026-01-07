@@ -183,7 +183,7 @@ async function processBatch(chunks, concurrency = 3, sessionId = null) {
     const chunk = chunks[i];
     const promise = (async () => {
       try {
-        const result = await processChunk(chunk);
+        const result = await processChunk({ chunk, prefix: message.prefix, suffix: message.suffix, sessionId: message.sessionId });
         completedCount++;
         
         // PHASE 3 OPTIMIZATION: Calculate and send progress updates
@@ -656,7 +656,7 @@ async function unifiedStreamingHandler(config) {
       
       // PHASE 2 OPTIMIZATION: Use array accumulation instead of string concatenation
       // This provides O(n) performance instead of O(n²) for large translations
-      let contentArray = [];
+      // Note: contentArray is declared at line 589, no need to redeclare here
       
       try {
         while (true) {

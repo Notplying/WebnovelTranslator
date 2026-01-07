@@ -1999,11 +1999,11 @@ browser.runtime.onMessage.addListener((message) => {
 // Scroll behavior for progress bar
 let lastScrollTop = 0;
 let scrollDirectionThreshold = 50; // Minimum pixels to scroll before triggering
-// PHASE 3 OPTIMIZATION: Use cached element
-const progressContainer = getCachedElement('progress-container');
 
 // Initialize scroll behavior
 function initializeScrollBehavior() {
+  // PHASE 3 OPTIMIZATION: Cache element after DOM is ready
+  const progressContainer = getCachedElement('progress-container');
   if (!progressContainer) return;
   
   // Start with progress bar visible
@@ -2032,12 +2032,14 @@ function handleScroll() {
 }
 
 function hideProgressBar() {
+  const progressContainer = getCachedElement('progress-container');
   if (!progressContainer) return;
   progressContainer.classList.remove('visible');
   progressContainer.classList.add('hidden');
 }
 
 function showProgressBar() {
+  const progressContainer = getCachedElement('progress-container');
   if (!progressContainer) return;
   progressContainer.classList.remove('hidden');
   progressContainer.classList.add('visible');

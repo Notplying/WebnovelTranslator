@@ -33,7 +33,7 @@ function validateInput(value, type, min = null, max = null) {
   }
   
   switch (type) {
-    case 'number':
+    case 'number': {
       const num = parseFloat(value);
       if (isNaN(num)) {
         return { valid: false, error: 'Must be a valid number' };
@@ -45,6 +45,7 @@ function validateInput(value, type, min = null, max = null) {
         return { valid: false, error: `Must be at most ${max}` };
       }
       return { valid: true, value: num };
+    }
     case 'url':
       try {
         new URL(value);
