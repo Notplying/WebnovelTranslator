@@ -1,40 +1,11 @@
-// PHASE 3 OPTIMIZATION: DEBUG flag to control logging in production
-// Set to true for debugging, false for production to reduce console overhead
-const DEBUG = false;
-
-// PHASE 3 OPTIMIZATION: Cache DOM elements to avoid repeated queries
-let cachedTextLeftDiv = null;
-let cachedNovelContentDiv = null;
-
-// PHASE 3 OPTIMIZATION: Debounce function for DOM operations
-function debounce(func, wait) {
-  let timeout;
-  return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-  };
-}
-
 function splitParagraphText(lengthinput) {
   let maxLength = lengthinput;
-  if (DEBUG) console.log('maxLength in splitParagraphText:', maxLength);
+  console.log('maxLength in splitParagraphText:', maxLength);
   let paragraphId = 1;
   let combinedContent = "";
 
-  // PHASE 3 OPTIMIZATION: Use cached DOM elements
-  if (!cachedTextLeftDiv) {
-    cachedTextLeftDiv = document.querySelector('.text-left');
-  }
-  if (!cachedNovelContentDiv) {
-    cachedNovelContentDiv = document.querySelector('#novel_content');
-  }
-  
-  let textLeftDiv = cachedTextLeftDiv;
-  let novel_contentDiv = cachedNovelContentDiv;
+  let textLeftDiv = document.querySelector('.text-left');
+  let novel_contentDiv = document.querySelector('#novel_content');
   
   function extractContentWithImages(element) {
     let content = "";
@@ -111,7 +82,7 @@ function splitTextIntoChunks(text, maxLength) {
       }
     }
     const chunk = text.substring(startIndex, endIndex);
-    if (DEBUG) console.log(`Chunk length: ${chunk.length}`);
+    console.log(`Chunk length: ${chunk.length}`);
     chunks.push(chunk);
     startIndex = endIndex + 1;
   }
@@ -139,7 +110,7 @@ async function processChunkWithGemini(chunk, prefix, suffix, retries, delay) {
     });
 
     try {
-      if (DEBUG) console.log(`Attempt ${attempt + 1} - Sending message to background script`);
+      console.log(`Attempt ${attempt + 1} - Sending message to background script`);
       
       const response = await browser.runtime.sendMessage({
         action: 'processChunk',
@@ -148,7 +119,7 @@ async function processChunkWithGemini(chunk, prefix, suffix, retries, delay) {
         suffix
       });
       
-      if (DEBUG) console.log('Received response from background script:', response);
+      console.log('Received response from background script:', response);
       
       if (response.error) {
         throw new Error(response.error);
@@ -183,7 +154,7 @@ async function processChunkWithGemini(chunk, prefix, suffix, retries, delay) {
       if (error.message.includes("NetworkError") || error.message.includes("503") || 
           error.message.includes("UNAVAILABLE") || error.message.includes("Could not establish connection")) {
         if (attempt < retries - 1) {
-          if (DEBUG) console.log(`Retrying in ${delay / 1000} seconds...`);
+          console.log(`Retrying in ${delay / 1000} seconds...`);
           await new Promise(resolve => setTimeout(resolve, delay));
         } else {
           return { success: false, error: `Error processing chunk with Gemini API after ${retries} attempts: ${error.message}` };

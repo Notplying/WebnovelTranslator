@@ -1,79 +1,7 @@
-// PHASE 3 OPTIMIZATION: DEBUG flag to control logging in production
-// Set to true for debugging, false for production to reduce console overhead
-const DEBUG = false;
-
-// PHASE 3 OPTIMIZATION: Cache DOM elements to avoid repeated queries
-const cachedElements = {};
-
-// PHASE 3 OPTIMIZATION: Debounce function for input changes
-function debounce(func, wait) {
-  let timeout;
-  return function executedFunction(...args) {
-    const later = () => {
-      timeout = null;
-      func(...args);
-    };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-  };
-}
-
-// PHASE 3 OPTIMIZATION: Cache DOM element
-function getCachedElement(id) {
-  if (!cachedElements[id]) {
-    const element = document.getElementById(id);
-    // Only cache truthy elements to avoid caching null/undefined
-    if (element) {
-      cachedElements[id] = element;
-    }
-    return element;
-  }
-  return cachedElements[id];
-}
-
-// PHASE 3 OPTIMIZATION: Input validation function
-function validateInput(value, type, min = null, max = null) {
-  if (value === null || value === undefined || value === '') {
-    return { valid: true, value: '' }; // Empty values are allowed
-  }
-  
-  switch (type) {
-    case 'number': {
-      const num = parseFloat(value);
-      if (isNaN(num)) {
-        return { valid: false, error: 'Must be a valid number' };
-      }
-      if (min !== null && num < min) {
-        return { valid: false, error: `Must be at least ${min}` };
-      }
-      if (max !== null && num > max) {
-        return { valid: false, error: `Must be at most ${max}` };
-      }
-      return { valid: true, value: num };
-    }
-    case 'url':
-      try {
-        new URL(value);
-        return { valid: true, value };
-      } catch {
-        return { valid: false, error: 'Must be a valid URL' };
-      }
-    case 'json':
-      try {
-        JSON.parse(value);
-        return { valid: true, value };
-      } catch {
-        return { valid: false, error: 'Must be valid JSON' };
-      }
-    default:
-      return { valid: true, value };
-  }
-}
-
 // Function to display status messages to the user
 function showStatus(message, duration = 3000) {
-  // PHASE 3 OPTIMIZATION: Use cached element
-  let statusContainer = getCachedElement('status-message');
+  // Create status container if it doesn't exist
+  let statusContainer = document.getElementById('status-message');
   if (!statusContainer) {
     statusContainer = document.createElement('div');
     statusContainer.id = 'status-message';
@@ -104,7 +32,7 @@ function showStatus(message, duration = 3000) {
 function handleInputFocus() {
   // Small delay to ensure the keyboard is fully shown
   setTimeout(() => {
-    // PHASE 3 OPTIMIZATION: Cache focused element reference
+    // Get the focused element
     const focusedElement = document.activeElement;
     if (focusedElement) {
       // Calculate the element's position relative to the viewport
@@ -124,13 +52,12 @@ document.addEventListener('DOMContentLoaded', function () {
     input.addEventListener('focus', handleInputFocus);
   });
 
-  // PHASE 3 OPTIMIZATION: Cache frequently accessed elements
-  const apiTypeElement = getCachedElement('api-type');
-  const geminiSettings = getCachedElement('gemini-settings');
-  const vertexSettings = getCachedElement('vertex-settings');
-  const openRouterSettings = getCachedElement('openRouter-settings');
-  const openaiSettings = getCachedElement('openai-settings');
-  const glmCodingSettings = getCachedElement('glmCoding-settings');
+  const apiTypeElement = document.getElementById('api-type');
+  const geminiSettings = document.getElementById('gemini-settings');
+  const vertexSettings = document.getElementById('vertex-settings');
+  const openRouterSettings = document.getElementById('openRouter-settings');
+  const openaiSettings = document.getElementById('openai-settings');
+  const glmCodingSettings = document.getElementById('glmCoding-settings');
 
   // Toggle visibility of API-specific settings
   apiTypeElement.addEventListener('change', function () {
@@ -209,137 +136,58 @@ document.addEventListener('DOMContentLoaded', function () {
     apiTypeElement.dispatchEvent(new Event('change'));
   });
 
-  // PHASE 3 OPTIMIZATION: Add debouncing to save settings
-  const debouncedSaveSettings = debounce(async function() {
-    try {
-      const apiType = apiTypeElement.value;
-
-      // PHASE 3 OPTIMIZATION: Add input validation
-      const maxLengthElement = getCachedElement('max-length');
-      if (maxLengthElement) {
-        const maxLengthValidation = validateInput(maxLengthElement.value, 'number', 100, 100000);
-        if (!maxLengthValidation.valid) {
-          showStatus('Invalid Max Length: ' + maxLengthValidation.error, 5000);
-          return;
-        }
-      }
-
-      const retryCountElement = getCachedElement('retry-count');
-      if (retryCountElement) {
-        const retryCountValidation = validateInput(retryCountElement.value, 'number', 1, 10);
-        if (!retryCountValidation.valid) {
-          showStatus('Invalid Retry Count: ' + retryCountValidation.error, 5000);
-          return;
-        }
-      }
-
-      const temperatureElement = getCachedElement('temperature');
-      const rawTemperature = temperatureElement?.value || '';
-      const temperatureValidation = validateInput(rawTemperature, 'number', 0, 2);
-      if (rawTemperature !== '' && !temperatureValidation.valid) {
-        showStatus('Invalid Temperature: ' + temperatureValidation.error, 5000);
-        return;
-      }
-
-      const topKElement = getCachedElement('top-k');
-      const rawTopK = topKElement?.value || '';
-      const topKValidation = validateInput(rawTopK, 'number', 1, 100);
-      if (rawTopK !== '' && !topKValidation.valid) {
-        showStatus('Invalid Top K: ' + topKValidation.error, 5000);
-        return;
-      }
-
-      const topPElement = getCachedElement('top-p');
-      const rawTopP = topPElement?.value || '';
-      const topPValidation = validateInput(rawTopP, 'number', 0, 1);
-      if (rawTopP !== '' && !topPValidation.valid) {
-        showStatus('Invalid Top P: ' + topPValidation.error, 5000);
-        return;
-      }
-
-      const maxSessionsElement = getCachedElement('max-sessions');
-      if (maxSessionsElement) {
-        const maxSessionsValidation = validateInput(maxSessionsElement.value, 'number', 1, 10);
-        if (!maxSessionsValidation.valid) {
-          showStatus('Invalid Max Sessions: ' + maxSessionsValidation.error, 5000);
-          return;
-        }
-      }
-
-      const openaiBaseUrlElement = getCachedElement('openai-base-url');
-      const openaiBaseUrl = openaiBaseUrlElement?.value || '';
-      if (openaiBaseUrl && openaiBaseUrl !== '') {
-        const urlValidation = validateInput(openaiBaseUrl, 'url');
-        if (!urlValidation.valid) {
-          showStatus('Invalid OpenAI Base URL: ' + urlValidation.error, 5000);
-          return;
-        }
-      }
-
-      const serviceAccountKeyElement = getCachedElement('service-account-key');
-      const vertexServiceAccountKey = serviceAccountKeyElement?.value || '';
-      if (vertexServiceAccountKey && vertexServiceAccountKey !== '') {
-        const jsonValidation = validateInput(vertexServiceAccountKey, 'json');
-        if (!jsonValidation.valid) {
-          showStatus('Invalid Vertex Service Account Key: Must be valid JSON', 5000);
-          return;
-        }
-      }
-
-      const settings = {
-        apiType,
-        maxLength: maxLengthElement ? maxLengthValidation.value : undefined,
-        prefix: getCachedElement('prefix')?.value || '',
-        suffix: getCachedElement('suffix')?.value || '',
-        retryCount: retryCountElement ? retryCountValidation.value : undefined,
-        temperature: rawTemperature !== '' ? temperatureValidation.value : '',
-        topK: rawTopK !== '' ? topKValidation.value : '',
-        topP: rawTopP !== '' ? topPValidation.value : '',
-        geminiApiKey: getCachedElement('gemini-api-key')?.value || '',
-        geminiModelId: getCachedElement('gemini-model-id')?.value || '',
-        vertexServiceAccountKey: vertexServiceAccountKey,
-        vertexLocation: getCachedElement('location')?.value || '',
-        vertexProjectId: getCachedElement('project-id')?.value || '',
-        vertexModelId: getCachedElement('model-id')?.value || '',
-        vertexMaxTokens: getCachedElement('vertex-max-tokens')?.value || '',
-        vertexContextWindow: getCachedElement('vertex-context-window')?.value || '',
-        openRouterApiKey: getCachedElement('openRouter-api-key')?.value || '',
-        openRouterModelId: getCachedElement('openRouter-model-id')?.value || '',
-        openRouterMaxTokens: getCachedElement('openRouter-max-tokens')?.value || '',
-        openRouterContextWindow: getCachedElement('openRouter-context-window')?.value || '',
-        openRouterStream: getCachedElement('openRouter-stream')?.value === 'true',
-        openRouterProviderOrder: getCachedElement('openRouter-provider-order')?.value || '',
-        openRouterAllowFallback: getCachedElement('openRouter-allow-fallback')?.value === 'true',
-        openaiApiKey: getCachedElement('openai-api-key')?.value || '',
-        openaiModelId: getCachedElement('openai-model-id')?.value || '',
-        openaiBaseUrl: openaiBaseUrl,
-        openaiMaxTokens: getCachedElement('openai-max-tokens')?.value || '',
-        openaiContextWindow: getCachedElement('openai-context-window')?.value || '',
-        openaiStream: getCachedElement('openai-stream')?.value === 'true',
-        geminiMaxTokens: getCachedElement('gemini-max-tokens')?.value || '',
-        geminiContextWindow: getCachedElement('gemini-context-window')?.value || '',
-        geminiStream: getCachedElement('gemini-stream')?.value === 'true',
-        vertexStream: getCachedElement('vertex-stream')?.value === 'true',
-        glmCodingApiKey: getCachedElement('glmCoding-api-key')?.value || '',
-        glmCodingModelId: getCachedElement('glmCoding-model-id')?.value || '',
-        glmCodingMaxTokens: getCachedElement('glmCoding-max-tokens')?.value || '',
-        glmCodingContextWindow: getCachedElement('glmCoding-context-window')?.value || '',
-        glmCodingStream: getCachedElement('glmCoding-stream')?.value === 'true',
-        maxSessions: maxSessionsElement ? maxSessionsValidation.value : undefined
-      };
-
-      await browser.storage.local.set(settings);
-      showStatus('Settings saved successfully!');
-    } catch (error) {
-      console.error('Error saving settings:', error);
-      showStatus('Error saving settings: ' + error.message, 5000);
-    }
-  }, 300); // 300ms debounce delay
-
   // Save settings
   document.getElementById('options-form').addEventListener('submit', function (event) {
     event.preventDefault();
-    debouncedSaveSettings();
+
+    const apiType = apiTypeElement.value;
+
+    const settings = {
+      apiType,
+      maxLength: document.getElementById('max-length').value,
+      prefix: document.getElementById('prefix').value,
+      suffix: document.getElementById('suffix').value,
+      retryCount: document.getElementById('retry-count').value,
+      temperature: document.getElementById('temperature').value,
+      topK: document.getElementById('top-k').value,
+      topP: document.getElementById('top-p').value,
+      geminiApiKey: document.getElementById('gemini-api-key').value,
+      geminiModelId: document.getElementById('gemini-model-id').value,
+      vertexServiceAccountKey: document.getElementById('service-account-key').value,
+      vertexLocation: document.getElementById('location').value,
+      vertexProjectId: document.getElementById('project-id').value,
+      vertexModelId: document.getElementById('model-id').value,
+      vertexMaxTokens: document.getElementById('vertex-max-tokens').value,
+      vertexContextWindow: document.getElementById('vertex-context-window').value,
+      openRouterApiKey: document.getElementById('openRouter-api-key').value,
+      openRouterModelId: document.getElementById('openRouter-model-id').value,
+      openRouterMaxTokens: document.getElementById('openRouter-max-tokens').value,
+      openRouterContextWindow: document.getElementById('openRouter-context-window').value,
+      openRouterStream: document.getElementById('openRouter-stream').value === 'true',
+      openRouterProviderOrder: document.getElementById('openRouter-provider-order').value,
+      openRouterAllowFallback: document.getElementById('openRouter-allow-fallback').value === 'true',
+      openaiApiKey: document.getElementById('openai-api-key').value,
+      openaiModelId: document.getElementById('openai-model-id').value,
+      openaiBaseUrl: document.getElementById('openai-base-url').value,
+      openaiMaxTokens: document.getElementById('openai-max-tokens').value,
+      openaiContextWindow: document.getElementById('openai-context-window').value,
+      openaiStream: document.getElementById('openai-stream').value === 'true',
+      geminiMaxTokens: document.getElementById('gemini-max-tokens').value,
+      geminiContextWindow: document.getElementById('gemini-context-window').value,
+      geminiStream: document.getElementById('gemini-stream').value === 'true',
+      vertexStream: document.getElementById('vertex-stream').value === 'true',
+      glmCodingApiKey: document.getElementById('glmCoding-api-key').value,
+      glmCodingModelId: document.getElementById('glmCoding-model-id').value,
+      glmCodingMaxTokens: document.getElementById('glmCoding-max-tokens').value,
+      glmCodingContextWindow: document.getElementById('glmCoding-context-window').value,
+      glmCodingStream: document.getElementById('glmCoding-stream').value === 'true',
+      maxSessions: parseInt(document.getElementById('max-sessions').value) || 3
+    };
+
+    browser.storage.local.set(settings).then(() => {
+      alert('Settings saved!');
+    });
+  
   });
   // Export settings
   document.getElementById('export-settings').addEventListener('click', async function() {
@@ -403,48 +251,13 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('import-text').value = '';
   });
 
-  // PHASE 3 OPTIMIZATION: Common import function with validation and no reload
+  // Common import function
   async function importSettings(jsonText) {
     try {
       const settings = JSON.parse(jsonText);
-      
-      // PHASE 3 OPTIMIZATION: Validate imported settings
-      if (settings.maxLength) {
-        const validation = validateInput(settings.maxLength, 'number', 100, 100000);
-        if (!validation.valid) {
-          alert('Invalid Max Length in imported settings: ' + validation.error);
-          return;
-        }
-      }
-      
-      if (settings.retryCount) {
-        const validation = validateInput(settings.retryCount, 'number', 1, 10);
-        if (!validation.valid) {
-          alert('Invalid Retry Count in imported settings: ' + validation.error);
-          return;
-        }
-      }
-      
-      if (settings.temperature && settings.temperature !== '') {
-        const validation = validateInput(settings.temperature, 'number', 0, 2);
-        if (!validation.valid) {
-          alert('Invalid Temperature in imported settings: ' + validation.error);
-          return;
-        }
-      }
-      
-      if (settings.maxSessions) {
-        const validation = validateInput(settings.maxSessions, 'number', 1, 10);
-        if (!validation.valid) {
-          alert('Invalid Max Sessions in imported settings: ' + validation.error);
-          return;
-        }
-      }
-      
       await browser.storage.local.set(settings);
-      alert('Settings imported successfully!');
-      // PHASE 3 OPTIMIZATION: Reload form values without page reload
-      location.reload(); // Keep reload for import to ensure all values are properly set
+      alert('Settings imported successfully! Reloading page...');
+      location.reload();
     } catch (error) {
       alert('Error importing settings: ' + error.message);
     }
@@ -503,7 +316,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
       await browser.storage.local.set(defaultSettings);
       alert('Settings reset to defaults! Reloading page...');
-      location.reload(); // Keep reload for reset to ensure clean state
+      location.reload();
     }
   });
 
@@ -527,7 +340,6 @@ document.addEventListener('DOMContentLoaded', function () {
       alert(result.message);
     } catch (error) {
       console.error('Error testing service account:', error);
-      console.error('Full error details:', error);
       alert('Error: ' + error.message + '\n\nCheck the console for more details.');
     }
   });

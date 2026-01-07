@@ -1,24 +1,9 @@
-// PHASE 3 OPTIMIZATION: DEBUG flag to control logging in production
-// Set to true for debugging, false for production to reduce console overhead
-const DEBUG = false;
-
 // Track initialization state
 let isInitialized = false;
 
-// PHASE 3 OPTIMIZATION: Cache DOM elements to avoid repeated queries
-const cachedElements = {};
-
-// PHASE 3 OPTIMIZATION: Cache DOM element
-function getCachedElement(id) {
-  if (!cachedElements[id]) {
-    cachedElements[id] = document.getElementById(id);
-  }
-  return cachedElements[id];
-}
-
 // Self-initialize when loaded
 document.addEventListener('DOMContentLoaded', () => {
-  if (DEBUG) console.log('Chunks page loaded, initializing...');
+  console.log('Chunks page loaded, initializing...');
   if (!isInitialized) {
     initializeChunksPage();
   }
@@ -50,12 +35,12 @@ function isSessionIncomplete(sessionChunks, totalChunks) {
 
 async function initializeChunksPage() {
   if (isInitialized) {
-    if (DEBUG) console.log('Page already initialized, skipping...');
+    console.log('Page already initialized, skipping...');
     return;
   }
 
   try {
-    if (DEBUG) console.log('Starting page initialization...');
+    console.log('Starting page initialization...');
     isInitialized = true;
 
     const sessionId = getSessionId();
@@ -464,8 +449,7 @@ const ProgressColors = {
 };
 
 function updateProgressBar(elementId, current, total, state = ProgressState.PROCESSING) {
-  // PHASE 3 OPTIMIZATION: Use cached element for progress bar
-  const progressBar = getCachedElement(elementId);
+  const progressBar = document.getElementById(elementId);
   if (!progressBar) {
     console.error(`Progress bar element not found: ${elementId}`);
     return;
@@ -481,8 +465,7 @@ function updateProgress(current, total) {
   const state = current === total ? ProgressState.COMPLETED : ProgressState.PROCESSING;
   updateProgressBar('progress-bar-fill', current, total, state);
   
-  // PHASE 3 OPTIMIZATION: Use cached element
-  const progressText = getCachedElement('progress-text');
+  const progressText = document.getElementById('progress-text');
   if (progressText) {
     progressText.textContent = `${current}/${total} chunks processed`;
     
@@ -498,8 +481,8 @@ function updateAttemptProgress(current, total, forceState = null) {
   if (forceState !== null) {
     updateProgressBar('attempt-progress-bar-fill', current, total, forceState);
     
-    // PHASE 3 OPTIMIZATION: Use cached element
-    const progressText = getCachedElement('attempt-progress-text');
+    // Update text based on state
+    const progressText = document.getElementById('attempt-progress-text');
     if (progressText) {
       if (forceState === ProgressState.COMPLETED) {
         progressText.textContent = 'Processing complete';
@@ -517,8 +500,7 @@ function updateAttemptProgress(current, total, forceState = null) {
   // If streaming, show streaming state
   if (isStreaming) {
     updateProgressBar('attempt-progress-bar-fill', 1, 1, ProgressState.PROCESSING);
-    // PHASE 3 OPTIMIZATION: Use cached element
-    const progressText = getCachedElement('attempt-progress-text');
+    const progressText = document.getElementById('attempt-progress-text');
     if (progressText) {
       progressText.textContent = 'Currently Streaming...';
     }
@@ -532,8 +514,7 @@ function updateAttemptProgress(current, total, forceState = null) {
                 
   updateProgressBar('attempt-progress-bar-fill', current, total, state);
   
-  // PHASE 3 OPTIMIZATION: Use cached element
-  const progressText = getCachedElement('attempt-progress-text');
+  const progressText = document.getElementById('attempt-progress-text');
   if (progressText) {
     if (current === 0) {
       progressText.textContent = 'Ready for next chunk';
@@ -548,9 +529,9 @@ function initializeProgress(retryCount, totalChunks) {
   updateProgressBar('attempt-progress-bar-fill', 0, retryCount, ProgressState.INITIALIZING);
   updateProgressBar('progress-bar-fill', 0, totalChunks, ProgressState.INITIALIZING);
   
-  // PHASE 3 OPTIMIZATION: Use cached elements
-  const attemptText = getCachedElement('attempt-progress-text');
-  const progressText = getCachedElement('progress-text');
+  // Set initial text
+  const attemptText = document.getElementById('attempt-progress-text');
+  const progressText = document.getElementById('progress-text');
   
   if (attemptText) attemptText.textContent = 'Ready to start';
   if (progressText) progressText.textContent = `0/${totalChunks} chunks processed`;
@@ -791,13 +772,12 @@ async function addChunk(index, content, rawContent) {
     });
 
     await browser.storage.local.set({ processedChunks: filteredChunks });
-    if (DEBUG) console.log(`addChunk: Successfully saved chunk ${index} for session ${sessionId}`);
+    console.log(`addChunk: Successfully saved chunk ${index} for session ${sessionId}`);
   } catch (error) {
     console.error(`addChunk: Error saving chunk ${index} to storage:`, error);
   }
 
-  // PHASE 3 OPTIMIZATION: Use cached element
-  const chunksContainer = getCachedElement('chunks-container');
+  const chunksContainer = document.getElementById('chunks-container');
   const chunkDiv = document.createElement('div');
   chunkDiv.id = 'chunk-' + index;
   chunkDiv.className = 'chunk';
@@ -1056,7 +1036,7 @@ async function saveChunkToStorage(index, content, rawContent) {
   });
 
   await browser.storage.local.set({ processedChunks: filteredChunks });
-  if (DEBUG) console.log(`Saved chunk ${index} to storage for session ${sessionId}`);
+  console.log(`Saved chunk ${index} to storage for session ${sessionId}`);
 }
 
 async function reprocessChunk(index, rawContent) {
@@ -1180,10 +1160,9 @@ async function reprocessChunk(index, rawContent) {
     reprocessingState.targetIndex = index;
     reprocessingState.targetElementId = `chunk-${index}`;
     reprocessingState.originalRawContent = rawContent; // Store the raw content being reprocessed
-    if (DEBUG) console.log(`Reprocessing activated for index: ${index}, ID: ${reprocessingState.targetElementId}`);
+    console.log(`Reprocessing activated for index: ${index}, ID: ${reprocessingState.targetElementId}`);
 
-    // PHASE 3 OPTIMIZATION: Use cached element
-    const targetChunkDiv = getCachedElement(reprocessingState.targetElementId);
+    const targetChunkDiv = document.getElementById(reprocessingState.targetElementId);
     if (!targetChunkDiv) {
       console.error(`Cannot reprocess: Chunk element ${reprocessingState.targetElementId} not found.`);
       showError(`Error: UI element for chunk ${index + 1} not found for reprocessing.`);
@@ -1318,16 +1297,15 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
         // Do not return; proceed to update/create the div content.
       }
     } else { // Normal (non-reprocessing) stream
-      if (DEBUG) console.log(`updateStreamingChunk (NORMAL): isInitial=${isInitial}, isComplete=${isComplete}, globalCurrentChunkIndex=${currentChunkIndex}`);
+      console.log(`updateStreamingChunk (NORMAL): isInitial=${isInitial}, isComplete=${isComplete}, globalCurrentChunkIndex=${currentChunkIndex}`);
       if (isInitial) {
         currentChunkIndex++; // A new distinct chunk is starting
         effectiveChunkIndex = currentChunkIndex;
         effectiveStreamingChunkId = `chunk-${effectiveChunkIndex}`;
-        if (DEBUG) console.log(`New chunk starting (NORMAL). EffectiveIndex: ${effectiveChunkIndex}. Raw: ${rawContent ? rawContent.substring(0,20) : 'N/A'}`);
+        console.log(`New chunk starting (NORMAL). EffectiveIndex: ${effectiveChunkIndex}. Raw: ${rawContent ? rawContent.substring(0,20) : 'N/A'}`);
 
         if (effectiveChunkIndex === 0) { // Clear container only for the very first *new* chunk
-          // PHASE 3 OPTIMIZATION: Use cached element
-          const chunksContainer = getCachedElement('chunks-container');
+          const chunksContainer = document.getElementById('chunks-container');
           if (chunksContainer) chunksContainer.innerHTML = '';
         }
         
@@ -1506,7 +1484,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
       
       // Explicitly save the final complete content
       await saveChunkToStorage(effectiveChunkIndex, finalContentToSave, effectiveRawContent);
-      if (DEBUG) console.log(`Saved final COMPLETED content for chunk ${effectiveChunkIndex} (ID: ${effectiveStreamingChunkId})`);
+      console.log(`Saved final COMPLETED content for chunk ${effectiveChunkIndex} (ID: ${effectiveStreamingChunkId})`);
 
       isStreaming = false;
       updateAttemptProgress(1, 1, ProgressState.COMPLETED);
@@ -1526,13 +1504,13 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
       }
       
       if (reprocessingState.isActive && reprocessingState.targetIndex === effectiveChunkIndex) {
-        if (DEBUG) console.log(`Reprocessing stream complete for index ${effectiveChunkIndex}. Resetting state.`);
+        console.log(`Reprocessing stream complete for index ${effectiveChunkIndex}. Resetting state.`);
         reprocessingState.isActive = false;
         reprocessingState.targetIndex = -1;
         reprocessingState.targetElementId = null;
         reprocessingState.originalRawContent = null;
       }
-      if (DEBUG) console.log(`Streaming complete and saved for chunk ${effectiveChunkIndex}. Main progress updated.`);
+      console.log(`Streaming complete and saved for chunk ${effectiveChunkIndex}. Main progress updated.`);
       return;
     }
 
@@ -1564,8 +1542,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
         // Fallback: try to find it again, or show error. For now, log and proceed cautiously.
         // This indicates a logic flaw if reprocessChunk didn't prepare the div or it got removed.
       }
-      // PHASE 3 OPTIMIZATION: Use cached element
-      const chunksContainer = getCachedElement('chunks-container');
+      const chunksContainer = document.getElementById('chunks-container');
       chunkDiv = document.createElement('div'); // Renamed from chunkElement for consistency
       chunkDiv.id = effectiveStreamingChunkId;
       chunkDiv.className = 'chunk';
@@ -1913,7 +1890,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
     showError('Error updating streaming content: ' + error.message);
     // If an error occurs during a reprocess stream, reset the state
     if (reprocessingState.isActive && reprocessingState.targetIndex === (typeof effectiveChunkIndex !== 'undefined' ? effectiveChunkIndex : currentChunkIndex) ) {
-        if (DEBUG) console.log("Resetting reprocessing state due to error in updateStreamingChunk.");
+        console.log("Resetting reprocessing state due to error in updateStreamingChunk.");
         reprocessingState.isActive = false;
         reprocessingState.targetIndex = -1;
         reprocessingState.targetElementId = null;
@@ -1923,7 +1900,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
 }
 
 browser.runtime.onMessage.addListener((message) => {
-  if (DEBUG) console.log('Received message:', message);
+  console.log('Received message:', message);
   switch (message.action) {
       case 'initializeProgress':
           initializeProgress(message.retryCount, message.totalChunks);
@@ -1967,7 +1944,7 @@ browser.runtime.onMessage.addListener((message) => {
           showError(message.errorContent, message.isFatal);
           break;
       case 'updateStreamContent':
-          if (DEBUG) console.log('Received streaming content update:', message.content);
+          console.log('Received streaming content update:', message.content);
           if (message.terminated) {
             // Handle terminated state
             isStreaming = false;
@@ -1986,11 +1963,10 @@ browser.runtime.onMessage.addListener((message) => {
 // Scroll behavior for progress bar
 let lastScrollTop = 0;
 let scrollDirectionThreshold = 50; // Minimum pixels to scroll before triggering
+const progressContainer = document.getElementById('progress-container');
 
 // Initialize scroll behavior
 function initializeScrollBehavior() {
-  // PHASE 3 OPTIMIZATION: Cache element after DOM is ready
-  const progressContainer = getCachedElement('progress-container');
   if (!progressContainer) return;
   
   // Start with progress bar visible
@@ -2019,14 +1995,12 @@ function handleScroll() {
 }
 
 function hideProgressBar() {
-  const progressContainer = getCachedElement('progress-container');
   if (!progressContainer) return;
   progressContainer.classList.remove('visible');
   progressContainer.classList.add('hidden');
 }
 
 function showProgressBar() {
-  const progressContainer = getCachedElement('progress-container');
   if (!progressContainer) return;
   progressContainer.classList.remove('hidden');
   progressContainer.classList.add('visible');
@@ -2037,4 +2011,4 @@ document.addEventListener('DOMContentLoaded', () => {
   initializeScrollBehavior();
 });
 
-if (DEBUG) console.log('Chunks page script loaded');
+console.log('Chunks page script loaded');
