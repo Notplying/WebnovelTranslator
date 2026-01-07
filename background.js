@@ -157,7 +157,7 @@ browser.storage.onChanged.addListener((changes, areaName) => {
  * @param {string} sessionId - Session ID for progress tracking
  * @returns {Promise<Array>} - Array of results in the same order as input chunks
  */
-async function processBatch(chunks, concurrency = 3, sessionId = null) {
+async function processBatch(chunks, concurrency = 3, sessionId = null, prefix = '', suffix = '') {
   if (!chunks || chunks.length === 0) {
     return [];
   }
@@ -183,7 +183,7 @@ async function processBatch(chunks, concurrency = 3, sessionId = null) {
     const chunk = chunks[i];
     const promise = (async () => {
       try {
-        const result = await processChunk({ chunk, prefix: message.prefix, suffix: message.suffix, sessionId: message.sessionId });
+        const result = await processChunk({ chunk, prefix, suffix, sessionId });
         completedCount++;
         
         // PHASE 3 OPTIMIZATION: Calculate and send progress updates
@@ -316,7 +316,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // PHASE 2 OPTIMIZATION: Handle batch processing requests
     const concurrency = message.concurrency || 3;
     const sessionId = message.sessionId;
-    processBatch(message.chunks, concurrency, sessionId)
+    processBatch(message.chunks, concurrency, sessionId, message.prefix, message.suffix)
       .then(results => sendResponse({ success: true, results }))
       .catch(error => {
         console.error('Error in processBatch:', error);
@@ -643,7 +643,15 @@ async function unifiedStreamingHandler(config) {
       const responseData = await response.json();
       if (DEBUG) console.log(`Parsed ${apiName} response:`, JSON.stringify(responseData, null, 2));
       
-      return parseResponse(responseData);
+      const result = parseResponse(responseData);
+      
+      // Clean up tab close listener and session tracking on successful non-streaming completion
+      if (tabCloseListener) {
+        browser.tabs.onRemoved.removeListener(tabCloseListener);
+      }
+      delete sessionTabIds[sessionId];
+      
+      return result;
     } else {
       // Streaming mode
       const reader = response.body?.getReader();
@@ -723,8 +731,8 @@ async function unifiedStreamingHandler(config) {
           rawContent: message.chunk,
           isComplete: true
         });
-        // Small delay to ensure UI updates before returning
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // Wait for next animation frame to ensure UI updates are processed
+        await new Promise(resolve => requestAnimationFrame(resolve));
         
         // PHASE 1 OPTIMIZATION: Update last update time
         if (sessionControllers[sessionId]) {
@@ -738,6 +746,11 @@ async function unifiedStreamingHandler(config) {
         clearDebounceTimeout(sessionId);
         // Clean up the controller reference
         delete sessionControllers[sessionId];
+        // Remove tab close listener and clean up session tracking
+        if (tabCloseListener) {
+          browser.tabs.onRemoved.removeListener(tabCloseListener);
+        }
+        delete sessionTabIds[sessionId];
       }
     }
   } catch (error) {

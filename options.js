@@ -222,20 +222,23 @@ document.addEventListener('DOMContentLoaded', function () {
         return;
       }
 
-      const temperatureValidation = validateInput(getCachedElement('temperature').value, 'number', 0, 2);
-      if (!temperatureValidation.valid && temperatureValidation.value !== '') {
+      const rawTemperature = getCachedElement('temperature').value;
+      const temperatureValidation = validateInput(rawTemperature, 'number', 0, 2);
+      if (rawTemperature !== '' && !temperatureValidation.valid) {
         showStatus('Invalid Temperature: ' + temperatureValidation.error, 5000);
         return;
       }
 
-      const topKValidation = validateInput(getCachedElement('top-k').value, 'number', 1, 100);
-      if (!topKValidation.valid && topKValidation.value !== '') {
+      const rawTopK = getCachedElement('top-k').value;
+      const topKValidation = validateInput(rawTopK, 'number', 1, 100);
+      if (rawTopK !== '' && !topKValidation.valid) {
         showStatus('Invalid Top K: ' + topKValidation.error, 5000);
         return;
       }
 
-      const topPValidation = validateInput(getCachedElement('top-p').value, 'number', 0, 1);
-      if (!topPValidation.valid && topPValidation.value !== '') {
+      const rawTopP = getCachedElement('top-p').value;
+      const topPValidation = validateInput(rawTopP, 'number', 0, 1);
+      if (rawTopP !== '' && !topPValidation.valid) {
         showStatus('Invalid Top P: ' + topPValidation.error, 5000);
         return;
       }
@@ -267,42 +270,42 @@ document.addEventListener('DOMContentLoaded', function () {
       const settings = {
         apiType,
         maxLength: maxLengthValidation.value,
-        prefix: getCachedElement('prefix').value,
-        suffix: getCachedElement('suffix').value,
+        prefix: getCachedElement('prefix')?.value || '',
+        suffix: getCachedElement('suffix')?.value || '',
         retryCount: retryCountValidation.value,
-        temperature: temperatureValidation.value,
-        topK: topKValidation.value,
-        topP: topPValidation.value,
-        geminiApiKey: getCachedElement('gemini-api-key').value,
-        geminiModelId: getCachedElement('gemini-model-id').value,
+        temperature: rawTemperature !== '' ? temperatureValidation.value : '',
+        topK: rawTopK !== '' ? topKValidation.value : '',
+        topP: rawTopP !== '' ? topPValidation.value : '',
+        geminiApiKey: getCachedElement('gemini-api-key')?.value || '',
+        geminiModelId: getCachedElement('gemini-model-id')?.value || '',
         vertexServiceAccountKey: vertexServiceAccountKey,
-        vertexLocation: getCachedElement('location').value,
-        vertexProjectId: getCachedElement('project-id').value,
-        vertexModelId: getCachedElement('model-id').value,
-        vertexMaxTokens: getCachedElement('vertex-max-tokens').value,
-        vertexContextWindow: getCachedElement('vertex-context-window').value,
-        openRouterApiKey: getCachedElement('openRouter-api-key').value,
-        openRouterModelId: getCachedElement('openRouter-model-id').value,
-        openRouterMaxTokens: getCachedElement('openRouter-max-tokens').value,
-        openRouterContextWindow: getCachedElement('openRouter-context-window').value,
-        openRouterStream: getCachedElement('openRouter-stream').value === 'true',
-        openRouterProviderOrder: getCachedElement('openRouter-provider-order').value,
-        openRouterAllowFallback: getCachedElement('openRouter-allow-fallback').value === 'true',
-        openaiApiKey: getCachedElement('openai-api-key').value,
-        openaiModelId: getCachedElement('openai-model-id').value,
+        vertexLocation: getCachedElement('location')?.value || '',
+        vertexProjectId: getCachedElement('project-id')?.value || '',
+        vertexModelId: getCachedElement('model-id')?.value || '',
+        vertexMaxTokens: getCachedElement('vertex-max-tokens')?.value || '',
+        vertexContextWindow: getCachedElement('vertex-context-window')?.value || '',
+        openRouterApiKey: getCachedElement('openRouter-api-key')?.value || '',
+        openRouterModelId: getCachedElement('openRouter-model-id')?.value || '',
+        openRouterMaxTokens: getCachedElement('openRouter-max-tokens')?.value || '',
+        openRouterContextWindow: getCachedElement('openRouter-context-window')?.value || '',
+        openRouterStream: getCachedElement('openRouter-stream')?.value === 'true',
+        openRouterProviderOrder: getCachedElement('openRouter-provider-order')?.value || '',
+        openRouterAllowFallback: getCachedElement('openRouter-allow-fallback')?.value === 'true',
+        openaiApiKey: getCachedElement('openai-api-key')?.value || '',
+        openaiModelId: getCachedElement('openai-model-id')?.value || '',
         openaiBaseUrl: openaiBaseUrl,
-        openaiMaxTokens: getCachedElement('openai-max-tokens').value,
-        openaiContextWindow: getCachedElement('openai-context-window').value,
-        openaiStream: getCachedElement('openai-stream').value === 'true',
-        geminiMaxTokens: getCachedElement('gemini-max-tokens').value,
-        geminiContextWindow: getCachedElement('gemini-context-window').value,
-        geminiStream: getCachedElement('gemini-stream').value === 'true',
-        vertexStream: getCachedElement('vertex-stream').value === 'true',
-        glmCodingApiKey: getCachedElement('glmCoding-api-key').value,
-        glmCodingModelId: getCachedElement('glmCoding-model-id').value,
-        glmCodingMaxTokens: getCachedElement('glmCoding-max-tokens').value,
-        glmCodingContextWindow: getCachedElement('glmCoding-context-window').value,
-        glmCodingStream: getCachedElement('glmCoding-stream').value === 'true',
+        openaiMaxTokens: getCachedElement('openai-max-tokens')?.value || '',
+        openaiContextWindow: getCachedElement('openai-context-window')?.value || '',
+        openaiStream: getCachedElement('openai-stream')?.value === 'true',
+        geminiMaxTokens: getCachedElement('gemini-max-tokens')?.value || '',
+        geminiContextWindow: getCachedElement('gemini-context-window')?.value || '',
+        geminiStream: getCachedElement('gemini-stream')?.value === 'true',
+        vertexStream: getCachedElement('vertex-stream')?.value === 'true',
+        glmCodingApiKey: getCachedElement('glmCoding-api-key')?.value || '',
+        glmCodingModelId: getCachedElement('glmCoding-model-id')?.value || '',
+        glmCodingMaxTokens: getCachedElement('glmCoding-max-tokens')?.value || '',
+        glmCodingContextWindow: getCachedElement('glmCoding-context-window')?.value || '',
+        glmCodingStream: getCachedElement('glmCoding-stream')?.value === 'true',
         maxSessions: maxSessionsValidation.value
       };
 

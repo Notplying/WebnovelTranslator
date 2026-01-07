@@ -16,19 +16,6 @@ function getCachedElement(id) {
   return cachedElements[id];
 }
 
-// PHASE 3 OPTIMIZATION: Debounce function for DOM operations
-function debounce(func, wait) {
-  let timeout;
-  return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-  };
-}
-
 // Self-initialize when loaded
 document.addEventListener('DOMContentLoaded', () => {
   if (DEBUG) console.log('Chunks page loaded, initializing...');
