@@ -522,7 +522,7 @@ document.addEventListener('DOMContentLoaded', function () {
       alert(result.message);
     } catch (error) {
       console.error('Error testing service account:', error);
-      if (DEBUG) console.error('Full error details:', error);
+      console.error('Full error details:', error);
       alert('Error: ' + error.message + '\n\nCheck the console for more details.');
     }
   });
