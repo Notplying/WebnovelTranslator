@@ -731,7 +731,12 @@ async function unifiedStreamingHandler(config) {
           rawContent: message.chunk,
           isComplete: true
         });
-        // Wait for next animation frame to ensure UI updates are processed
+        // NOTE: requestAnimationFrame schedules a callback before the next repaint but does NOT guarantee
+        // that the asynchronous browser.tabs.sendMessage(..., updateChunksPage) has been received or processed.
+        // For deterministic ordering, either await a response/ack from the content script when calling
+        // browser.tabs.sendMessage for updateChunksPage, or intentionally delay (e.g., a short setTimeout)
+        // if you only need a micro-delay. This current approach provides a micro-delay but is not reliable
+        // for ensuring message delivery.
         await new Promise(resolve => requestAnimationFrame(resolve));
         
         // PHASE 1 OPTIMIZATION: Update last update time

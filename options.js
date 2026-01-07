@@ -210,46 +210,59 @@ document.addEventListener('DOMContentLoaded', function () {
       const apiType = apiTypeElement.value;
 
       // PHASE 3 OPTIMIZATION: Add input validation
-      const maxLengthValidation = validateInput(getCachedElement('max-length').value, 'number', 100, 100000);
-      if (!maxLengthValidation.valid) {
-        showStatus('Invalid Max Length: ' + maxLengthValidation.error, 5000);
-        return;
+      const maxLengthElement = getCachedElement('max-length');
+      if (maxLengthElement) {
+        const maxLengthValidation = validateInput(maxLengthElement.value, 'number', 100, 100000);
+        if (!maxLengthValidation.valid) {
+          showStatus('Invalid Max Length: ' + maxLengthValidation.error, 5000);
+          return;
+        }
       }
 
-      const retryCountValidation = validateInput(getCachedElement('retry-count').value, 'number', 1, 10);
-      if (!retryCountValidation.valid) {
-        showStatus('Invalid Retry Count: ' + retryCountValidation.error, 5000);
-        return;
+      const retryCountElement = getCachedElement('retry-count');
+      if (retryCountElement) {
+        const retryCountValidation = validateInput(retryCountElement.value, 'number', 1, 10);
+        if (!retryCountValidation.valid) {
+          showStatus('Invalid Retry Count: ' + retryCountValidation.error, 5000);
+          return;
+        }
       }
 
-      const rawTemperature = getCachedElement('temperature').value;
+      const temperatureElement = getCachedElement('temperature');
+      const rawTemperature = temperatureElement?.value || '';
       const temperatureValidation = validateInput(rawTemperature, 'number', 0, 2);
       if (rawTemperature !== '' && !temperatureValidation.valid) {
         showStatus('Invalid Temperature: ' + temperatureValidation.error, 5000);
         return;
       }
 
-      const rawTopK = getCachedElement('top-k').value;
+      const topKElement = getCachedElement('top-k');
+      const rawTopK = topKElement?.value || '';
       const topKValidation = validateInput(rawTopK, 'number', 1, 100);
       if (rawTopK !== '' && !topKValidation.valid) {
         showStatus('Invalid Top K: ' + topKValidation.error, 5000);
         return;
       }
 
-      const rawTopP = getCachedElement('top-p').value;
+      const topPElement = getCachedElement('top-p');
+      const rawTopP = topPElement?.value || '';
       const topPValidation = validateInput(rawTopP, 'number', 0, 1);
       if (rawTopP !== '' && !topPValidation.valid) {
         showStatus('Invalid Top P: ' + topPValidation.error, 5000);
         return;
       }
 
-      const maxSessionsValidation = validateInput(getCachedElement('max-sessions').value, 'number', 1, 10);
-      if (!maxSessionsValidation.valid) {
-        showStatus('Invalid Max Sessions: ' + maxSessionsValidation.error, 5000);
-        return;
+      const maxSessionsElement = getCachedElement('max-sessions');
+      if (maxSessionsElement) {
+        const maxSessionsValidation = validateInput(maxSessionsElement.value, 'number', 1, 10);
+        if (!maxSessionsValidation.valid) {
+          showStatus('Invalid Max Sessions: ' + maxSessionsValidation.error, 5000);
+          return;
+        }
       }
 
-      const openaiBaseUrl = getCachedElement('openai-base-url').value;
+      const openaiBaseUrlElement = getCachedElement('openai-base-url');
+      const openaiBaseUrl = openaiBaseUrlElement?.value || '';
       if (openaiBaseUrl && openaiBaseUrl !== '') {
         const urlValidation = validateInput(openaiBaseUrl, 'url');
         if (!urlValidation.valid) {
@@ -258,7 +271,8 @@ document.addEventListener('DOMContentLoaded', function () {
         }
       }
 
-      const vertexServiceAccountKey = getCachedElement('service-account-key').value;
+      const serviceAccountKeyElement = getCachedElement('service-account-key');
+      const vertexServiceAccountKey = serviceAccountKeyElement?.value || '';
       if (vertexServiceAccountKey && vertexServiceAccountKey !== '') {
         const jsonValidation = validateInput(vertexServiceAccountKey, 'json');
         if (!jsonValidation.valid) {
@@ -269,10 +283,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
       const settings = {
         apiType,
-        maxLength: maxLengthValidation.value,
+        maxLength: maxLengthElement ? maxLengthValidation.value : undefined,
         prefix: getCachedElement('prefix')?.value || '',
         suffix: getCachedElement('suffix')?.value || '',
-        retryCount: retryCountValidation.value,
+        retryCount: retryCountElement ? retryCountValidation.value : undefined,
         temperature: rawTemperature !== '' ? temperatureValidation.value : '',
         topK: rawTopK !== '' ? topKValidation.value : '',
         topP: rawTopP !== '' ? topPValidation.value : '',
@@ -306,7 +320,7 @@ document.addEventListener('DOMContentLoaded', function () {
         glmCodingMaxTokens: getCachedElement('glmCoding-max-tokens')?.value || '',
         glmCodingContextWindow: getCachedElement('glmCoding-context-window')?.value || '',
         glmCodingStream: getCachedElement('glmCoding-stream')?.value === 'true',
-        maxSessions: maxSessionsValidation.value
+        maxSessions: maxSessionsElement ? maxSessionsValidation.value : undefined
       };
 
       await browser.storage.local.set(settings);
