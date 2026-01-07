@@ -667,6 +667,9 @@ async function unifiedStreamingHandler(config) {
       // Note: contentArray is declared at line 589, no need to redeclare here
       
       try {
+        // Flag to signal when stream is finished
+        let streamFinished = false;
+        
         while (true) {
           try {
             const { done, value } = await reader.read();
@@ -685,7 +688,10 @@ async function unifiedStreamingHandler(config) {
               
               if (line.startsWith('data: ')) {
                 const data = line.slice(6);
-                if (data === '[DONE]') break;
+                if (data === '[DONE]') {
+                  streamFinished = true;
+                  break;
+                }
                 
                 try {
                   const parsed = JSON.parse(data);
@@ -711,6 +717,11 @@ async function unifiedStreamingHandler(config) {
                   if (DEBUG) console.log('Error parsing JSON:', e);
                 }
               }
+            }
+            
+            // Break outer loop if stream is finished
+            if (streamFinished) {
+              break;
             }
           } catch (error) {
             if (error.name === 'AbortError') {

@@ -10,7 +10,7 @@ function debounce(func, wait) {
   let timeout;
   return function executedFunction(...args) {
     const later = () => {
-      clearTimeout(timeout);
+      timeout = null;
       func(...args);
     };
     clearTimeout(timeout);
@@ -21,7 +21,12 @@ function debounce(func, wait) {
 // PHASE 3 OPTIMIZATION: Cache DOM element
 function getCachedElement(id) {
   if (!cachedElements[id]) {
-    cachedElements[id] = document.getElementById(id);
+    const element = document.getElementById(id);
+    // Only cache truthy elements to avoid caching null/undefined
+    if (element) {
+      cachedElements[id] = element;
+    }
+    return element;
   }
   return cachedElements[id];
 }
