@@ -1,5 +1,13 @@
 var extension = typeof browser !== 'undefined' ? browser : chrome;
 
+// Web Automation Configuration
+var WebAutomationConfig = {
+  DELAY_CHATGPT_MS: 2000,
+  DELAY_GEMINI_MS: 3000,
+  TAB_LOAD_TIMEOUT_MS: 15000,
+  EXECUTION_TIMEOUT_MS: 10000
+};
+
 // Variables for debouncing stream updates
 let debounceTimeout;
 let lastUpdateTime = 0;
@@ -1462,35 +1470,120 @@ async function processChunkWithGLMCoding(message, options) {
   }
 }
 
+// Helper to get an existing tab or create a new one
+async function getOrCreateTab(url, urlPattern, sessionId) {
+  // 1. Check if we have a tracked tab for this session
+  if (sessionTabIds[sessionId]) {
+    try {
+      const tab = await browser.tabs.get(sessionTabIds[sessionId]);
+      // Optional: check if url still matches pattern
+      if (tab.url && new RegExp(urlPattern.replace('*', '.*')).test(tab.url)) {
+        return { tab, reused: true };
+      }
+    } catch (e) {
+      // Tab closed or invalid
+      delete sessionTabIds[sessionId];
+    }
+  }
+
+  // 2. Check for any existing tab matching pattern
+  const tabs = await browser.tabs.query({ url: urlPattern });
+  if (tabs.length > 0) {
+    const tab = tabs[0];
+    sessionTabIds[sessionId] = tab.id;
+    await browser.tabs.update(tab.id, { active: true });
+    return { tab, reused: true };
+  }
+
+  // 3. Create new tab
+  const tab = await browser.tabs.create({ url: url });
+  sessionTabIds[sessionId] = tab.id;
+  return { tab, reused: false };
+}
+
+// Helper to wait for tab to be ready
+function waitForTabLoad(tabId, timeoutMs, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error('Aborted'));
+
+    // Check if already complete
+    browser.tabs.get(tabId).then(tab => {
+      if (tab.status === 'complete') {
+        resolve();
+        return;
+      }
+
+      const timer = setTimeout(() => {
+        browser.tabs.onUpdated.removeListener(listener);
+        reject(new Error(`Timeout waiting for tab ${tabId} to load`));
+      }, timeoutMs);
+
+      const listener = (tid, changeInfo) => {
+        if (tid === tabId && changeInfo.status === 'complete') {
+          browser.tabs.onUpdated.removeListener(listener);
+          clearTimeout(timer);
+          resolve();
+        }
+      };
+
+      if (signal) {
+        signal.addEventListener('abort', () => {
+          browser.tabs.onUpdated.removeListener(listener);
+          clearTimeout(timer);
+          reject(new Error('Aborted'));
+        });
+      }
+
+      browser.tabs.onUpdated.addListener(listener);
+    }).catch(reject);
+  });
+}
+
 async function processChunkWithChatGPTWeb(message, options) {
   const fullContent = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
   const targetUrl = 'https://chatgpt.com/';
+  const targetPattern = 'https://chatgpt.com/*'; // Simplistic pattern
+
+  // Setup AbortController
+  const controller = new AbortController();
+  const sessionId = message.sessionId;
+  sessionControllers[sessionId] = controller;
 
   try {
     console.log("Opening/Finding ChatGPT tab...");
 
-    // Create a new tab
-    const tab = await browser.tabs.create({ url: targetUrl });
+    if (controller.signal.aborted) throw new Error("Aborted");
 
-    // Wait for tab to be ready
-    await new Promise((resolve) => {
-      const listener = (tabId, changeInfo) => {
-        if (tabId === tab.id && changeInfo.status === 'complete') {
-          browser.tabs.onUpdated.removeListener(listener);
-          resolve();
-        }
-      };
-      browser.tabs.onUpdated.addListener(listener);
+    const { tab, reused } = await getOrCreateTab(targetUrl, targetPattern, sessionId);
+
+    // Wait for load if created or if reused but loading (waitForTabLoad handles 'complete' check)
+    await waitForTabLoad(tab.id, WebAutomationConfig.TAB_LOAD_TIMEOUT_MS, controller.signal);
+
+    // Wait delay
+    if (controller.signal.aborted) throw new Error("Aborted");
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(resolve, WebAutomationConfig.DELAY_CHATGPT_MS);
+      controller.signal.addEventListener('abort', () => {
+        clearTimeout(timer);
+        reject(new Error("Aborted"));
+      });
     });
 
-    // Add a small delay for page scripts to settle
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
     console.log("Sending text to ChatGPT tab...");
-    await browser.tabs.sendMessage(tab.id, {
+    // Send message with timeout mechanism
+    // Note: browser.tabs.sendMessage doesn't support signal directly, but we can ignore result if aborted
+
+    const responsePromise = browser.tabs.sendMessage(tab.id, {
       action: 'paste_chunk_v2',
       text: fullContent
     });
+
+    // Race with timeout and abort
+    const result = await Promise.race([
+      responsePromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout sending message to script")), WebAutomationConfig.EXECUTION_TIMEOUT_MS)),
+      new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error("Aborted"))))
+    ]);
 
     return {
       result: "Sent to ChatGPT Web",
@@ -1500,38 +1593,49 @@ async function processChunkWithChatGPTWeb(message, options) {
   } catch (error) {
     console.error("Error in processChunkWithChatGPTWeb:", error);
     return { error: "Failed to send to ChatGPT: " + error.message };
+  } finally {
+    delete sessionControllers[sessionId];
   }
 }
 
 async function processChunkWithGeminiWeb(message, options) {
   const fullContent = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
   const targetUrl = 'https://gemini.google.com/';
+  const targetPattern = 'https://gemini.google.com/*';
+
+  const controller = new AbortController();
+  const sessionId = message.sessionId;
+  sessionControllers[sessionId] = controller;
 
   try {
     console.log("Opening/Finding Gemini tab...");
 
-    // Create a new tab
-    const tab = await browser.tabs.create({ url: targetUrl });
+    if (controller.signal.aborted) throw new Error("Aborted");
 
-    // Wait for tab to be ready
-    await new Promise((resolve) => {
-      const listener = (tabId, changeInfo) => {
-        if (tabId === tab.id && changeInfo.status === 'complete') {
-          browser.tabs.onUpdated.removeListener(listener);
-          resolve();
-        }
-      };
-      browser.tabs.onUpdated.addListener(listener);
+    const { tab, reused } = await getOrCreateTab(targetUrl, targetPattern, sessionId);
+
+    await waitForTabLoad(tab.id, WebAutomationConfig.TAB_LOAD_TIMEOUT_MS, controller.signal);
+
+    if (controller.signal.aborted) throw new Error("Aborted");
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(resolve, WebAutomationConfig.DELAY_GEMINI_MS);
+      controller.signal.addEventListener('abort', () => {
+        clearTimeout(timer);
+        reject(new Error("Aborted"));
+      });
     });
 
-    // Add a small delay for page scripts to settle
-    await new Promise(resolve => setTimeout(resolve, 3000)); // Slightly longer for Gemini
-
     console.log("Sending text to Gemini tab...");
-    await browser.tabs.sendMessage(tab.id, {
+    const responsePromise = browser.tabs.sendMessage(tab.id, {
       action: 'paste_chunk_gemini',
       text: fullContent
     });
+
+    await Promise.race([
+      responsePromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout sending message to script")), WebAutomationConfig.EXECUTION_TIMEOUT_MS)),
+      new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error("Aborted"))))
+    ]);
 
     return {
       result: "Sent to Gemini Web",
@@ -1541,5 +1645,7 @@ async function processChunkWithGeminiWeb(message, options) {
   } catch (error) {
     console.error("Error in processChunkWithGeminiWeb:", error);
     return { error: "Failed to send to Gemini: " + error.message };
+  } finally {
+    delete sessionControllers[sessionId];
   }
 }
