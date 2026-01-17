@@ -1508,6 +1508,8 @@ function waitForTabLoad(tabId, timeoutMs, signal) {
 
     // Check if already complete
     browser.tabs.get(tabId).then(tab => {
+      if (signal?.aborted) return reject(new Error('Aborted'));
+
       if (tab.status === 'complete') {
         resolve();
         return;
@@ -1582,7 +1584,10 @@ async function processChunkWithChatGPTWeb(message, options) {
     const result = await Promise.race([
       responsePromise,
       new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout sending message to script")), WebAutomationConfig.EXECUTION_TIMEOUT_MS)),
-      new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error("Aborted"))))
+      new Promise((_, reject) => {
+        if (controller.signal.aborted) return reject(new Error("Aborted"));
+        controller.signal.addEventListener('abort', () => reject(new Error("Aborted")));
+      })
     ]);
 
     if (!result || !result.success) {

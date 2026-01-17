@@ -7,6 +7,7 @@
             console.log("Received paste_chunk_gemini message");
             const success = pasteTextToGemini(message.text);
             sendResponse({ success: success });
+            return true;
         }
     });
 
@@ -38,15 +39,25 @@
 
                 if (!success) {
                     // Fallback
+                    if (inputElement.disabled || (inputElement.readOnly && (inputElement instanceof HTMLInputElement || inputElement instanceof HTMLTextAreaElement))) {
+                        console.error("Input element is disabled or read-only");
+                        return false;
+                    }
+
                     if (inputElement instanceof HTMLInputElement || inputElement instanceof HTMLTextAreaElement) {
                         inputElement.value = text;
-                        inputElement.dispatchEvent(new Event('input', { bubbles: true }));
-                        inputElement.dispatchEvent(new Event('change', { bubbles: true }));
+                        if (inputElement.value === text) {
+                            inputElement.dispatchEvent(new Event('input', { bubbles: true }));
+                            inputElement.dispatchEvent(new Event('change', { bubbles: true }));
+                            success = true;
+                        }
                     } else {
                         inputElement.textContent = text;
-                        inputElement.dispatchEvent(new Event('input', { bubbles: true }));
+                        if (inputElement.textContent === text) {
+                            inputElement.dispatchEvent(new Event('input', { bubbles: true }));
+                            success = true;
+                        }
                     }
-                    success = true; // Assume success if fallback didn't throw
                 }
 
                 if (inputElement.scrollIntoView) {
