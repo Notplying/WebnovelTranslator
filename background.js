@@ -98,7 +98,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
       storedPrefix = message.prefix;
       storedSuffix = message.suffix;
       storedRetryCount = message.retryCount;
-      
+
       // Only clear lastChunksData when starting a new session
       // This preserves processedChunks which contains all session results
       browser.storage.local.remove('lastChunksData')
@@ -144,10 +144,10 @@ async function generateContentHash(chunks, prefix, suffix) {
 
 async function updateSessionStorage(sessionId, sessionDataToStore) {
   let { translationSessions = [] } = await browser.storage.local.get('translationSessions');
-  
+
   // Remove existing session with the same ID, if any, to update its timestamp and data
   translationSessions = translationSessions.filter(s => s.id !== sessionId);
-  
+
   // Create/update the session entry
   const sessionEntry = {
     id: sessionId, // This is the content-based hash
@@ -155,13 +155,13 @@ async function updateSessionStorage(sessionId, sessionDataToStore) {
     firstChunk: sessionDataToStore.chunks[0] || '', // For display/identification
     ...sessionDataToStore // Includes chunks, prefix, suffix, retryCount
   };
-  
+
   // Get max sessions from settings and use it for cleanup
   const { maxSessions = 3 } = await browser.storage.local.get('maxSessions');
   const updatedSessions = [sessionEntry, ...translationSessions]
     .sort((a, b) => b.timestamp - a.timestamp) // Sort by most recent first
     .slice(0, maxSessions); // Keep only the configured number of sessions
-  
+
   await browser.storage.local.set({ translationSessions: updatedSessions });
   console.log(`Session storage updated. Session ID: ${sessionId}, Total sessions: ${updatedSessions.length}`);
 }
@@ -201,10 +201,10 @@ async function openChunksPage() {
 
   const url = browser.runtime.getURL(`chunks.html?session=${sessionIdToUse}`);
   const tab = await browser.tabs.create({ url: url });
-  
+
   // Store the tab ID for this session
   sessionTabIds[sessionIdToUse] = tab.id;
-  
+
   browser.tabs.onUpdated.addListener(function listener(tabId, info) {
     if (tabId === tab.id && info.status === 'complete') {
       browser.tabs.onUpdated.removeListener(listener);
@@ -234,14 +234,14 @@ async function terminateRequest(sessionId) {
     if (!sessionId) {
       throw new Error('No session ID provided');
     }
-    
+
     // Get the AbortController for this session
     const controller = sessionControllers[sessionId];
     if (controller) {
       console.log(`Terminating request for session ${sessionId}`);
       controller.abort();
       delete sessionControllers[sessionId];
-      
+
       // Update the chunks page to show that the request was terminated
       updateChunksPage(sessionId, {
         action: 'updateStreamContent',
@@ -250,7 +250,7 @@ async function terminateRequest(sessionId) {
         isComplete: true,
         terminated: true
       });
-      
+
       return { success: true };
     } else {
       console.log(`No active request found for session ${sessionId}`);
@@ -322,6 +322,10 @@ async function processChunk(message) {
     return processChunkWithOpenAI(message, options);
   } else if (options.apiType === 'glmCoding') {
     return processChunkWithGLMCoding(message, options);
+  } else if (options.apiType === 'chatgptWeb') {
+    return processChunkWithChatGPTWeb(message, options);
+  } else if (options.apiType === 'geminiWeb') {
+    return processChunkWithGeminiWeb(message, options);
   } else {
     throw new Error('Invalid API type selected');
   }
@@ -332,7 +336,7 @@ async function processChunkWithGemini(message, options) {
   let fullContent = '';
   let controller = new AbortController();
   const sessionId = message.sessionId;
-  
+
   // Store the controller for this session to allow termination
   sessionControllers[sessionId] = controller;
 
@@ -399,7 +403,7 @@ async function processChunkWithGemini(message, options) {
         const errorData = await response.json().catch(() => ({ error: { message: `HTTP error! status: ${response.status}` } }));
         let errorMessage = `HTTP error! status: ${response.status}`;
         if (errorData.error) {
-            errorMessage += `, message: ${errorData.error.message}`;
+          errorMessage += `, message: ${errorData.error.message}`;
         }
         throw new Error(errorMessage);
       }
@@ -418,15 +422,15 @@ async function processChunkWithGemini(message, options) {
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
-          
+
           // Gemini streams JSON objects, sometimes prefixed with "data: " in SSE mode
           // We'll handle both cases: direct JSON and SSE-like "data: " prefix.
           while (true) {
             let lineEnd = buffer.indexOf('\n');
             if (lineEnd === -1 && buffer.startsWith('data: ') && buffer.endsWith('}')) { // Handle case where a single data line doesn't have \n but is complete
-                lineEnd = buffer.length;
+              lineEnd = buffer.length;
             } else if (lineEnd === -1) {
-                break; // Not enough data for a full line/object yet
+              break; // Not enough data for a full line/object yet
             }
 
             let line = buffer.slice(0, lineEnd).trim();
@@ -435,7 +439,7 @@ async function processChunkWithGemini(message, options) {
             if (line.startsWith('data: ')) {
               line = line.slice(6).trim(); // Remove "data: " prefix
             }
-            
+
             if (line === '[DONE]') break; // Should not happen with Gemini SSE, but good to have
             if (!line.startsWith('{') || !line.endsWith('}')) continue; // Skip empty or non-JSON lines
 
@@ -460,8 +464,8 @@ async function processChunkWithGemini(message, options) {
                   }
                 }
               } else if (parsed.error) {
-                  console.error('Gemini Stream Error in chunk:', parsed.error.message);
-                  throw new Error(`Gemini API Stream Error: ${parsed.error.message}`);
+                console.error('Gemini Stream Error in chunk:', parsed.error.message);
+                throw new Error(`Gemini API Stream Error: ${parsed.error.message}`);
               }
             } catch (e) {
               console.warn('Error parsing JSON from Gemini stream:', e, "Line:", line);
@@ -475,7 +479,7 @@ async function processChunkWithGemini(message, options) {
         // Clean up the controller reference
         delete sessionControllers[sessionId];
       }
-      
+
       updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk, isComplete: true });
       await new Promise(resolve => setTimeout(resolve, 100)); // Ensure UI update
       lastUpdateTime = Date.now();
@@ -516,18 +520,18 @@ async function processChunkWithGemini(message, options) {
     if (tabCloseListener) browser.tabs.onRemoved.removeListener(tabCloseListener);
     // Clean up the controller reference on error
     delete sessionControllers[sessionId];
-    
+
     updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk, isComplete: true, error: true });
 
     let errorMessage = `Error processing chunk with Gemini API: ${error.message}`;
-     if (error.name === 'AbortError') {
-        return { error: 'Gemini request cancelled - chunks page was closed' };
+    if (error.name === 'AbortError') {
+      return { error: 'Gemini request cancelled - chunks page was closed' };
     }
     if (error.message.includes('code:') && error.message.includes('message:')) {
       const apiMessageMatch = error.message.match(/message: ([^,}]+)/);
       if (apiMessageMatch) errorMessage = `Gemini API Error: ${apiMessageMatch[1].trim()}`;
     } else if (error.message.includes('API key not valid')) {
-        errorMessage = 'Gemini API Error: API key not valid. Please check your key.';
+      errorMessage = 'Gemini API Error: API key not valid. Please check your key.';
     }
     return { error: errorMessage };
   }
@@ -538,7 +542,7 @@ async function processChunkWithVertex(message, options) {
   let fullContent = '';
   let controller = new AbortController();
   const sessionId = message.sessionId;
-  
+
   // Store the controller for this session to allow termination
   sessionControllers[sessionId] = controller;
 
@@ -558,7 +562,7 @@ async function processChunkWithVertex(message, options) {
         top_k: parseInt(options.topK) || 40,
         top_p: parseFloat(options.topP) || 0.95,
       },
-       safety_settings: [ // Vertex uses 'safety_settings'
+      safety_settings: [ // Vertex uses 'safety_settings'
         { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
         { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
         { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
@@ -573,7 +577,7 @@ async function processChunkWithVertex(message, options) {
         requestBody.generation_config.max_output_tokens = maxTokens;
       }
     }
-    
+
     const modelApiName = options.vertexModelId.includes("gemini") ? "streamGenerateContent" : "streamRawPredict"; // Different endpoints for Gemini vs other models
     const apiUrl = `https://${options.vertexLocation}-aiplatform.googleapis.com/v1/projects/${options.vertexProjectId}/locations/${options.vertexLocation}/publishers/google/models/${options.vertexModelId}:${modelApiName}`;
 
@@ -595,7 +599,7 @@ async function processChunkWithVertex(message, options) {
         rawContent: message.chunk,
         isInitial: true
       });
-      
+
       // Vertex AI streaming for Gemini models returns an array of JSON objects.
       // For other models (like text-bison via streamRawPredict), it might be different.
       // We assume Gemini-like streaming here.
@@ -615,9 +619,9 @@ async function processChunkWithVertex(message, options) {
         try { parsedError = JSON.parse(errorText); } catch (e) { /* ignore */ }
         let errorMessage = `HTTP error! status: ${response.status}`;
         if (parsedError && parsedError.error && parsedError.error.message) {
-            errorMessage += `, message: ${parsedError.error.message}`;
+          errorMessage += `, message: ${parsedError.error.message}`;
         } else {
-            errorMessage += `, body: ${errorText.substring(0, 200)}`;
+          errorMessage += `, body: ${errorText.substring(0, 200)}`;
         }
         throw new Error(errorMessage);
       }
@@ -636,9 +640,9 @@ async function processChunkWithVertex(message, options) {
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
-          
+
           // Vertex AI SSE stream sends "data: " prefixed JSON objects
-          while(true) {
+          while (true) {
             const lineEnd = buffer.indexOf('\n');
             if (lineEnd === -1) break;
 
@@ -646,17 +650,17 @@ async function processChunkWithVertex(message, options) {
             buffer = buffer.slice(lineEnd + 1);
 
             if (line.startsWith('data: ')) {
-                line = line.slice(6).trim();
+              line = line.slice(6).trim();
             } else if (line === "" || line === "event: message" || line.startsWith("id:")) { // SSE protocol lines to ignore
-                continue;
+              continue;
             }
 
 
             if (!line.startsWith('{') || !line.endsWith('}')) {
-                 if(line) console.warn("Skipping non-JSON line from Vertex stream:", line);
-                 continue;
+              if (line) console.warn("Skipping non-JSON line from Vertex stream:", line);
+              continue;
             }
-            
+
             try {
               // Vertex responses are an array of objects, but SSE sends one object at a time.
               // Each object should be a valid JSON.
@@ -734,7 +738,7 @@ async function processChunkWithVertex(message, options) {
       if (!responseData.candidates || !responseData.candidates[0] || !responseData.candidates[0].content || !responseData.candidates[0].content.parts || !responseData.candidates[0].content.parts[0]) {
         // Check for PaLM style response for older models if Gemini structure fails
         if (responseData.predictions && responseData.predictions[0] && responseData.predictions[0].content) {
-             return { result: responseData.predictions[0].content };
+          return { result: responseData.predictions[0].content };
         }
         throw new Error('Unexpected response structure from Vertex AI API (non-streaming): ' + JSON.stringify(responseData).substring(0, 500));
       }
@@ -747,10 +751,10 @@ async function processChunkWithVertex(message, options) {
     delete sessionControllers[sessionId];
 
     updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk, isComplete: true, error: true });
-    
+
     let errorMessage = `Error processing chunk with Vertex AI API: ${error.message}`;
     if (error.name === 'AbortError') {
-        return { error: 'Vertex request cancelled - chunks page was closed' };
+      return { error: 'Vertex request cancelled - chunks page was closed' };
     }
     // Add more specific error parsing if needed
     return { error: errorMessage };
@@ -763,10 +767,10 @@ async function processChunkWithOpenRouter(message, options) {
   let fullContent = '';
   let controller = new AbortController();
   const sessionId = message.sessionId;
-  
+
   // Store the controller for this session to allow termination
   sessionControllers[sessionId] = controller;
-  
+
   try {
     // Set up tab close listener to abort request
     tabCloseListener = (tabId) => {
@@ -778,7 +782,7 @@ async function processChunkWithOpenRouter(message, options) {
       }
     };
     browser.tabs.onRemoved.addListener(tabCloseListener);
-    
+
     // Initialize progress bar first to prevent "processing error" text
     if (options.openRouterStream) {
       updateChunksPage(sessionId, {
@@ -788,7 +792,7 @@ async function processChunkWithOpenRouter(message, options) {
         isInitial: true // Flag to indicate this is the initial update
       });
     }
-    
+
     const requestBody = {
       model: options.openRouterModelId || 'openai/gpt-4',
       messages: [
@@ -822,7 +826,7 @@ async function processChunkWithOpenRouter(message, options) {
         .split(',')
         .map(provider => provider.trim())
         .filter(provider => provider.length > 0);
-      
+
       if (providerOrder.length > 0) {
         requestBody.provider = {
           order: providerOrder,
@@ -891,10 +895,10 @@ async function processChunkWithOpenRouter(message, options) {
                 try {
                   const parsed = JSON.parse(data);
                   const content = parsed.choices[0]?.delta?.content;
-                  
+
                   if (content) {
                     fullContent += content;
-                    
+
                     // Debounce the UI updates
                     const now = Date.now();
                     if (now - lastUpdateTime >= UPDATE_DELAY) {
@@ -956,7 +960,7 @@ async function processChunkWithOpenRouter(message, options) {
     }
     // Clean up the controller reference on error
     delete sessionControllers[sessionId];
-      if (error.name === 'AbortError') {
+    if (error.name === 'AbortError') {
       // Ensure any pending content is delivered before returning error
       if (fullContent) {
         updateChunksPage(sessionId, {
@@ -968,7 +972,7 @@ async function processChunkWithOpenRouter(message, options) {
       }
       return { error: 'Request cancelled - chunks page was closed' };
     }
-    
+
     // Even for errors, make sure to signal completion to fix the progress bar
     updateChunksPage(sessionId, {
       action: 'updateStreamContent',
@@ -976,14 +980,14 @@ async function processChunkWithOpenRouter(message, options) {
       rawContent: message.chunk,
       isComplete: true
     });
-    
+
     // For any errors related to OpenRouter, provide specific error message
     if (error.message.includes('401')) {
       return { error: 'OpenRouter API: Invalid API key or authentication failed' };
     } else if (error.message.includes('429')) {
       return { error: 'OpenRouter API: Rate limit exceeded. Please try again later.' };
     }
-    
+
     return { error: `Error processing chunk with OpenRouter API: ${error.message}` };
   }
 }
@@ -994,10 +998,10 @@ async function processChunkWithOpenAI(message, options) {
   let fullContent = '';
   let controller = new AbortController();
   const sessionId = message.sessionId;
-  
+
   // Store the controller for this session to allow termination
   sessionControllers[sessionId] = controller;
-  
+
   try {
     // Set up tab close listener to abort request
     tabCloseListener = (tabId) => {
@@ -1009,7 +1013,7 @@ async function processChunkWithOpenAI(message, options) {
       }
     };
     browser.tabs.onRemoved.addListener(tabCloseListener);
-    
+
     // Initialize progress bar first to prevent "processing error" text
     if (options.openaiStream !== false) {
       updateChunksPage(sessionId, {
@@ -1019,7 +1023,7 @@ async function processChunkWithOpenAI(message, options) {
         isInitial: true // Flag to indicate this is the initial update
       });
     }
-    
+
     const requestBody = {
       model: options.openaiModelId || 'gpt-4o-mini',
       messages: [
@@ -1115,10 +1119,10 @@ async function processChunkWithOpenAI(message, options) {
                 try {
                   const parsed = JSON.parse(data);
                   const content = parsed.choices[0]?.delta?.content;
-                  
+
                   if (content) {
                     fullContent += content;
-                    
+
                     // Debounce the UI updates
                     const now = Date.now();
                     if (now - lastUpdateTime >= UPDATE_DELAY) {
@@ -1155,7 +1159,7 @@ async function processChunkWithOpenAI(message, options) {
             throw error;
           }
         }
-        
+
         // Ensure final content is delivered before returning
         updateChunksPage(sessionId, {
           action: 'updateStreamContent',
@@ -1182,7 +1186,7 @@ async function processChunkWithOpenAI(message, options) {
     }
     // Clean up the controller reference on error
     delete sessionControllers[sessionId];
-    
+
     if (error.name === 'AbortError') {
       // Ensure any pending content is delivered before returning error
       if (fullContent) {
@@ -1195,7 +1199,7 @@ async function processChunkWithOpenAI(message, options) {
       }
       return { error: 'OpenAI request cancelled - chunks page was closed' };
     }
-    
+
     // Even for errors, make sure to signal completion to fix the progress bar
     updateChunksPage(sessionId, {
       action: 'updateStreamContent',
@@ -1203,7 +1207,7 @@ async function processChunkWithOpenAI(message, options) {
       rawContent: message.chunk,
       isComplete: true
     });
-    
+
     // For any errors related to OpenAI, provide specific error message
     if (error.message.includes('401')) {
       return { error: 'OpenAI API: Invalid API key or authentication failed' };
@@ -1212,7 +1216,7 @@ async function processChunkWithOpenAI(message, options) {
     } else if (error.message.includes('404')) {
       return { error: 'OpenAI API: Model not found or invalid endpoint' };
     }
-    
+
     return { error: `Error processing chunk with OpenAI API: ${error.message}` };
   }
 }
@@ -1223,10 +1227,10 @@ async function processChunkWithGLMCoding(message, options) {
   let fullContent = '';
   let controller = new AbortController();
   const sessionId = message.sessionId;
-  
+
   // Store the controller for this session to allow termination
   sessionControllers[sessionId] = controller;
-  
+
   try {
     // Set up tab close listener to abort request
     tabCloseListener = (tabId) => {
@@ -1238,7 +1242,7 @@ async function processChunkWithGLMCoding(message, options) {
       }
     };
     browser.tabs.onRemoved.addListener(tabCloseListener);
-    
+
     // Initialize progress bar first to prevent "processing error" text
     if (options.glmCodingStream !== false) {
       updateChunksPage(sessionId, {
@@ -1248,7 +1252,7 @@ async function processChunkWithGLMCoding(message, options) {
         isInitial: true // Flag to indicate this is the initial update
       });
     }
-    
+
     const requestBody = {
       model: options.glmCodingModelId || 'GLM-4.5-air',
       messages: [
@@ -1356,10 +1360,10 @@ async function processChunkWithGLMCoding(message, options) {
                 try {
                   const parsed = JSON.parse(data);
                   const content = parsed.choices[0]?.delta?.content;
-                  
+
                   if (content) {
                     fullContent += content;
-                    
+
                     // Debounce the UI updates
                     const now = Date.now();
                     if (now - lastUpdateTime >= UPDATE_DELAY) {
@@ -1396,7 +1400,7 @@ async function processChunkWithGLMCoding(message, options) {
             throw error;
           }
         }
-        
+
         // Ensure final content is delivered before returning
         updateChunksPage(sessionId, {
           action: 'updateStreamContent',
@@ -1423,7 +1427,7 @@ async function processChunkWithGLMCoding(message, options) {
     }
     // Clean up the controller reference on error
     delete sessionControllers[sessionId];
-    
+
     if (error.name === 'AbortError') {
       // Ensure any pending content is delivered before returning error
       if (fullContent) {
@@ -1436,7 +1440,7 @@ async function processChunkWithGLMCoding(message, options) {
       }
       return { error: 'GLM Coding Plan request cancelled - chunks page was closed' };
     }
-    
+
     // Even for errors, make sure to signal completion to fix the progress bar
     updateChunksPage(sessionId, {
       action: 'updateStreamContent',
@@ -1444,7 +1448,7 @@ async function processChunkWithGLMCoding(message, options) {
       rawContent: message.chunk,
       isComplete: true
     });
-    
+
     // For any errors related to GLM Coding Plan, provide specific error message
     if (error.message.includes('401')) {
       return { error: 'GLM Coding Plan API: Invalid API key or authentication failed' };
@@ -1453,7 +1457,89 @@ async function processChunkWithGLMCoding(message, options) {
     } else if (error.message.includes('404')) {
       return { error: 'GLM Coding Plan API: Model not found or invalid endpoint' };
     }
-    
+
     return { error: `Error processing chunk with GLM Coding Plan API: ${error.message}` };
+  }
+}
+
+async function processChunkWithChatGPTWeb(message, options) {
+  const fullContent = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
+  const targetUrl = 'https://chatgpt.com/';
+
+  try {
+    console.log("Opening/Finding ChatGPT tab...");
+
+    // Create a new tab
+    const tab = await browser.tabs.create({ url: targetUrl });
+
+    // Wait for tab to be ready
+    await new Promise((resolve) => {
+      const listener = (tabId, changeInfo) => {
+        if (tabId === tab.id && changeInfo.status === 'complete') {
+          browser.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      };
+      browser.tabs.onUpdated.addListener(listener);
+    });
+
+    // Add a small delay for page scripts to settle
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    console.log("Sending text to ChatGPT tab...");
+    await browser.tabs.sendMessage(tab.id, {
+      action: 'paste_chunk_v2',
+      text: fullContent
+    });
+
+    return {
+      result: "Sent to ChatGPT Web",
+      parts: ["Sent to ChatGPT Web"]
+    };
+
+  } catch (error) {
+    console.error("Error in processChunkWithChatGPTWeb:", error);
+    return { error: "Failed to send to ChatGPT: " + error.message };
+  }
+}
+
+async function processChunkWithGeminiWeb(message, options) {
+  const fullContent = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
+  const targetUrl = 'https://gemini.google.com/';
+
+  try {
+    console.log("Opening/Finding Gemini tab...");
+
+    // Create a new tab
+    const tab = await browser.tabs.create({ url: targetUrl });
+
+    // Wait for tab to be ready
+    await new Promise((resolve) => {
+      const listener = (tabId, changeInfo) => {
+        if (tabId === tab.id && changeInfo.status === 'complete') {
+          browser.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      };
+      browser.tabs.onUpdated.addListener(listener);
+    });
+
+    // Add a small delay for page scripts to settle
+    await new Promise(resolve => setTimeout(resolve, 3000)); // Slightly longer for Gemini
+
+    console.log("Sending text to Gemini tab...");
+    await browser.tabs.sendMessage(tab.id, {
+      action: 'paste_chunk_gemini',
+      text: fullContent
+    });
+
+    return {
+      result: "Sent to Gemini Web",
+      parts: ["Sent to Gemini Web"]
+    };
+
+  } catch (error) {
+    console.error("Error in processChunkWithGeminiWeb:", error);
+    return { error: "Failed to send to Gemini: " + error.message };
   }
 }
