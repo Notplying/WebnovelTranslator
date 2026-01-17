@@ -1585,6 +1585,10 @@ async function processChunkWithChatGPTWeb(message, options) {
       new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error("Aborted"))))
     ]);
 
+    if (!result || !result.success) {
+      throw new Error(result && result.error ? result.error : "Unknown error from content script");
+    }
+
     return {
       result: "Sent to ChatGPT Web",
       parts: ["Sent to ChatGPT Web"]
@@ -1631,11 +1635,15 @@ async function processChunkWithGeminiWeb(message, options) {
       text: fullContent
     });
 
-    await Promise.race([
+    const result = await Promise.race([
       responsePromise,
       new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout sending message to script")), WebAutomationConfig.EXECUTION_TIMEOUT_MS)),
       new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error("Aborted"))))
     ]);
+
+    if (!result || !result.success) {
+      throw new Error(result && result.error ? result.error : "Unknown error from content script");
+    }
 
     return {
       result: "Sent to Gemini Web",

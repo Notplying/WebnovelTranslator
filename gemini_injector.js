@@ -38,8 +38,14 @@
 
                 if (!success) {
                     // Fallback
-                    inputElement.textContent = text;
-                    inputElement.dispatchEvent(new Event('input', { bubbles: true }));
+                    if (inputElement instanceof HTMLInputElement || inputElement instanceof HTMLTextAreaElement) {
+                        inputElement.value = text;
+                        inputElement.dispatchEvent(new Event('input', { bubbles: true }));
+                        inputElement.dispatchEvent(new Event('change', { bubbles: true }));
+                    } else {
+                        inputElement.textContent = text;
+                        inputElement.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
                     success = true; // Assume success if fallback didn't throw
                 }
 
