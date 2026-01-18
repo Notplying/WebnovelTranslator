@@ -1,6 +1,15 @@
 // Track initialization state
 let isInitialized = false;
 
+// Disable strikethrough tokenizer in marked.js to preserve ~~text~~
+if (typeof marked !== 'undefined' && marked.use) {
+  marked.use({
+    tokenizer: {
+      del(src) { return undefined; }
+    }
+  });
+}
+
 // Self-initialize when loaded
 document.addEventListener('DOMContentLoaded', () => {
   console.log('Chunks page loaded, initializing...');
@@ -22,14 +31,14 @@ function getSessionId() {
 
 function isSessionIncomplete(sessionChunks, totalChunks) {
   if (sessionChunks.length === 0) return false;
-  
+
   let processedCount = 0;
   for (let i = 0; i < totalChunks; i++) {
     if (sessionChunks[i] && sessionChunks[i].content) {
       processedCount++;
     }
   }
-  
+
   return processedCount < totalChunks && processedCount > 0;
 }
 
@@ -53,7 +62,7 @@ async function initializeChunksPage() {
     // Get session data
     const { translationSessions = [] } = await browser.storage.local.get('translationSessions');
     const sessionData = translationSessions.find(s => s.id === sessionId);
-    
+
     if (!sessionData) {
       console.error('Session not found:', sessionId);
       showError('Invalid session: Session not found');
@@ -70,7 +79,7 @@ async function initializeChunksPage() {
     await browser.storage.local.set({
       lastChunksData: { chunks, prefix, suffix, retryCount }
     });
-    
+
     // Initialize progress
     initializeProgress(retryCount, chunks.length);
     createChunkButtons(chunks, prefix, suffix);
@@ -124,34 +133,34 @@ async function initializeChunksPage() {
 async function reprocessAllChunks(chunks, prefix, suffix, retryCount) {
   try {
     showFeedback('Starting reprocessing of all chunks...', false);
-    
+
     // Clear all existing chunks from UI
     const chunksContainer = document.getElementById('chunks-container');
     chunksContainer.innerHTML = '';
-    
+
     // Clear all saved chunks for this session
     const sessionId = getSessionId();
     if (!sessionId) {
       showError('No session ID found');
       return;
     }
-    
+
     const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
     processedChunks[sessionId] = [];
     await browser.storage.local.set({ processedChunks });
-    
+
     // Reset progress
     initializeProgress(retryCount, chunks.length);
-    
+
     // Hide warning
     const warningDiv = document.getElementById('incomplete-session-warning');
     if (warningDiv) {
       warningDiv.style.display = 'none';
     }
-    
+
     // Process all chunks from scratch
     processStoredChunks(chunks, prefix, suffix, retryCount);
-    
+
   } catch (error) {
     console.error('Error reprocessing all chunks:', error);
     showError('Failed to reprocess chunks: ' + error.message);
@@ -168,20 +177,20 @@ async function terminateRequest() {
     }
 
     showFeedback('Terminating request...', false);
-    
+
     // Send termination message to background script
     const response = await browser.runtime.sendMessage({
       action: 'terminateRequest',
       sessionId: sessionId
     });
-    
+
     if (response && response.success) {
       showFeedback('Request terminated successfully!');
-      
+
       // Reset streaming state
       isStreaming = false;
       streamingChunkId = null;
-      
+
       // Update progress bar to show termination
       updateAttemptProgress(0, 1, ProgressState.COMPLETED);
       const progressText = document.getElementById('attempt-progress-text');
@@ -239,27 +248,27 @@ async function processStoredChunks(chunks, prefix, suffix, retryCount) {
         // The addChunk function itself doesn't return the div, so we find it.
         let chunkDiv = document.getElementById(`chunk-${i}`);
         if (!chunkDiv) {
-            // If addChunk hasn't run or finished UI part yet, we might need to call it here
-            // or ensure background.js sends an 'addChunk' message for non-streamed.
-            // For simplicity, assuming background.js sends 'addChunk' or we call it here.
-            // Let's assume background.js sends 'addChunk' message for non-streamed results too.
-            // If not, we'd call: await addChunk(i, processedContent, chunks[i]);
-            // For now, we expect an 'addChunk' message from background.js for non-streamed.
-            // The 'updateProgress' will be triggered by the 'addChunk' message handler
-            // or by the 'isComplete' in streaming.
+          // If addChunk hasn't run or finished UI part yet, we might need to call it here
+          // or ensure background.js sends an 'addChunk' message for non-streamed.
+          // For simplicity, assuming background.js sends 'addChunk' or we call it here.
+          // Let's assume background.js sends 'addChunk' message for non-streamed results too.
+          // If not, we'd call: await addChunk(i, processedContent, chunks[i]);
+          // For now, we expect an 'addChunk' message from background.js for non-streamed.
+          // The 'updateProgress' will be triggered by the 'addChunk' message handler
+          // or by the 'isComplete' in streaming.
 
-            // Let's explicitly call addChunk here for non-streamed results from processStoredChunks
-            // to ensure UI and storage are updated before progress.
-            await addChunk(i, processedContent, chunks[i]);
-            updateProgress(i + 1, chunks.length); // Update main progress after this chunk is fully processed and saved
-          } else {
-            // If div exists, it means addChunk was called (e.g. by a message from background)
-            // We just need to ensure progress is updated.
-            // This path might be redundant if addChunk message handler updates progress.
-            // Let's ensure save and then update progress.
-            await saveChunkToStorage(i, processedContent, chunks[i]); // Ensure it's saved
-            updateProgress(i + 1, chunks.length);
-          }
+          // Let's explicitly call addChunk here for non-streamed results from processStoredChunks
+          // to ensure UI and storage are updated before progress.
+          await addChunk(i, processedContent, chunks[i]);
+          updateProgress(i + 1, chunks.length); // Update main progress after this chunk is fully processed and saved
+        } else {
+          // If div exists, it means addChunk was called (e.g. by a message from background)
+          // We just need to ensure progress is updated.
+          // This path might be redundant if addChunk message handler updates progress.
+          // Let's ensure save and then update progress.
+          await saveChunkToStorage(i, processedContent, chunks[i]); // Ensure it's saved
+          updateProgress(i + 1, chunks.length);
+        }
       }
       // For streamed responses, updateProgress will be called by updateStreamingChunk when isComplete is true.
       updateAttemptProgress(0, retryCount, ProgressState.COMPLETED); // Mark attempt as complete
@@ -330,21 +339,21 @@ function showError(error, isFatal = false) {
   if (typeof error === 'string') {
     // Handle various API key errors
     if (error.includes('PERMISSION_DENIED') ||
-        error.includes('Please use API Key') ||
-        error.includes('Invalid API key') ||
-        error.includes('authentication failed')) {
+      error.includes('Please use API Key') ||
+      error.includes('Invalid API key') ||
+      error.includes('authentication failed')) {
       errorType = ErrorTypes.API_KEY;
     }
     // Handle content safety errors from different providers
     else if (error.includes('Unexpected response structure from Gemini API') ||
-             error.includes('Unexpected response structure from OpenRouter API') ||
-             error.includes('content policy')) {
+      error.includes('Unexpected response structure from OpenRouter API') ||
+      error.includes('content policy')) {
       errorType = ErrorTypes.CONTENT_SAFETY;
     }
     // Handle network errors
     else if (error.includes('Failed to fetch') ||
-             error.includes('Network error') ||
-             error.includes('Rate limit exceeded')) {
+      error.includes('Network error') ||
+      error.includes('Rate limit exceeded')) {
       errorType = ErrorTypes.NETWORK;
     }
   }
@@ -353,7 +362,7 @@ function showError(error, isFatal = false) {
   }
 
   const errorInfo = ErrorMessages[errorType];
-  
+
   // Create error container
   const errorContainer = document.createElement('div');
   errorContainer.className = 'container error-container';
@@ -383,7 +392,7 @@ function showError(error, isFatal = false) {
     line-height: 1.6;
     font-size: 1rem;
   `;
-  
+
   // Show the pre-programmed message first
   errorMessage.innerHTML = errorInfo.message;
 
@@ -410,7 +419,7 @@ function showError(error, isFatal = false) {
   // Assemble and show error
   errorContainer.appendChild(errorTitle);
   errorContainer.appendChild(errorMessage);
-  
+
   // Insert after the first container (title/buttons area)
   const container = document.querySelector('.container');
   if (container) {
@@ -426,7 +435,7 @@ function showError(error, isFatal = false) {
   if (isFatal) {
     const attemptProgressText = document.getElementById('attempt-progress-text');
     const progressText = document.getElementById('progress-text');
-    
+
     if (attemptProgressText) attemptProgressText.textContent = 'FATAL ERROR OCCURRED';
     if (progressText) progressText.textContent = 'FATAL ERROR OCCURRED';
   }
@@ -464,11 +473,11 @@ function updateProgressBar(elementId, current, total, state = ProgressState.PROC
 function updateProgress(current, total) {
   const state = current === total ? ProgressState.COMPLETED : ProgressState.PROCESSING;
   updateProgressBar('progress-bar-fill', current, total, state);
-  
+
   const progressText = document.getElementById('progress-text');
   if (progressText) {
     progressText.textContent = `${current}/${total} chunks processed`;
-    
+
     // Show completion feedback
     if (current === total) {
       showFeedback('All chunks processed successfully!');
@@ -480,7 +489,7 @@ function updateAttemptProgress(current, total, forceState = null) {
   // Handle forced state (typically for completion)
   if (forceState !== null) {
     updateProgressBar('attempt-progress-bar-fill', current, total, forceState);
-    
+
     // Update text based on state
     const progressText = document.getElementById('attempt-progress-text');
     if (progressText) {
@@ -496,7 +505,7 @@ function updateAttemptProgress(current, total, forceState = null) {
     }
     return;
   }
-  
+
   // If streaming, show streaming state
   if (isStreaming) {
     updateProgressBar('attempt-progress-bar-fill', 1, 1, ProgressState.PROCESSING);
@@ -509,11 +518,11 @@ function updateAttemptProgress(current, total, forceState = null) {
 
   // Default state handling
   const state = current === 0 ? ProgressState.COMPLETED :
-                current === total ? ProgressState.COMPLETED :
-                ProgressState.PROCESSING;
-                
+    current === total ? ProgressState.COMPLETED :
+      ProgressState.PROCESSING;
+
   updateProgressBar('attempt-progress-bar-fill', current, total, state);
-  
+
   const progressText = document.getElementById('attempt-progress-text');
   if (progressText) {
     if (current === 0) {
@@ -528,14 +537,14 @@ function initializeProgress(retryCount, totalChunks) {
   // Initialize both progress bars
   updateProgressBar('attempt-progress-bar-fill', 0, retryCount, ProgressState.INITIALIZING);
   updateProgressBar('progress-bar-fill', 0, totalChunks, ProgressState.INITIALIZING);
-  
+
   // Set initial text
   const attemptText = document.getElementById('attempt-progress-text');
   const progressText = document.getElementById('progress-text');
-  
+
   if (attemptText) attemptText.textContent = 'Ready to start';
   if (progressText) progressText.textContent = `0/${totalChunks} chunks processed`;
-  
+
   // Show initial feedback
   // showFeedback('Starting chunk processing...', false);
 }
@@ -578,7 +587,7 @@ function createPartContent(content, isActive, partIndex) {
   const partContent = document.createElement('div');
   partContent.className = 'markdown-content part-content' + (isActive ? ' active' : '');
   partContent.dataset.part = partIndex;
-  
+
   let htmlContent;
   if (typeof content === 'string') {
     htmlContent = content;
@@ -590,14 +599,14 @@ function createPartContent(content, isActive, partIndex) {
 
   // Check if content contains HTML images
   const hasImages = htmlContent.includes('<img');
-  
+
   if (hasImages) {
     // For content with images, let's try a simpler approach
     // First, let's process the entire content as markdown to see what happens
     const escapedContent = escapeHtml(htmlContent);
     const markdownContent = marked.parse(escapedContent);
     const unescapedContent = unescapeHtml(markdownContent);
-    
+
     // Now let's check if images are still present in the markdown output
     if (unescapedContent.includes('<img')) {
       // If images are preserved, just use the markdown output
@@ -607,7 +616,7 @@ function createPartContent(content, isActive, partIndex) {
       // Create a temporary DOM element to parse the original HTML
       const tempDiv = document.createElement('div');
       tempDiv.innerHTML = htmlContent;
-      
+
       // Process text nodes while preserving image elements
       const processNode = (node) => {
         if (node.nodeType === Node.TEXT_NODE) {
@@ -627,26 +636,26 @@ function createPartContent(content, isActive, partIndex) {
             // Process image elements
             let src = node.getAttribute('src') || node.src;
             const alt = node.getAttribute('alt') || '';
-            
+
             // Create a new image element with proper styling
             const newImg = document.createElement('img');
             newImg.alt = alt;
-            
+
             if (src && src.includes('.file')) {
               // Handle .file extension images
               newImg.dataset.originalSrc = src;
-              
+
               // Convert relative URLs to absolute
               if (src.startsWith('//')) {
                 src = 'https:' + src;
               } else if (src.startsWith('/')) {
                 src = 'https://images.novelpia.com' + src;
               }
-              
+
               newImg.src = src;
-              
+
               // Add error handling for failed loads
-              newImg.onerror = function() {
+              newImg.onerror = function () {
                 const fallback = document.createElement('div');
                 fallback.className = 'image-fallback';
                 fallback.innerHTML = `
@@ -668,7 +677,7 @@ function createPartContent(content, isActive, partIndex) {
                 newImg.src = src;
               }
             }
-            
+
             // Add styling for better display
             newImg.style.maxWidth = '100%';
             newImg.style.height = 'auto';
@@ -677,45 +686,45 @@ function createPartContent(content, isActive, partIndex) {
             newImg.style.borderRadius = '8px';
             newImg.style.cursor = 'pointer';
             newImg.style.background = 'rgba(255,255,255,0.05)';
-            
+
             // Add click handler to open image in new tab
-            newImg.addEventListener('click', function() {
+            newImg.addEventListener('click', function () {
               const originalSrc = this.dataset.originalSrc || this.src;
               if (originalSrc) {
                 window.open(originalSrc, '_blank');
               }
             });
-            
+
             return newImg.outerHTML;
           } else {
             // Process other elements recursively
             let result = `<${node.tagName.toLowerCase()}`;
-            
+
             // Copy attributes
             for (const attr of node.attributes) {
               result += ` ${attr.name}="${attr.value}"`;
             }
-            
+
             result += '>';
-            
+
             // Process child nodes
             for (const child of node.childNodes) {
               result += processNode(child);
             }
-            
+
             result += `</${node.tagName.toLowerCase()}>`;
             return result;
           }
         }
         return '';
       };
-      
+
       // Process all child nodes of the temporary div
       let processedContent = '';
       for (const child of tempDiv.childNodes) {
         processedContent += processNode(child);
       }
-      
+
       // Set the content without sanitization for testing
       partContent.innerHTML = processedContent;
     }
@@ -728,7 +737,7 @@ function createPartContent(content, isActive, partIndex) {
     const unescapedContent = unescapeHtml(markdownContent);
     partContent.innerHTML = unescapedContent;
   }
-  
+
   return partContent;
 }
 
@@ -800,7 +809,7 @@ async function addChunk(index, content, rawContent) {
   const parts = content.parts && Array.isArray(content.parts) ? content.parts : [content];
   parts.forEach((part, partIndex) => {
     const isActive = (parts.length === 1 && partIndex === 0) || (parts.length > 1 && partIndex === 1);
-    
+
     // Create part button
     const button = createPartButton(
       `Part ${partIndex + 1}`,
@@ -860,7 +869,7 @@ async function addChunk(index, content, rawContent) {
 
 function switchPart(chunkIndex, partIndex) {
   const chunkDiv = document.getElementById(`chunk-${chunkIndex}`);
-  
+
   // Update button states
   const buttons = chunkDiv.querySelectorAll('.part-button');
   buttons.forEach((btn, idx) => {
@@ -909,7 +918,7 @@ function showFeedback(message, isError = false) {
 async function copyChunk(index, content, buttonType = 'processed') {
   try {
     await navigator.clipboard.writeText(content);
-    
+
     // Get the chunk div and its elements
     const chunkDiv = document.getElementById(`chunk-${index}`);
     if (!chunkDiv) return;
@@ -955,7 +964,7 @@ async function copyChunk(index, content, buttonType = 'processed') {
 function updateChunkContent(chunkDiv, parts, index) {
   const contentParts = chunkDiv.querySelector('.content-parts');
   const partButtons = chunkDiv.querySelector('.part-buttons');
-  
+
   if (!contentParts || !partButtons) {
     throw new Error('Required elements not found');
   }
@@ -967,7 +976,7 @@ function updateChunkContent(chunkDiv, parts, index) {
   // Add new parts
   parts.forEach((part, partIndex) => {
     const isActive = partIndex === 0;
-    
+
     // Add part button
     const button = createPartButton(
       `Part ${partIndex + 1}`,
@@ -995,12 +1004,12 @@ function updateCopyButtonHandler(copyButton, contentParts, parts, index) {
       copyChunk(index, parts[activePartIndex]);
     }
   };
-  
+
   // Remove old handler if it exists
   if (copyButton.clickHandler) {
     copyButton.removeEventListener('click', copyButton.clickHandler);
   }
-  
+
   copyButton.clickHandler = newHandler;
   copyButton.addEventListener('click', newHandler);
 }
@@ -1058,7 +1067,7 @@ async function reprocessChunk(index, rawContent) {
     // Step 1: Delete the saved result for the current session first
     const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
     const sessionChunks = processedChunks[sessionId] || [];
-    
+
     // Remove the chunk at the specified index
     if (sessionChunks[index]) {
       console.log(`Deleting saved result for chunk ${index} in session ${sessionId}`);
@@ -1108,7 +1117,7 @@ async function reprocessChunk(index, rawContent) {
           parts: parts,
           text: result.result
         };
-        
+
         // Save the new result to storage without updating UI
         await saveChunkToStorage(index, content, rawContent);
 
@@ -1120,10 +1129,10 @@ async function reprocessChunk(index, rawContent) {
         console.error(`Attempt ${attempt + 1} failed:`, error);
 
         if (error.message.includes("PERMISSION_DENIED") ||
-            error.message.includes("Please use API Key") ||
-            error.message.includes("Unexpected response structure from Gemini API") ||
-            attempt === retryCount - 1) {
-          
+          error.message.includes("Please use API Key") ||
+          error.message.includes("Unexpected response structure from Gemini API") ||
+          attempt === retryCount - 1) {
+
           const errorMessage = `Error reprocessing chunk ${index + 1}: ${error.message}`;
           showError(errorMessage, true);
           showFeedback(errorMessage, true);
@@ -1209,7 +1218,7 @@ async function reprocessChunk(index, rawContent) {
         updateChunkContent(targetChunkDiv, parts, index);
         const newProcessedContent = { parts: parts, text: result.result };
         await saveChunkToStorage(index, newProcessedContent, rawContent);
-         
+
         // Update main progress bar
         const { translationSessions = [] } = await browser.storage.local.get('translationSessions');
         const currentSessionId = getSessionId();
@@ -1217,7 +1226,7 @@ async function reprocessChunk(index, rawContent) {
         if (currentSessionData && currentSessionData.chunks) {
           updateProgress(index + 1, currentSessionData.chunks.length);
         } else {
-           // Fallback if session data isn't readily available, might need to adjust total
+          // Fallback if session data isn't readily available, might need to adjust total
           const totalChunks = document.querySelectorAll('.chunk').length || index + 1;
           updateProgress(index + 1, totalChunks);
         }
@@ -1246,21 +1255,21 @@ async function reprocessChunk(index, rawContent) {
   } finally {
     // Ensure state is reset if not handled by a successful stream completion
     // This is a fallback; ideally, successful stream completion in updateStreamingChunk resets it.
-    if (reprocessingState.isActive && !(isStreaming && reprocessingState.targetIndex === currentChunkIndex) ) {
-        // Only reset if not actively streaming for this reprocessed chunk
-        // This condition might be tricky. The primary reset should be on stream 'isComplete' or non-streamed success/final error.
-        // For now, let's rely on updateStreamingChunk for streamed reset.
-        // And non-streamed success/error in the loop above.
-        // This finally might be too aggressive if a stream is ongoing.
-        // Consider removing this or making it more conditional.
-        // For now, if an error threw out of the loop, we reset.
-         if (!isStreaming || reprocessingState.targetIndex !== currentChunkIndex) { // Avoid resetting if a stream for *this* reprocess is active
-            console.log("ReprocessChunk finally: Resetting reprocessing state due to error or non-streamed completion.");
-            reprocessingState.isActive = false;
-            reprocessingState.targetIndex = -1;
-            reprocessingState.targetElementId = null;
-            reprocessingState.originalRawContent = null;
-        }
+    if (reprocessingState.isActive && !(isStreaming && reprocessingState.targetIndex === currentChunkIndex)) {
+      // Only reset if not actively streaming for this reprocessed chunk
+      // This condition might be tricky. The primary reset should be on stream 'isComplete' or non-streamed success/final error.
+      // For now, let's rely on updateStreamingChunk for streamed reset.
+      // And non-streamed success/error in the loop above.
+      // This finally might be too aggressive if a stream is ongoing.
+      // Consider removing this or making it more conditional.
+      // For now, if an error threw out of the loop, we reset.
+      if (!isStreaming || reprocessingState.targetIndex !== currentChunkIndex) { // Avoid resetting if a stream for *this* reprocess is active
+        console.log("ReprocessChunk finally: Resetting reprocessing state due to error or non-streamed completion.");
+        reprocessingState.isActive = false;
+        reprocessingState.targetIndex = -1;
+        reprocessingState.targetElementId = null;
+        reprocessingState.originalRawContent = null;
+      }
     }
   }
 }
@@ -1283,15 +1292,15 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
         streamingChunkId = effectiveStreamingChunkId; // Global streaming ID points to the reprocessed chunk
         currentChunkIndex = effectiveChunkIndex; // Align global currentChunkIndex for consistency during this stream
         lastRawContent = effectiveRawContent; // Track raw content for this specific stream
-        
+
         const targetChunkDiv = document.getElementById(effectiveStreamingChunkId);
         if (targetChunkDiv) {
-            const targetContentParts = targetChunkDiv.querySelector('.content-parts');
-            if (targetContentParts && targetContentParts.innerHTML.includes("Reprocessing...")) {
-                 targetContentParts.innerHTML = ''; // Clear "Reprocessing..."
-            }
-            const targetPartButtons = targetChunkDiv.querySelector('.part-buttons');
-            if (targetPartButtons) targetPartButtons.innerHTML = '';
+          const targetContentParts = targetChunkDiv.querySelector('.content-parts');
+          if (targetContentParts && targetContentParts.innerHTML.includes("Reprocessing...")) {
+            targetContentParts.innerHTML = ''; // Clear "Reprocessing..."
+          }
+          const targetPartButtons = targetChunkDiv.querySelector('.part-buttons');
+          if (targetPartButtons) targetPartButtons.innerHTML = '';
         }
         updateAttemptProgress(0, 0); // Show generic streaming state
         // Do not return; proceed to update/create the div content.
@@ -1302,13 +1311,13 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
         currentChunkIndex++; // A new distinct chunk is starting
         effectiveChunkIndex = currentChunkIndex;
         effectiveStreamingChunkId = `chunk-${effectiveChunkIndex}`;
-        console.log(`New chunk starting (NORMAL). EffectiveIndex: ${effectiveChunkIndex}. Raw: ${rawContent ? rawContent.substring(0,20) : 'N/A'}`);
+        console.log(`New chunk starting (NORMAL). EffectiveIndex: ${effectiveChunkIndex}. Raw: ${rawContent ? rawContent.substring(0, 20) : 'N/A'}`);
 
         if (effectiveChunkIndex === 0) { // Clear container only for the very first *new* chunk
           const chunksContainer = document.getElementById('chunks-container');
           if (chunksContainer) chunksContainer.innerHTML = '';
         }
-        
+
         // const { translationSessions = [] } = await browser.storage.local.get('translationSessions');
         // const sessionId = getSessionId();
         // const sessionData = translationSessions.find(s => s.id === sessionId);
@@ -1338,14 +1347,14 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
         if (partContent) {
           // Check if content contains HTML images
           const hasImages = content.includes('<img');
-          
+
           if (hasImages) {
             // For content with images, let's try a simpler approach
             // First, let's process the entire content as markdown to see what happens
             const escapedContent = escapeHtml(content);
             const markdownContent = marked.parse(escapedContent);
             const unescapedContent = unescapeHtml(markdownContent);
-            
+
             // Now let's check if images are still present in the markdown output
             if (unescapedContent.includes('<img')) {
               // If images are preserved, just use the markdown output
@@ -1355,7 +1364,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
               // Create a temporary DOM element to parse the original HTML
               const tempDiv = document.createElement('div');
               tempDiv.innerHTML = content;
-              
+
               // Process text nodes while preserving image elements
               const processNode = (node) => {
                 if (node.nodeType === Node.TEXT_NODE) {
@@ -1375,26 +1384,26 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
                     // Process image elements
                     let src = node.getAttribute('src') || node.src;
                     const alt = node.getAttribute('alt') || '';
-                    
+
                     // Create a new image element with proper styling
                     const newImg = document.createElement('img');
                     newImg.alt = alt;
-                    
+
                     if (src && src.includes('.file')) {
                       // Handle .file extension images
                       newImg.dataset.originalSrc = src;
-                      
+
                       // Convert relative URLs to absolute
                       if (src.startsWith('//')) {
                         src = 'https:' + src;
                       } else if (src.startsWith('/')) {
                         src = 'https://images.novelpia.com' + src;
                       }
-                      
+
                       newImg.src = src;
-                      
+
                       // Add error handling for failed loads
-                      newImg.onerror = function() {
+                      newImg.onerror = function () {
                         const fallback = document.createElement('div');
                         fallback.className = 'image-fallback';
                         fallback.innerHTML = `
@@ -1416,7 +1425,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
                         newImg.src = src;
                       }
                     }
-                    
+
                     // Add styling for better display
                     newImg.style.maxWidth = '100%';
                     newImg.style.height = 'auto';
@@ -1425,45 +1434,45 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
                     newImg.style.borderRadius = '8px';
                     newImg.style.cursor = 'pointer';
                     newImg.style.background = 'rgba(255,255,255,0.05)';
-                    
+
                     // Add click handler to open image in new tab
-                    newImg.addEventListener('click', function() {
+                    newImg.addEventListener('click', function () {
                       const originalSrc = this.dataset.originalSrc || this.src;
                       if (originalSrc) {
                         window.open(originalSrc, '_blank');
                       }
                     });
-                    
+
                     return newImg.outerHTML;
                   } else {
                     // Process other elements recursively
                     let result = `<${node.tagName.toLowerCase()}`;
-                    
+
                     // Copy attributes
                     for (const attr of node.attributes) {
                       result += ` ${attr.name}="${attr.value}"`;
                     }
-                    
+
                     result += '>';
-                    
+
                     // Process child nodes
                     for (const child of node.childNodes) {
                       result += processNode(child);
                     }
-                    
+
                     result += `</${node.tagName.toLowerCase()}>`;
                     return result;
                   }
                 }
                 return '';
               };
-              
+
               // Process all child nodes of the temporary div
               let processedContent = '';
               for (const child of tempDiv.childNodes) {
                 processedContent += processNode(child);
               }
-              
+
               // Set the content without sanitization for testing
               partContent.innerHTML = processedContent;
             }
@@ -1476,12 +1485,12 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
             const unescapedContent = unescapeHtml(markdownContent);
             partContent.innerHTML = unescapedContent;
           }
-          
+
           chunkDiv.dataset.rawContent = effectiveRawContent;
         }
         // Ensure finalContentToSave is based on the received 'content' parameter for isComplete
       }
-      
+
       // Explicitly save the final complete content
       await saveChunkToStorage(effectiveChunkIndex, finalContentToSave, effectiveRawContent);
       console.log(`Saved final COMPLETED content for chunk ${effectiveChunkIndex} (ID: ${effectiveStreamingChunkId})`);
@@ -1490,7 +1499,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
       updateAttemptProgress(1, 1, ProgressState.COMPLETED);
       const progressText = document.getElementById('attempt-progress-text');
       if (progressText) progressText.textContent = 'Chunk completed';
-      
+
       // Update main progress bar *after* saving the completed chunk
       const { translationSessions = [] } = await browser.storage.local.get('translationSessions');
       const currentSessionId = getSessionId();
@@ -1502,7 +1511,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
         const totalSessionChunks = document.querySelectorAll('.chunk').length; // Estimate total from UI if needed
         updateProgress(effectiveChunkIndex + 1, totalSessionChunks > 0 ? totalSessionChunks : effectiveChunkIndex + 1);
       }
-      
+
       if (reprocessingState.isActive && reprocessingState.targetIndex === effectiveChunkIndex) {
         console.log(`Reprocessing stream complete for index ${effectiveChunkIndex}. Resetting state.`);
         reprocessingState.isActive = false;
@@ -1522,14 +1531,14 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
       console.log(`Starting to stream content for chunk index ${effectiveChunkIndex}. Assigned ID: ${streamingChunkId}`);
       updateAttemptProgress(0, 0);
     }
-    
+
     // Ensure rawContent matches for ongoing stream (sanity check, primarily for non-reprocessing)
     if (!reprocessingState.isActive && rawContent !== lastRawContent) {
-        console.warn(`Normal stream: rawContent changed unexpectedly mid-stream for chunk ${effectiveChunkIndex}.`);
+      console.warn(`Normal stream: rawContent changed unexpectedly mid-stream for chunk ${effectiveChunkIndex}.`);
     }
 
     let chunkDiv = document.getElementById(effectiveStreamingChunkId);
-  
+
     const processedContentToSave = { parts: [content], text: content };
     if (saveTimeout) clearTimeout(saveTimeout);
     saveTimeout = setTimeout(async () => {
@@ -1553,22 +1562,22 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
 
       const partButtons = document.createElement('div'); partButtons.className = 'part-buttons';
       cardBody.appendChild(partButtons);
-      
+
       const contentParts = document.createElement('div'); contentParts.className = 'content-parts';
       const partContentElement = document.createElement('div');
       partContentElement.className = 'markdown-content part-content active';
       partContentElement.dataset.part = '0';
-      
+
       // Check if content contains HTML images
       const hasImages = content.includes('<img');
-      
+
       if (hasImages) {
         // For content with images, let's try a simpler approach
         // First, let's process the entire content as markdown to see what happens
         const escapedContent = escapeHtml(content);
         const markdownContent = marked.parse(escapedContent);
         const unescapedContent = unescapeHtml(markdownContent);
-        
+
         // Now let's check if images are still present in the markdown output
         if (unescapedContent.includes('<img')) {
           // If images are preserved, just use the markdown output
@@ -1578,7 +1587,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
           // Create a temporary DOM element to parse the original HTML
           const tempDiv = document.createElement('div');
           tempDiv.innerHTML = content;
-          
+
           // Process text nodes while preserving image elements
           const processNode = (node) => {
             if (node.nodeType === Node.TEXT_NODE) {
@@ -1598,26 +1607,26 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
                 // Process image elements
                 let src = node.getAttribute('src') || node.src;
                 const alt = node.getAttribute('alt') || '';
-                
+
                 // Create a new image element with proper styling
                 const newImg = document.createElement('img');
                 newImg.alt = alt;
-                
+
                 if (src && src.includes('.file')) {
                   // Handle .file extension images
                   newImg.dataset.originalSrc = src;
-                  
+
                   // Convert relative URLs to absolute
                   if (src.startsWith('//')) {
                     src = 'https:' + src;
                   } else if (src.startsWith('/')) {
                     src = 'https://images.novelpia.com' + src;
                   }
-                  
+
                   newImg.src = src;
-                  
+
                   // Add error handling for failed loads
-                  newImg.onerror = function() {
+                  newImg.onerror = function () {
                     const fallback = document.createElement('div');
                     fallback.className = 'image-fallback';
                     fallback.innerHTML = `
@@ -1639,7 +1648,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
                     newImg.src = src;
                   }
                 }
-                
+
                 // Add styling for better display
                 newImg.style.maxWidth = '100%';
                 newImg.style.height = 'auto';
@@ -1648,45 +1657,45 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
                 newImg.style.borderRadius = '8px';
                 newImg.style.cursor = 'pointer';
                 newImg.style.background = 'rgba(255,255,255,0.05)';
-                
+
                 // Add click handler to open image in new tab
-                newImg.addEventListener('click', function() {
+                newImg.addEventListener('click', function () {
                   const originalSrc = this.dataset.originalSrc || this.src;
                   if (originalSrc) {
                     window.open(originalSrc, '_blank');
                   }
                 });
-                
+
                 return newImg.outerHTML;
               } else {
                 // Process other elements recursively
                 let result = `<${node.tagName.toLowerCase()}`;
-                
+
                 // Copy attributes
                 for (const attr of node.attributes) {
                   result += ` ${attr.name}="${attr.value}"`;
                 }
-                
+
                 result += '>';
-                
+
                 // Process child nodes
                 for (const child of node.childNodes) {
                   result += processNode(child);
                 }
-                
+
                 result += `</${node.tagName.toLowerCase()}>`;
                 return result;
               }
             }
             return '';
           };
-          
+
           // Process all child nodes of the temporary div
           let processedContent = '';
           for (const child of tempDiv.childNodes) {
             processedContent += processNode(child);
           }
-          
+
           // Set the content without sanitization for testing
           partContentElement.innerHTML = processedContent;
         }
@@ -1699,7 +1708,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
         const unescapedContent = unescapeHtml(markdownContent);
         partContentElement.innerHTML = unescapedContent;
       }
-      
+
       contentParts.appendChild(partContentElement);
       cardBody.appendChild(contentParts);
 
@@ -1729,14 +1738,14 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
       if (partContent) {
         // Check if content contains HTML images
         const hasImages = content.includes('<img');
-        
+
         if (hasImages) {
           // For content with images, let's try a simpler approach
           // First, let's process the entire content as markdown to see what happens
           const escapedContent = escapeHtml(content);
           const markdownContent = marked.parse(escapedContent);
           const unescapedContent = unescapeHtml(markdownContent);
-          
+
           // Now let's check if images are still present in the markdown output
           if (unescapedContent.includes('<img')) {
             // If images are preserved, just use the markdown output
@@ -1746,7 +1755,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
             // Create a temporary DOM element to parse the original HTML
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = content;
-            
+
             // Process text nodes while preserving image elements
             const processNode = (node) => {
               if (node.nodeType === Node.TEXT_NODE) {
@@ -1766,26 +1775,26 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
                   // Process image elements
                   let src = node.getAttribute('src') || node.src;
                   const alt = node.getAttribute('alt') || '';
-                  
+
                   // Create a new image element with proper styling
                   const newImg = document.createElement('img');
                   newImg.alt = alt;
-                  
+
                   if (src && src.includes('.file')) {
                     // Handle .file extension images
                     newImg.dataset.originalSrc = src;
-                    
+
                     // Convert relative URLs to absolute
                     if (src.startsWith('//')) {
                       src = 'https:' + src;
                     } else if (src.startsWith('/')) {
                       src = 'https://images.novelpia.com' + src;
                     }
-                    
+
                     newImg.src = src;
-                    
+
                     // Add error handling for failed loads
-                    newImg.onerror = function() {
+                    newImg.onerror = function () {
                       const fallback = document.createElement('div');
                       fallback.className = 'image-fallback';
                       fallback.innerHTML = `
@@ -1807,7 +1816,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
                       newImg.src = src;
                     }
                   }
-                  
+
                   // Add styling for better display
                   newImg.style.maxWidth = '100%';
                   newImg.style.height = 'auto';
@@ -1816,45 +1825,45 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
                   newImg.style.borderRadius = '8px';
                   newImg.style.cursor = 'pointer';
                   newImg.style.background = 'rgba(255,255,255,0.05)';
-                  
+
                   // Add click handler to open image in new tab
-                  newImg.addEventListener('click', function() {
+                  newImg.addEventListener('click', function () {
                     const originalSrc = this.dataset.originalSrc || this.src;
                     if (originalSrc) {
                       window.open(originalSrc, '_blank');
                     }
                   });
-                  
+
                   return newImg.outerHTML;
                 } else {
                   // Process other elements recursively
                   let result = `<${node.tagName.toLowerCase()}`;
-                  
+
                   // Copy attributes
                   for (const attr of node.attributes) {
                     result += ` ${attr.name}="${attr.value}"`;
                   }
-                  
+
                   result += '>';
-                  
+
                   // Process child nodes
                   for (const child of node.childNodes) {
                     result += processNode(child);
                   }
-                  
+
                   result += `</${node.tagName.toLowerCase()}>`;
                   return result;
                 }
               }
               return '';
             };
-            
+
             // Process all child nodes of the temporary div
             let processedContent = '';
             for (const child of tempDiv.childNodes) {
               processedContent += processNode(child);
             }
-            
+
             // Set the content without sanitization for testing
             partContent.innerHTML = processedContent;
           }
@@ -1869,32 +1878,32 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
         }
         chunkDiv.dataset.rawContent = effectiveRawContent;
       } else {
-          // If .part-content.active is missing (e.g. after clearing for reprocess), recreate it.
-          const contentPartsContainer = chunkDiv.querySelector('.content-parts');
-          if (contentPartsContainer) {
-              contentPartsContainer.innerHTML = ''; // Clear any "Reprocessing..."
-              const newPartContent = createPartContent(content, true, 0);
-              contentPartsContainer.appendChild(newPartContent);
+        // If .part-content.active is missing (e.g. after clearing for reprocess), recreate it.
+        const contentPartsContainer = chunkDiv.querySelector('.content-parts');
+        if (contentPartsContainer) {
+          contentPartsContainer.innerHTML = ''; // Clear any "Reprocessing..."
+          const newPartContent = createPartContent(content, true, 0);
+          contentPartsContainer.appendChild(newPartContent);
 
-              // Also ensure part button exists
-              const partButtonsContainer = chunkDiv.querySelector('.part-buttons');
-              if (partButtonsContainer && partButtonsContainer.innerHTML === '') {
-                  const newPartButton = createPartButton('Part 1', true, () => switchPart(effectiveChunkIndex, 0));
-                  partButtonsContainer.appendChild(newPartButton);
-              }
+          // Also ensure part button exists
+          const partButtonsContainer = chunkDiv.querySelector('.part-buttons');
+          if (partButtonsContainer && partButtonsContainer.innerHTML === '') {
+            const newPartButton = createPartButton('Part 1', true, () => switchPart(effectiveChunkIndex, 0));
+            partButtonsContainer.appendChild(newPartButton);
           }
+        }
       }
     }
   } catch (error) {
     console.error('Error in updateStreamingChunk:', error);
     showError('Error updating streaming content: ' + error.message);
     // If an error occurs during a reprocess stream, reset the state
-    if (reprocessingState.isActive && reprocessingState.targetIndex === (typeof effectiveChunkIndex !== 'undefined' ? effectiveChunkIndex : currentChunkIndex) ) {
-        console.log("Resetting reprocessing state due to error in updateStreamingChunk.");
-        reprocessingState.isActive = false;
-        reprocessingState.targetIndex = -1;
-        reprocessingState.targetElementId = null;
-        reprocessingState.originalRawContent = null;
+    if (reprocessingState.isActive && reprocessingState.targetIndex === (typeof effectiveChunkIndex !== 'undefined' ? effectiveChunkIndex : currentChunkIndex)) {
+      console.log("Resetting reprocessing state due to error in updateStreamingChunk.");
+      reprocessingState.isActive = false;
+      reprocessingState.targetIndex = -1;
+      reprocessingState.targetElementId = null;
+      reprocessingState.originalRawContent = null;
     }
   }
 }
@@ -1902,61 +1911,61 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
 browser.runtime.onMessage.addListener((message) => {
   console.log('Received message:', message);
   switch (message.action) {
-      case 'initializeProgress':
-          initializeProgress(message.retryCount, message.totalChunks);
-          break;
-      case 'updateProgress':
-          updateProgress(message.current, message.total);
-          // Only update currentChunkIndex if not in streaming mode
-          if (!isStreaming) {
-              currentChunkIndex = message.current - 1;
+    case 'initializeProgress':
+      initializeProgress(message.retryCount, message.totalChunks);
+      break;
+    case 'updateProgress':
+      updateProgress(message.current, message.total);
+      // Only update currentChunkIndex if not in streaming mode
+      if (!isStreaming) {
+        currentChunkIndex = message.current - 1;
+      }
+      // Reset streaming state when chunk is complete and ensure last save completes
+      if (saveTimeout) {
+        clearTimeout(saveTimeout);
+        saveTimeout = null;
+
+        // Ensure final save completes when streaming ends
+        const chunkDiv = document.getElementById(streamingChunkId);
+        if (chunkDiv && isStreaming) {
+          const content = chunkDiv.querySelector('.part-content.active')?.innerHTML;
+          const rawContent = chunkDiv.dataset.rawContent;
+          if (content && rawContent) {
+            saveChunkToStorage(currentChunkIndex, {
+              parts: [content],
+              text: content
+            }, rawContent);
           }
-          // Reset streaming state when chunk is complete and ensure last save completes
-          if (saveTimeout) {
-            clearTimeout(saveTimeout);
-            saveTimeout = null;
-            
-            // Ensure final save completes when streaming ends
-            const chunkDiv = document.getElementById(streamingChunkId);
-            if (chunkDiv && isStreaming) {
-              const content = chunkDiv.querySelector('.part-content.active')?.innerHTML;
-              const rawContent = chunkDiv.dataset.rawContent;
-              if (content && rawContent) {
-                saveChunkToStorage(currentChunkIndex, {
-                  parts: [content],
-                  text: content
-                }, rawContent);
-              }
-            }
-          }
-          isStreaming = false;
-          streamingChunkId = null;
-          break;
-      case 'updateAttemptProgress':
-          updateAttemptProgress(message.current, message.total);
-          break;
-      case 'addChunk':
-          if (!isStreaming) { // Only add chunk if not currently streaming
-            addChunk(message.index, message.content);
-          }
-          break;
-      case 'showError':
-          showError(message.errorContent, message.isFatal);
-          break;
-      case 'updateStreamContent':
-          console.log('Received streaming content update:', message.content);
-          if (message.terminated) {
-            // Handle terminated state
-            isStreaming = false;
-            streamingChunkId = null;
-            showFeedback('Request terminated by user');
-            updateAttemptProgress(0, 1, ProgressState.COMPLETED);
-            const progressText = document.getElementById('attempt-progress-text');
-            if (progressText) progressText.textContent = 'Request terminated';
-          } else {
-            updateStreamingChunk(message.content, message.rawContent, message.isInitial, message.isComplete);
-          }
-          break;
+        }
+      }
+      isStreaming = false;
+      streamingChunkId = null;
+      break;
+    case 'updateAttemptProgress':
+      updateAttemptProgress(message.current, message.total);
+      break;
+    case 'addChunk':
+      if (!isStreaming) { // Only add chunk if not currently streaming
+        addChunk(message.index, message.content);
+      }
+      break;
+    case 'showError':
+      showError(message.errorContent, message.isFatal);
+      break;
+    case 'updateStreamContent':
+      console.log('Received streaming content update:', message.content);
+      if (message.terminated) {
+        // Handle terminated state
+        isStreaming = false;
+        streamingChunkId = null;
+        showFeedback('Request terminated by user');
+        updateAttemptProgress(0, 1, ProgressState.COMPLETED);
+        const progressText = document.getElementById('attempt-progress-text');
+        if (progressText) progressText.textContent = 'Request terminated';
+      } else {
+        updateStreamingChunk(message.content, message.rawContent, message.isInitial, message.isComplete);
+      }
+      break;
   }
 });
 
@@ -1968,10 +1977,10 @@ const progressContainer = document.getElementById('progress-container');
 // Initialize scroll behavior
 function initializeScrollBehavior() {
   if (!progressContainer) return;
-  
+
   // Start with progress bar visible
   progressContainer.classList.add('visible');
-  
+
   // Add scroll event listener
   window.addEventListener('scroll', handleScroll, { passive: true });
 }
@@ -1979,7 +1988,7 @@ function initializeScrollBehavior() {
 function handleScroll() {
   const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
   const scrollDelta = Math.abs(scrollTop - lastScrollTop);
-  
+
   // Only trigger if scroll exceeds threshold
   if (scrollDelta >= scrollDirectionThreshold) {
     if (scrollTop > lastScrollTop && scrollTop > 100) {
@@ -1989,7 +1998,7 @@ function handleScroll() {
       // Scrolling up - show progress bar
       showProgressBar();
     }
-    
+
     lastScrollTop = scrollTop;
   }
 }
