@@ -6,7 +6,7 @@ function splitParagraphText(lengthinput) {
 
   let textLeftDiv = document.querySelector('.text-left');
   let novel_contentDiv = document.querySelector('#novel_content');
-  
+
   function extractContentWithImages(element) {
     let content = "";
     element.childNodes.forEach(node => {
@@ -29,40 +29,40 @@ function splitParagraphText(lengthinput) {
   }
 
   if (textLeftDiv) {
-      let children = textLeftDiv.childNodes;
-      
-      children.forEach(node => {
-          if (node.nodeType === Node.ELEMENT_NODE && node.tagName.toLowerCase() === 'p') {
-              combinedContent += node.innerHTML + '\n\n';
-          } else if (node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== '') {
-              let lines = node.textContent.trim().split(']');
-              lines.forEach(line => {
-                  if (line.trim() !== '') {
-                      combinedContent += line.trim() + ']\n\n';
-                  }
-              });
-          } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName.toLowerCase() === 'img') {
-              combinedContent += node.outerHTML + '\n\n';
+    let children = textLeftDiv.childNodes;
+
+    children.forEach(node => {
+      if (node.nodeType === Node.ELEMENT_NODE && node.tagName.toLowerCase() === 'p') {
+        combinedContent += node.innerHTML + '\n\n';
+      } else if (node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== '') {
+        let lines = node.textContent.trim().split(']');
+        lines.forEach(line => {
+          if (line.trim() !== '') {
+            combinedContent += line.trim() + ']\n\n';
           }
-      });
-       
+        });
+      } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName.toLowerCase() === 'img') {
+        combinedContent += node.outerHTML + '\n\n';
+      }
+    });
+
   } else if (novel_contentDiv) { //booktoki
     let innerDivs = novel_contentDiv.querySelectorAll('div');
-    
+
     innerDivs.forEach(div => {
       combinedContent += extractContentWithImages(div);
     });
   } else {
-      while (true) {
-          let paragraphElement = document.getElementById(`p${paragraphId}`);
-          if (!paragraphElement) {
-              paragraphElement = document.getElementById(`L${paragraphId}`);
-          }
-          if (!paragraphElement) break;
-
-          combinedContent += paragraphElement.innerHTML + '\n\n';
-          paragraphId++;
+    while (true) {
+      let paragraphElement = document.getElementById(`p${paragraphId}`);
+      if (!paragraphElement) {
+        paragraphElement = document.getElementById(`L${paragraphId}`);
       }
+      if (!paragraphElement) break;
+
+      combinedContent += paragraphElement.innerHTML + '\n\n';
+      paragraphId++;
+    }
   }
 
   const textChunks = splitTextIntoChunks(combinedContent, maxLength);
@@ -106,29 +106,29 @@ async function processChunkWithGemini(chunk, prefix, suffix, retries, delay) {
     // Update attempt progress before processing
     browser.runtime.sendMessage({
       action: 'updateChunksPage',
-      data: {action: 'updateAttemptProgress', current: attempt + 1, total: retries}
+      data: { action: 'updateAttemptProgress', current: attempt + 1, total: retries }
     });
 
     try {
       console.log(`Attempt ${attempt + 1} - Sending message to background script`);
-      
+
       const response = await browser.runtime.sendMessage({
         action: 'processChunk',
         chunk,
         prefix,
         suffix
       });
-      
+
       console.log('Received response from background script:', response);
-      
+
       if (response.error) {
         throw new Error(response.error);
       }
-      
+
       return { success: true, result: response.result };
     } catch (error) {
       console.error(`Attempt ${attempt + 1} - Error in processChunkWithGemini:`, error);
-      
+
       if (error.message.includes("PERMISSION_DENIED") && error.message.includes("Please use API Key")) {
         // API key error, show message to user
         browser.runtime.sendMessage({
@@ -150,9 +150,9 @@ async function processChunkWithGemini(chunk, prefix, suffix, retries, delay) {
         });
         return { success: false, error: 'Invalid API Key', fatal: true };
       }
-      
-      if (error.message.includes("NetworkError") || error.message.includes("503") || 
-          error.message.includes("UNAVAILABLE") || error.message.includes("Could not establish connection")) {
+
+      if (error.message.includes("NetworkError") || error.message.includes("503") ||
+        error.message.includes("UNAVAILABLE") || error.message.includes("Could not establish connection")) {
         if (attempt < retries - 1) {
           console.log(`Retrying in ${delay / 1000} seconds...`);
           await new Promise(resolve => setTimeout(resolve, delay));

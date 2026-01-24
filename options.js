@@ -17,11 +17,11 @@ function showStatus(message, duration = 3000) {
     statusContainer.style.display = 'none';
     document.body.appendChild(statusContainer);
   }
-  
+
   // Update message and show
   statusContainer.textContent = message;
   statusContainer.style.display = 'block';
-  
+
   // Hide after duration
   setTimeout(() => {
     statusContainer.style.display = 'none';
@@ -58,6 +58,8 @@ document.addEventListener('DOMContentLoaded', function () {
   const openRouterSettings = document.getElementById('openRouter-settings');
   const openaiSettings = document.getElementById('openai-settings');
   const glmCodingSettings = document.getElementById('glmCoding-settings');
+  const chatgptWebSettings = document.getElementById('chatgptWeb-settings');
+  const geminiWebSettings = document.getElementById('geminiWeb-settings');
 
   // Toggle visibility of API-specific settings
   apiTypeElement.addEventListener('change', function () {
@@ -66,6 +68,8 @@ document.addEventListener('DOMContentLoaded', function () {
     openRouterSettings.style.display = 'none';
     openaiSettings.style.display = 'none';
     glmCodingSettings.style.display = 'none';
+    chatgptWebSettings.style.display = 'none';
+    geminiWebSettings.style.display = 'none';
 
     if (apiTypeElement.value === 'gemini') {
       geminiSettings.style.display = 'block';
@@ -77,6 +81,10 @@ document.addEventListener('DOMContentLoaded', function () {
       openaiSettings.style.display = 'block';
     } else if (apiTypeElement.value === 'glmCoding') {
       glmCodingSettings.style.display = 'block';
+    } else if (apiTypeElement.value === 'chatgptWeb') {
+      chatgptWebSettings.style.display = 'block';
+    } else if (apiTypeElement.value === 'geminiWeb') {
+      geminiWebSettings.style.display = 'block';
     }
   });
 
@@ -104,32 +112,32 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('openRouter-stream').value = options.openRouterStream !== false ? 'true' : 'false';
     document.getElementById('openRouter-provider-order').value = options.openRouterProviderOrder || '';
     document.getElementById('openRouter-allow-fallback').value = options.openRouterAllowFallback !== false ? 'true' : 'false';
-    
+
     document.getElementById('openai-api-key').value = options.openaiApiKey || '';
     document.getElementById('openai-model-id').value = options.openaiModelId || 'gpt-4o-mini';
     document.getElementById('openai-base-url').value = options.openaiBaseUrl || 'https://api.openai.com/v1';
     document.getElementById('openai-max-tokens').value = options.openaiMaxTokens || '';
     document.getElementById('openai-context-window').value = options.openaiContextWindow || '';
     document.getElementById('openai-stream').value = options.openaiStream !== false ? 'true' : 'false';
-    
+
     // GLM Coding Plan settings
     document.getElementById('glmCoding-api-key').value = options.glmCodingApiKey || '';
     document.getElementById('glmCoding-model-id').value = options.glmCodingModelId || 'GLM-5-air';
     document.getElementById('glmCoding-max-tokens').value = options.glmCodingMaxTokens || '';
     document.getElementById('glmCoding-context-window').value = options.glmCodingContextWindow || '';
     document.getElementById('glmCoding-stream').value = options.glmCodingStream !== false ? 'true' : 'false';
-    
+
     document.getElementById('gemini-api-key').value = options.geminiApiKey || '';
     document.getElementById('gemini-model-id').value = options.geminiModelId || 'gemini-2.0-flash-001';
     document.getElementById('gemini-max-tokens').value = options.geminiMaxTokens || '';
     document.getElementById('gemini-context-window').value = options.geminiContextWindow || '';
     document.getElementById('gemini-stream').value = options.geminiStream !== false ? 'true' : 'false';
-    
+
     document.getElementById('model-id').value = options.vertexModelId || 'gemini-2.0-flash-001';
     document.getElementById('vertex-max-tokens').value = options.vertexMaxTokens || '';
     document.getElementById('vertex-context-window').value = options.vertexContextWindow || '';
     document.getElementById('vertex-stream').value = options.vertexStream !== false ? 'true' : 'false';
-    
+
     document.getElementById('max-sessions').value = options.maxSessions || 3;
 
     // Trigger change event to show the correct settings
@@ -187,15 +195,15 @@ document.addEventListener('DOMContentLoaded', function () {
     browser.storage.local.set(settings).then(() => {
       alert('Settings saved!');
     });
-  
+
   });
   // Export settings
-  document.getElementById('export-settings').addEventListener('click', async function() {
+  document.getElementById('export-settings').addEventListener('click', async function () {
     const settings = await browser.storage.local.get();
-    
+
     // Exclude specific keys from the exported settings
     const keysToExclude = ['processedChunks', 'lastChunksData', 'translationSessions'];
-    
+
     // Create a cleaned copy of the settings without the excluded keys
     const exportSettings = {};
     for (const key in settings) {
@@ -203,7 +211,7 @@ document.addEventListener('DOMContentLoaded', function () {
         exportSettings[key] = settings[key];
       }
     }
-    
+
     const blob = new Blob([JSON.stringify(exportSettings, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -213,12 +221,12 @@ document.addEventListener('DOMContentLoaded', function () {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    
+
     showStatus('Settings exported successfully (excluding session data)');
   });
 
   // Import settings
-  document.getElementById('import-settings').addEventListener('click', function() {
+  document.getElementById('import-settings').addEventListener('click', function () {
     // On mobile, show textarea instead of file picker
     if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
       document.getElementById('import-container').style.display = 'block';
@@ -228,11 +236,11 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   // Handle file import
-  document.getElementById('import-file').addEventListener('change', function(event) {
+  document.getElementById('import-file').addEventListener('change', function (event) {
     const file = event.target.files[0];
     if (file) {
       const reader = new FileReader();
-      reader.onload = async function(e) {
+      reader.onload = async function (e) {
         importSettings(e.target.result);
       };
       reader.readAsText(file);
@@ -240,13 +248,13 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   // Handle textarea import
-  document.getElementById('import-submit').addEventListener('click', async function() {
+  document.getElementById('import-submit').addEventListener('click', async function () {
     const jsonText = document.getElementById('import-text').value;
     importSettings(jsonText);
   });
 
   // Handle import cancel
-  document.getElementById('import-cancel').addEventListener('click', function() {
+  document.getElementById('import-cancel').addEventListener('click', function () {
     document.getElementById('import-container').style.display = 'none';
     document.getElementById('import-text').value = '';
   });
@@ -264,7 +272,7 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   // Reset settings
-  document.getElementById('reset-settings').addEventListener('click', async function() {
+  document.getElementById('reset-settings').addEventListener('click', async function () {
     if (confirm('Are you sure you want to reset all settings to default values?')) {
       const defaultSettings = {
         apiType: "gemini",
@@ -321,7 +329,7 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   // Clear saved results
-  document.getElementById('clear-saved-results').addEventListener('click', async function() {
+  document.getElementById('clear-saved-results').addEventListener('click', async function () {
     if (confirm('Are you sure you want to clear all saved translation results? This action cannot be undone.')) {
       await browser.storage.local.remove(['processedChunks', 'translationSessions']);
       alert('All saved results have been cleared!');
