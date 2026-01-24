@@ -100,11 +100,11 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('top-k').value = options.topK || '';
     document.getElementById('top-p').value = options.topP || '';
     document.getElementById('gemini-api-key').value = options.geminiApiKey || '';
-    document.getElementById('gemini-model-id').value = options.geminiModelId || 'gemini-1.5-flash-8b-latest';
+    document.getElementById('gemini-model-id').value = options.geminiModelId || 'gemini-2.5-flash';
     document.getElementById('service-account-key').value = options.vertexServiceAccountKey || '';
     document.getElementById('location').value = options.vertexLocation || 'us-central1';
     document.getElementById('project-id').value = options.vertexProjectId || '';
-    document.getElementById('model-id').value = options.vertexModelId || 'gemini-1.5-flash-002';
+    document.getElementById('model-id').value = options.vertexModelId || 'gemini-2.5-flash';
     document.getElementById('openRouter-api-key').value = options.openRouterApiKey || '';
     document.getElementById('openRouter-model-id').value = options.openRouterModelId || 'deepseek/deepseek-chat-v3-0324';
     document.getElementById('openRouter-max-tokens').value = options.openRouterMaxTokens || '';
@@ -128,12 +128,12 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('glmCoding-stream').value = options.glmCodingStream !== false ? 'true' : 'false';
 
     document.getElementById('gemini-api-key').value = options.geminiApiKey || '';
-    document.getElementById('gemini-model-id').value = options.geminiModelId || 'gemini-2.0-flash-001';
+    document.getElementById('gemini-model-id').value = options.geminiModelId || 'gemini-2.5-flash';
     document.getElementById('gemini-max-tokens').value = options.geminiMaxTokens || '';
     document.getElementById('gemini-context-window').value = options.geminiContextWindow || '';
     document.getElementById('gemini-stream').value = options.geminiStream !== false ? 'true' : 'false';
 
-    document.getElementById('model-id').value = options.vertexModelId || 'gemini-2.0-flash-001';
+    document.getElementById('model-id').value = options.vertexModelId || 'gemini-2.5-flash';
     document.getElementById('vertex-max-tokens').value = options.vertexMaxTokens || '';
     document.getElementById('vertex-context-window').value = options.vertexContextWindow || '';
     document.getElementById('vertex-stream').value = options.vertexStream !== false ? 'true' : 'false';
@@ -288,14 +288,14 @@ document.addEventListener('DOMContentLoaded', function () {
         topK: 30,
         topP: 0.95,
         geminiApiKey: "",
-        geminiModelId: "gemini-2.0-flash-001",
+        geminiModelId: "gemini-2.5-flash",
         geminiMaxTokens: "",
         geminiContextWindow: "",
         geminiStream: true,
         vertexServiceAccountKey: "",
         vertexLocation: "us-central1",
         vertexProjectId: "",
-        vertexModelId: "gemini-2.0-flash-001",
+        vertexModelId: "gemini-2.5-flash",
         vertexMaxTokens: "",
         vertexContextWindow: "",
         vertexStream: true,

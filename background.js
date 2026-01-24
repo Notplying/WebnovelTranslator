@@ -38,14 +38,14 @@ browser.runtime.onInstalled.addListener(function (details) {
       topK: 30,
       topP: 0.95,
       geminiApiKey: "", // Default Gemini API key (empty)
-      geminiModelId: "gemini-2.0-flash-001", // Default Gemini model
+      geminiModelId: "gemini-2.5-flash", // Default Gemini model
       geminiMaxTokens: "", // Default Gemini max output tokens (empty = use model default)
       geminiContextWindow: "", // Default Gemini context window (empty = use model default)
       geminiStream: true, // Default Gemini stream
       vertexServiceAccountKey: "", // Default Vertex service account key (empty)
       vertexLocation: "us-central1", // Default Vertex location
       vertexProjectId: "", // Default Vertex project ID (empty)
-      vertexModelId: "gemini-2.0-flash-001", // Default Vertex model
+      vertexModelId: "gemini-2.5-flash", // Default Vertex model
       vertexMaxTokens: "", // Default Vertex max output tokens (empty = use model default)
       vertexContextWindow: "", // Default Vertex context window (empty = use model default)
       vertexStream: true, // Default Vertex stream
