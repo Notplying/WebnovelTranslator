@@ -568,6 +568,12 @@ function unescapeHtml(text) {
 }
 
 // Security helper to prevent XSS
+DOMPurify.addHook('afterSanitizeAttributes', function (node) {
+  if (node.tagName === 'A' && node.getAttribute('target') === '_blank') {
+    node.setAttribute('rel', 'noopener noreferrer');
+  }
+});
+
 function sanitizeHTML(html) {
   // Allow 'style' because processNode adds style attributes to images.
   // Allow 'data-original-src' because it's used for image fallback.
@@ -1927,7 +1933,7 @@ browser.runtime.onMessage.addListener((message) => {
       break;
     case 'addChunk':
       if (!isStreaming) { // Only add chunk if not currently streaming
-        addChunk(message.index, message.content);
+        addChunk(message.index, message.content, message.rawContent);
       }
       break;
     case 'showError':
