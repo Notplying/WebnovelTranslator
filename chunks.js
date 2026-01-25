@@ -610,7 +610,7 @@ function createPartContent(content, isActive, partIndex) {
     // Now let's check if images are still present in the markdown output
     if (unescapedContent.includes('<img')) {
       // If images are preserved, just use the markdown output
-      partContent.innerHTML = unescapedContent;
+      partContent.innerHTML = sanitizeHTML(unescapedContent);
     } else {
       // If images are lost, we need to handle them differently
       // Create a temporary DOM element to parse the original HTML
@@ -725,8 +725,8 @@ function createPartContent(content, isActive, partIndex) {
         processedContent += processNode(child);
       }
 
-      // Set the content without sanitization for testing
-      partContent.innerHTML = processedContent;
+      // Set the content with sanitization
+      partContent.innerHTML = sanitizeHTML(processedContent);
     }
   } else {
     // Process as markdown for plain text content without images
@@ -735,7 +735,7 @@ function createPartContent(content, isActive, partIndex) {
     const markdownContent = marked.parse(escapedContent);
     // Unescape HTML entities to convert < and > back to < and >
     const unescapedContent = unescapeHtml(markdownContent);
-    partContent.innerHTML = unescapedContent;
+    partContent.innerHTML = sanitizeHTML(unescapedContent);
   }
 
   return partContent;
@@ -1358,7 +1358,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
             // Now let's check if images are still present in the markdown output
             if (unescapedContent.includes('<img')) {
               // If images are preserved, just use the markdown output
-              partContent.innerHTML = unescapedContent;
+              partContent.innerHTML = sanitizeHTML(unescapedContent);
             } else {
               // If images are lost, we need to handle them differently
               // Create a temporary DOM element to parse the original HTML
@@ -1473,8 +1473,8 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
                 processedContent += processNode(child);
               }
 
-              // Set the content without sanitization for testing
-              partContent.innerHTML = processedContent;
+          // Set the content with sanitization
+          partContent.innerHTML = sanitizeHTML(processedContent);
             }
           } else {
             // Process as markdown for plain text content without images
@@ -1483,7 +1483,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
             const markdownContent = marked.parse(escapedContent);
             // Unescape HTML entities to convert < and > back to < and >
             const unescapedContent = unescapeHtml(markdownContent);
-            partContent.innerHTML = unescapedContent;
+        partContent.innerHTML = sanitizeHTML(unescapedContent);
           }
 
           chunkDiv.dataset.rawContent = effectiveRawContent;
@@ -1581,7 +1581,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
         // Now let's check if images are still present in the markdown output
         if (unescapedContent.includes('<img')) {
           // If images are preserved, just use the markdown output
-          partContentElement.innerHTML = unescapedContent;
+          partContentElement.innerHTML = sanitizeHTML(unescapedContent);
         } else {
           // If images are lost, we need to handle them differently
           // Create a temporary DOM element to parse the original HTML
@@ -1696,8 +1696,8 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
             processedContent += processNode(child);
           }
 
-          // Set the content without sanitization for testing
-          partContentElement.innerHTML = processedContent;
+          // Set the content with sanitization
+          partContentElement.innerHTML = sanitizeHTML(processedContent);
         }
       } else {
         // Process as markdown for plain text content without images
@@ -1706,7 +1706,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
         const markdownContent = marked.parse(escapedContent);
         // Unescape HTML entities to convert < and > back to < and >
         const unescapedContent = unescapeHtml(markdownContent);
-        partContentElement.innerHTML = unescapedContent;
+        partContentElement.innerHTML = sanitizeHTML(unescapedContent);
       }
 
       contentParts.appendChild(partContentElement);
@@ -1749,7 +1749,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
           // Now let's check if images are still present in the markdown output
           if (unescapedContent.includes('<img')) {
             // If images are preserved, just use the markdown output
-            partContent.innerHTML = unescapedContent;
+            partContent.innerHTML = sanitizeHTML(unescapedContent);
           } else {
             // If images are lost, we need to handle them differently
             // Create a temporary DOM element to parse the original HTML
@@ -1864,8 +1864,8 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
               processedContent += processNode(child);
             }
 
-            // Set the content without sanitization for testing
-            partContent.innerHTML = processedContent;
+            // Set the content with sanitization
+            partContent.innerHTML = sanitizeHTML(processedContent);
           }
         } else {
           // Process as markdown for plain text content without images
@@ -1874,7 +1874,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
           const markdownContent = marked.parse(escapedContent);
           // Unescape HTML entities to convert < and > back to < and >
           const unescapedContent = unescapeHtml(markdownContent);
-          partContent.innerHTML = unescapedContent;
+          partContent.innerHTML = sanitizeHTML(unescapedContent);
         }
         chunkDiv.dataset.rawContent = effectiveRawContent;
       } else {
@@ -2021,3 +2021,11 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 console.log('Chunks page script loaded');
+
+// Security helper to prevent XSS
+function sanitizeHTML(html) {
+  // Allow 'style' because processNode adds style attributes to images.
+  // Allow 'data-original-src' because it's used for image fallback.
+  // Allow 'target' for links.
+  return DOMPurify.sanitize(html, { ADD_ATTR: ['target', 'data-original-src', 'style'] });
+}
