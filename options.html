@@ -312,6 +312,51 @@
     ::-webkit-scrollbar-thumb:hover {
       background: rgba(99, 102, 241, 0.7);
     }
+
+    .password-wrapper {
+      position: relative;
+      width: 100%;
+      margin-bottom: 16px;
+    }
+
+    .password-wrapper input {
+      margin-bottom: 0;
+      padding-right: 48px;
+    }
+
+    .password-toggle {
+      position: absolute;
+      right: 0;
+      top: 0;
+      height: 100%;
+      width: 48px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      transition: color 0.2s ease;
+      /* Remove standard button styles override */
+      backdrop-filter: none;
+      box-shadow: none;
+      border-radius: 0 8px 8px 0;
+    }
+
+    .password-toggle:hover {
+      color: var(--text-primary);
+      background: none;
+      box-shadow: none;
+      transform: none;
+      border-color: transparent;
+    }
+
+    .password-toggle svg {
+      width: 20px;
+      height: 20px;
+    }
   </style>
 </head>
 <body>
@@ -369,7 +414,12 @@
     <div id="gemini-settings" class="section" style="display: none;">
       <div class="section-title">Gemini Settings</div>
       <label for="gemini-api-key">Gemini API Key:</label>
-      <input type="text" id="gemini-api-key" placeholder="Enter Gemini API key">
+      <div class="password-wrapper">
+        <input type="password" id="gemini-api-key" placeholder="Enter Gemini API key">
+        <button type="button" class="password-toggle" aria-label="Show password">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+        </button>
+      </div>
       <label for="gemini-model-id">Model ID:</label>
       <input type="text" id="gemini-model-id" placeholder="e.g., gemini-1.5-flash-002">
       <label for="gemini-max-tokens">Max Output Tokens (Optional):</label>
@@ -413,7 +463,12 @@
     <div id="openRouter-settings" class="section" style="display: none;">
       <div class="section-title">OpenRouter Settings</div>
       <label for="openRouter-api-key">OpenRouter API Key:</label>
-      <input type="text" id="openRouter-api-key" placeholder="Enter OpenRouter API key">
+      <div class="password-wrapper">
+        <input type="password" id="openRouter-api-key" placeholder="Enter OpenRouter API key">
+        <button type="button" class="password-toggle" aria-label="Show password">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+        </button>
+      </div>
       
       <label for="openRouter-model-id">Model ID:</label>
       <input type="text" id="openRouter-model-id" placeholder="e.g., openai/gpt-4">
@@ -442,7 +497,12 @@
     <div id="openai-settings" class="section" style="display: none;">
       <div class="section-title">OpenAI Compatible Settings</div>
       <label for="openai-api-key">OpenAI API Compatible Key:</label>
-      <input type="text" id="openai-api-key" placeholder="Enter OpenAI API key">
+      <div class="password-wrapper">
+        <input type="password" id="openai-api-key" placeholder="Enter OpenAI API key">
+        <button type="button" class="password-toggle" aria-label="Show password">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+        </button>
+      </div>
       
       <label for="openai-model-id">Model ID:</label>
       <input type="text" id="openai-model-id" placeholder="e.g., gpt-4o-mini">
@@ -465,7 +525,12 @@
     <div id="glmCoding-settings" class="section" style="display: none;">
       <div class="section-title">GLM Coding Plan Settings</div>
       <label for="glmCoding-api-key">GLM Coding Plan API Key:</label>
-      <input type="text" id="glmCoding-api-key" placeholder="Enter your Z.AI API key">
+      <div class="password-wrapper">
+        <input type="password" id="glmCoding-api-key" placeholder="Enter your Z.AI API key">
+        <button type="button" class="password-toggle" aria-label="Show password">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+        </button>
+      </div>
       
       <label for="glmCoding-model-id">Model ID:</label>
       <input type="text" id="glmCoding-model-id" placeholder="e.g., GLM-4.5-air">
