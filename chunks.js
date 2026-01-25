@@ -567,6 +567,14 @@ function unescapeHtml(text) {
     .replace(/&/g, "&");
 }
 
+// Security helper to prevent XSS
+function sanitizeHTML(html) {
+  // Allow 'style' because processNode adds style attributes to images.
+  // Allow 'data-original-src' because it's used for image fallback.
+  // Allow 'target' for links.
+  return DOMPurify.sanitize(html, { ADD_ATTR: ['target', 'data-original-src', 'style'] });
+}
+
 // Helper functions for creating UI elements
 function createButton(text, className, clickHandler) {
   const button = document.createElement('button');
@@ -1446,8 +1454,8 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
                 processedContent += processNode(child);
               }
 
-          // Set the content with sanitization
-          partContent.innerHTML = sanitizeHTML(processedContent);
+              // Set the content with sanitization
+              partContent.innerHTML = sanitizeHTML(processedContent);
             }
           } else {
             // Process as markdown for plain text content without images
@@ -1456,7 +1464,7 @@ async function updateStreamingChunk(content, rawContent, isInitial = false, isCo
             const markdownContent = marked.parse(escapedContent);
             // Unescape HTML entities to convert < and > back to < and >
             const unescapedContent = unescapeHtml(markdownContent);
-        partContent.innerHTML = sanitizeHTML(unescapedContent);
+            partContent.innerHTML = sanitizeHTML(unescapedContent);
           }
 
           chunkDiv.dataset.rawContent = effectiveRawContent;
@@ -1995,10 +2003,3 @@ document.addEventListener('DOMContentLoaded', () => {
 
 console.log('Chunks page script loaded');
 
-// Security helper to prevent XSS
-function sanitizeHTML(html) {
-  // Allow 'style' because processNode adds style attributes to images.
-  // Allow 'data-original-src' because it's used for image fallback.
-  // Allow 'target' for links.
-  return DOMPurify.sanitize(html, { ADD_ATTR: ['target', 'data-original-src', 'style'] });
-}
