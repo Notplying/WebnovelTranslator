@@ -116,7 +116,7 @@ async function initializeChunksPage() {
       // Restore stored chunks for this session
       sessionChunks.forEach((chunk, index) => {
         if (chunk) {
-          addChunk(index, chunk.content, chunk.rawContent);
+          addChunk(index, chunk.content, chunk.rawContent, true);
           updateProgress(index + 1, chunks.length);
         }
       });
@@ -750,40 +750,42 @@ function createChunkHeader(index) {
   return header;
 }
 
-async function addChunk(index, content, rawContent) {
-  const sessionId = getSessionId();
-  if (!sessionId) {
-    console.error('No session ID found when adding chunk');
-    return;
-  }
+async function addChunk(index, content, rawContent, skipStorage = false) {
+  if (!skipStorage) {
+    const sessionId = getSessionId();
+    if (!sessionId) {
+      console.error('No session ID found when adding chunk');
+      return;
+    }
 
-  try {
-    // Store the chunk data under the session ID
-    const result = await browser.storage.local.get(['processedChunks', 'translationSessions']);
-    const allChunks = result.processedChunks || {};
-    const sessionChunks = allChunks[sessionId] || [];
-    sessionChunks[index] = { content, rawContent }; // Ensure 'content' is the structured object
-    allChunks[sessionId] = sessionChunks;
+    try {
+      // Store the chunk data under the session ID
+      const result = await browser.storage.local.get(['processedChunks', 'translationSessions']);
+      const allChunks = result.processedChunks || {};
+      const sessionChunks = allChunks[sessionId] || [];
+      sessionChunks[index] = { content, rawContent }; // Ensure 'content' is the structured object
+      allChunks[sessionId] = sessionChunks;
 
-    // Get the most recent session IDs based on maxSessions setting
-    const maxSessions = (await browser.storage.local.get('maxSessions')).maxSessions || 3;
-    const recentSessions = (result.translationSessions || [])
-      .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(0, maxSessions)
-      .map(session => session.id);
+      // Get the most recent session IDs based on maxSessions setting
+      const maxSessions = (await browser.storage.local.get('maxSessions')).maxSessions || 3;
+      const recentSessions = (result.translationSessions || [])
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, maxSessions)
+        .map(session => session.id);
 
-    // Keep only chunks from recent sessions
-    const filteredChunks = {};
-    recentSessions.forEach(sid => {
-      if (allChunks[sid]) {
-        filteredChunks[sid] = allChunks[sid];
-      }
-    });
+      // Keep only chunks from recent sessions
+      const filteredChunks = {};
+      recentSessions.forEach(sid => {
+        if (allChunks[sid]) {
+          filteredChunks[sid] = allChunks[sid];
+        }
+      });
 
-    await browser.storage.local.set({ processedChunks: filteredChunks });
-    console.log(`addChunk: Successfully saved chunk ${index} for session ${sessionId}`);
-  } catch (error) {
-    console.error(`addChunk: Error saving chunk ${index} to storage:`, error);
+      await browser.storage.local.set({ processedChunks: filteredChunks });
+      console.log(`addChunk: Successfully saved chunk ${index} for session ${sessionId}`);
+    } catch (error) {
+      console.error(`addChunk: Error saving chunk ${index} to storage:`, error);
+    }
   }
 
   const chunksContainer = document.getElementById('chunks-container');
