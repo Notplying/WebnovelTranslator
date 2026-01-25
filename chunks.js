@@ -752,37 +752,8 @@ function createChunkHeader(index) {
 
 async function addChunk(index, content, rawContent, skipStorage = false) {
   if (!skipStorage) {
-    const sessionId = getSessionId();
-    if (!sessionId) {
-      console.error('No session ID found when adding chunk');
-      return;
-    }
-
     try {
-      // Store the chunk data under the session ID
-      const result = await browser.storage.local.get(['processedChunks', 'translationSessions']);
-      const allChunks = result.processedChunks || {};
-      const sessionChunks = allChunks[sessionId] || [];
-      sessionChunks[index] = { content, rawContent }; // Ensure 'content' is the structured object
-      allChunks[sessionId] = sessionChunks;
-
-      // Get the most recent session IDs based on maxSessions setting
-      const maxSessions = (await browser.storage.local.get('maxSessions')).maxSessions || 3;
-      const recentSessions = (result.translationSessions || [])
-        .sort((a, b) => b.timestamp - a.timestamp)
-        .slice(0, maxSessions)
-        .map(session => session.id);
-
-      // Keep only chunks from recent sessions
-      const filteredChunks = {};
-      recentSessions.forEach(sid => {
-        if (allChunks[sid]) {
-          filteredChunks[sid] = allChunks[sid];
-        }
-      });
-
-      await browser.storage.local.set({ processedChunks: filteredChunks });
-      console.log(`addChunk: Successfully saved chunk ${index} for session ${sessionId}`);
+      await saveChunkToStorage(index, content, rawContent);
     } catch (error) {
       console.error(`addChunk: Error saving chunk ${index} to storage:`, error);
     }
