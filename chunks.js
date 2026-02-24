@@ -33,6 +33,7 @@ let completedChunks = 0;
 let processedResults = [];   // { content, rawContent } per index
 let streamingIndex = -1;
 let reprocessingState = { isActive: false, targetIndex: -1 };
+let _terminated = false;
 
 // ─── URL param ────────────────────────────────────────────────────────────────
 function getSessionId() {
@@ -106,9 +107,9 @@ function buildChunkCards(chunks) {
           </div>
         </div>
         <div class="chunk-actions" id="chunk-actions-${i}">
-          <button class="btn btn-secondary btn-sm" onclick="copyChunk(${i}, 'processed')">📋 Copy</button>
-          <button class="btn btn-secondary btn-sm" onclick="copyChunkRaw(${i})">📄 Copy Raw</button>
-          <button class="btn btn-secondary btn-sm" onclick="reprocessOne(${i})">↩ Reprocess</button>
+          <button class="btn btn-secondary btn-sm" id="chunk-copy-${i}">📋 Copy</button>
+          <button class="btn btn-secondary btn-sm" id="chunk-copy-raw-${i}">📄 Copy Raw</button>
+          <button class="btn btn-secondary btn-sm" id="chunk-reprocess-${i}">↩ Reprocess</button>
         </div>
       </div>`;
         container.appendChild(card);
@@ -117,6 +118,11 @@ function buildChunkCards(chunks) {
         card.querySelector('.chunk-header').addEventListener('click', () => {
             card.classList.toggle('collapsed');
         });
+
+        // Action buttons
+        document.getElementById(`chunk-copy-${i}`).addEventListener('click', (e) => { e.stopPropagation(); copyChunk(i, 'processed'); });
+        document.getElementById(`chunk-copy-raw-${i}`).addEventListener('click', (e) => { e.stopPropagation(); copyChunkRaw(i); });
+        document.getElementById(`chunk-reprocess-${i}`).addEventListener('click', (e) => { e.stopPropagation(); reprocessOne(i); });
     });
 }
 
@@ -148,8 +154,6 @@ function renderChunk(index, text, isStreaming = false) {
     if (isStreaming) {
         contentEl.classList.add('streaming');
         contentEl.innerHTML = renderMarkdown(text);
-        // Auto scroll to bottom of streaming element
-        contentEl.scrollTop = contentEl.scrollHeight;
     } else {
         contentEl.classList.remove('streaming');
         contentEl.innerHTML = renderMarkdown(text);
@@ -204,11 +208,13 @@ function handleImages(el) {
 // ─── Process all chunks sequentially ─────────────────────────────────────────
 async function processAllChunks(resume = false) {
     const sessId = getSessionId();
+    _terminated = false;
     isProcessing = true;
     document.getElementById('terminateBtn').style.display = '';
     updateFloatingStatus();
 
     for (let i = 0; i < allChunks.length; i++) {
+        if (_terminated) break;
         if (resume && processedResults[i]?.content) { completedChunks = i + 1; updateOverallProgress(completedChunks, totalChunks); continue; }
 
         streamingIndex = i;
@@ -223,6 +229,7 @@ async function processAllChunks(resume = false) {
 
         let success = false;
         for (let attempt = 0; attempt < retryCount; attempt++) {
+            if (_terminated) break;
             updateAttemptProgress(attempt + 1, retryCount);
             try {
                 const result = await browser.runtime.sendMessage({
@@ -232,11 +239,13 @@ async function processAllChunks(resume = false) {
                     sessionId: sessId
                 });
 
+                if (_terminated) break;
                 if (result.error) throw new Error(result.error);
 
                 if (result.streaming) {
                     // Streaming updates come via message listener; wait for them
                     await waitForStreamComplete(i);
+                    if (_terminated) { success = !!processedResults[i]?.content?.text; break; }
                     success = true; break;
                 }
 
@@ -249,6 +258,7 @@ async function processAllChunks(resume = false) {
                 await saveChunk(i, processedResults[i].content, allChunks[i]);
                 success = true; break;
             } catch (err) {
+                if (_terminated) break;
                 console.error(`Chunk ${i} attempt ${attempt + 1} failed:`, err);
                 if (attempt === retryCount - 1) {
                     const errEl = document.getElementById(`chunk-content-${i}`);
@@ -262,9 +272,15 @@ async function processAllChunks(resume = false) {
             }
         }
 
+        if (_terminated) {
+            // Mark current chunk as done if it has content
+            if (processedResults[i]?.content?.text) {
+                setChunkStatus(i, 'done'); setMicroBar(i, 'done');
+                completedChunks = i + 1; updateOverallProgress(completedChunks, totalChunks);
+            }
+            break;
+        }
         if (success) { setChunkStatus(i, 'done'); setMicroBar(i, 'done'); completedChunks = i + 1; updateOverallProgress(completedChunks, totalChunks); updateAttemptProgress(0, retryCount); }
-        // Collapse completed card
-        card?.classList.add('collapsed');
     }
 
     isProcessing = false; streamingIndex = -1;
@@ -289,6 +305,7 @@ function waitForStreamComplete(index) {
 let _streamCompleteFlags = {};
 function isStreamingActive(index) { return !_streamCompleteFlags[index]; }
 
+
 // ─── Message handler (streaming updates from service worker) ──────────────────
 browser.runtime.onMessage.addListener((msg) => {
     if (msg.action === 'initializeChunksPage') {
@@ -297,6 +314,7 @@ browser.runtime.onMessage.addListener((msg) => {
     }
 
     if (msg.action === 'updateStreamContent') {
+        if (_terminated) return; // Once terminated, ignore all streaming updates
         const index = reprocessingState.isActive ? reprocessingState.targetIndex : streamingIndex;
         if (index < 0) return;
 
@@ -306,22 +324,26 @@ browser.runtime.onMessage.addListener((msg) => {
             setMicroBar(index, 'pulse');
         } else {
             renderChunk(index, msg.content, !msg.isComplete);
+            // Save incrementally on every streaming update
+            const text = msg.content || '';
+            processedResults[index] = { content: { parts: [text], text }, rawContent: msg.rawContent || allChunks[index] };
+            saveChunk(index, processedResults[index].content, processedResults[index].rawContent);
         }
 
         if (msg.isComplete) {
             _streamCompleteFlags[index] = true;
             const text = msg.content || '';
-            processedResults[index] = { content: { parts: [text], text }, rawContent: msg.rawContent };
-            saveChunk(index, processedResults[index].content, msg.rawContent);
-            if (msg.terminated) {
-                setChunkStatus(index, 'error');
-                showBanner('⏹ Request terminated.', 'error');
+            if (text) {
+                processedResults[index] = { content: { parts: [text], text }, rawContent: msg.rawContent || allChunks[index] };
+                saveChunk(index, processedResults[index].content, processedResults[index].rawContent);
             }
             if (reprocessingState.isActive && reprocessingState.targetIndex === index) {
                 reprocessingState.isActive = false;
-                setChunkStatus(index, text ? 'done' : 'error');
-                setMicroBar(index, text ? 'done' : 'reset');
-                showToast(text ? '✅ Reprocessed!' : '❌ Reprocess failed', text ? 'success' : 'error');
+                const existing = processedResults[index];
+                const hasContent = existing?.content?.text;
+                setChunkStatus(index, hasContent ? 'done' : 'error');
+                setMicroBar(index, hasContent ? 'done' : 'reset');
+                showToast(hasContent ? '✅ Reprocessed!' : '❌ Reprocess failed', hasContent ? 'success' : 'error');
             }
         }
     }
@@ -358,7 +380,15 @@ async function copyChunk(index, type = 'processed') {
     } catch { showToast('❌ Copy failed', 'error'); }
 }
 
-async function copyChunkRaw(index) { return copyChunk(index, 'raw'); }
+async function copyChunkRaw(index) {
+    const raw = processedResults[index]?.rawContent || allChunks[index] || '';
+    const parts = [prefix, raw, suffix].filter(Boolean);
+    const text = parts.join('\n');
+    try {
+        await navigator.clipboard.writeText(text);
+        showToast('📄 Copied raw (with prefix/suffix)!', 'success');
+    } catch { showToast('❌ Copy failed', 'error'); }
+}
 
 async function copyAll() {
     const parts = getAllProcessedText();
@@ -379,6 +409,7 @@ function downloadAll() {
 
 // ─── Reprocess individual chunk ───────────────────────────────────────────────
 async function reprocessOne(index) {
+    if (reprocessingState.isActive) { showToast('Already reprocessing, please wait.', 'error'); return; }
     if (isProcessing && streamingIndex !== index) { showToast('Wait for current chunk to finish.', 'error'); return; }
     const sessId = getSessionId();
     const storedData = await browser.runtime.sendMessage({ action: 'getStoredData' });
@@ -386,10 +417,15 @@ async function reprocessOne(index) {
     const sfx = storedData.suffix || suffix;
     const rc = storedData.retryCount || retryCount;
 
-    // Clear saved
+    // Clear saved storage
     const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
     const sessChunks = processedChunks[sessId] || [];
     if (sessChunks[index]) { delete sessChunks[index]; processedChunks[sessId] = sessChunks; await browser.storage.local.set({ processedChunks }); }
+
+    // Clear in-memory result and UI immediately
+    processedResults[index] = null;
+    const contentEl = document.getElementById(`chunk-content-${index}`);
+    if (contentEl) contentEl.innerHTML = '<em style="color:var(--text-muted)">Reprocessing…</em>';
 
     reprocessingState = { isActive: true, targetIndex: index };
     _streamCompleteFlags[index] = false;
@@ -404,7 +440,7 @@ async function reprocessOne(index) {
             if (result.error) throw new Error(result.error);
             if (result.streaming) { await waitForStreamComplete(index); return; }
             const parts = result.parts || [result.result];
-            renderMultiPart.length > 1 ? renderMultiPart(index, parts) : renderChunk(index, result.result, false);
+            parts.length > 1 ? renderMultiPart(index, parts) : renderChunk(index, result.result, false);
             processedResults[index] = { content: { parts, text: result.result }, rawContent: allChunks[index] };
             await saveChunk(index, processedResults[index].content, allChunks[index]);
             setChunkStatus(index, 'done'); setMicroBar(index, 'done');
@@ -432,6 +468,7 @@ async function reprocessAll() {
     await browser.storage.local.set({ processedChunks });
     processedResults = [];
     completedChunks = 0;
+    _terminated = false;
     _streamCompleteFlags = {};
     buildChunkCards(allChunks);
     updateOverallProgress(0, totalChunks);
@@ -500,8 +537,20 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('downloadAllBtn')?.addEventListener('click', downloadAll);
     document.getElementById('downloadAllBtnFloat')?.addEventListener('click', downloadAll);
     document.getElementById('terminateBtn')?.addEventListener('click', async () => {
-        await browser.runtime.sendMessage({ action: 'terminateRequest', sessionId: getSessionId() });
-        showToast('⏹ Terminating…', '');
+        const idx = streamingIndex; // Save before anything changes
+        _terminated = true;
+        if (idx >= 0) _streamCompleteFlags[idx] = true;
+
+        try { await browser.runtime.sendMessage({ action: 'terminateRequest', sessionId: getSessionId() }); } catch (e) { }
+
+        // Re-render from processedResults to guarantee content is visible
+        if (idx >= 0 && processedResults[idx]?.content?.text) {
+            renderChunk(idx, processedResults[idx].content.text, false);
+            setChunkStatus(idx, 'done');
+            setMicroBar(idx, 'done');
+            saveChunk(idx, processedResults[idx].content, processedResults[idx].rawContent);
+        }
+        showToast('⏹ Terminated.', '');
     });
 
     // If not initialized via message, init directly

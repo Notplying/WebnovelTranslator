@@ -183,7 +183,6 @@ async function terminateRequest(sessionId) {
     if (controller) {
         controller.abort();
         delete sessionControllers[sessionId];
-        updateChunksPage(sessionId, { action: 'updateStreamContent', content: '', rawContent: '', isComplete: true, terminated: true });
         return { success: true };
     }
     return { success: false, error: 'No active request to terminate' };
