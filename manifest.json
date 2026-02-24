@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "AI Webnovel Translator",
+  "name": "AI Webnovel Translator Experimental",
   "version": "3.0.0",
   "browser_specific_settings": {
     "gecko": {
