@@ -1,20 +1,21 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI Webnovel Translator — Settings</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com"/>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
       --bg: #0d0f17;
       --surface: #13161f;
       --surface2: #1a1e2e;
-      --border: rgba(255,255,255,0.07);
+      --border: rgba(255, 255, 255, 0.07);
       --accent: #7c6af7;
       --accent2: #5eead4;
-      --accent-glow: rgba(124,106,247,0.25);
+      --accent-glow: rgba(124, 106, 247, 0.25);
       --text: #e2e8f0;
       --text-muted: #64748b;
       --danger: #f87171;
@@ -22,8 +23,19 @@
       --radius: 12px;
       --transition: 0.2s ease;
     }
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html { font-size: 15px; }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      font-size: 15px;
+    }
+
     body {
       font-family: 'Inter', system-ui, sans-serif;
       background: var(--bg);
@@ -45,6 +57,7 @@
       top: 0;
       flex-shrink: 0;
     }
+
     .sidebar-logo {
       display: flex;
       align-items: center;
@@ -52,21 +65,73 @@
       padding: 0 20px 24px;
       border-bottom: 1px solid var(--border);
     }
-    .sidebar-logo img { width: 32px; height: 32px; }
-    .sidebar-logo span { font-weight: 700; font-size: 0.95rem; color: var(--text); }
-    .sidebar-logo small { display: block; font-size: 0.7rem; color: var(--text-muted); font-weight: 400; }
-    nav { display: flex; flex-direction: column; gap: 2px; padding: 16px 12px; }
-    .nav-label { font-size: 0.7rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; padding: 8px 8px 4px; }
-    .nav-item {
-      display: flex; align-items: center; gap: 10px;
-      padding: 9px 12px; border-radius: 8px;
-      font-size: 0.875rem; font-weight: 500; color: var(--text-muted);
-      cursor: pointer; transition: background var(--transition), color var(--transition);
-      border: none; background: none; width: 100%; text-align: left;
+
+    .sidebar-logo img {
+      width: 32px;
+      height: 32px;
     }
-    .nav-item:hover { background: var(--surface2); color: var(--text); }
-    .nav-item.active { background: var(--accent-glow); color: var(--accent); }
-    .nav-item .icon { font-size: 1rem; width: 20px; text-align: center; }
+
+    .sidebar-logo span {
+      font-weight: 700;
+      font-size: 0.95rem;
+      color: var(--text);
+    }
+
+    .sidebar-logo small {
+      display: block;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+
+    nav {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 16px 12px;
+    }
+
+    .nav-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      padding: 8px 8px 4px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 12px;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: background var(--transition), color var(--transition);
+      border: none;
+      background: none;
+      width: 100%;
+      text-align: left;
+    }
+
+    .nav-item:hover {
+      background: var(--surface2);
+      color: var(--text);
+    }
+
+    .nav-item.active {
+      background: var(--accent-glow);
+      color: var(--accent);
+    }
+
+    .nav-item .icon {
+      font-size: 1rem;
+      width: 20px;
+      text-align: center;
+    }
 
     /* ── Main content ─────────────────────────────────────────── */
     .main {
@@ -75,9 +140,21 @@
       overflow-y: auto;
       max-width: 860px;
     }
-    .page-header { margin-bottom: 28px; }
-    .page-header h1 { font-size: 1.5rem; font-weight: 700; }
-    .page-header p { color: var(--text-muted); font-size: 0.875rem; margin-top: 4px; }
+
+    .page-header {
+      margin-bottom: 28px;
+    }
+
+    .page-header h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+
+    .page-header p {
+      color: var(--text-muted);
+      font-size: 0.875rem;
+      margin-top: 4px;
+    }
 
     /* ── Cards ────────────────────────────────────────────────── */
     .card {
@@ -87,15 +164,54 @@
       padding: 24px;
       margin-bottom: 20px;
     }
-    .card-title { font-size: 0.9rem; font-weight: 600; color: var(--text); margin-bottom: 18px; display: flex; align-items: center; gap: 8px; }
-    .card-title .badge { font-size: 0.65rem; padding: 2px 8px; border-radius: 20px; background: var(--accent-glow); color: var(--accent); font-weight: 600; }
+
+    .card-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-title .badge {
+      font-size: 0.65rem;
+      padding: 2px 8px;
+      border-radius: 20px;
+      background: var(--accent-glow);
+      color: var(--accent);
+      font-weight: 600;
+    }
 
     /* ── Form controls ────────────────────────────────────────── */
-    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .form-grid.single { grid-template-columns: 1fr; }
-    .field { display: flex; flex-direction: column; gap: 6px; }
-    label { font-size: 0.8rem; font-weight: 500; color: var(--text-muted); }
-    input[type="text"], input[type="password"], input[type="number"], select, textarea {
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .form-grid.single {
+      grid-template-columns: 1fr;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    label {
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    input[type="text"],
+    input[type="password"],
+    input[type="number"],
+    select,
+    textarea {
       background: var(--surface2);
       border: 1px solid var(--border);
       border-radius: 8px;
@@ -106,62 +222,190 @@
       transition: border-color var(--transition), box-shadow var(--transition);
       width: 100%;
     }
-    input:focus, select:focus, textarea:focus {
+
+    input:focus,
+    select:focus,
+    textarea:focus {
       outline: none;
       border-color: var(--accent);
       box-shadow: 0 0 0 3px var(--accent-glow);
     }
-    textarea { resize: vertical; min-height: 90px; }
-    .password-wrap { position: relative; }
-    .password-wrap input { padding-right: 40px; }
-    .toggle-pw {
-      position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
-      cursor: pointer; color: var(--text-muted); background: none; border: none;
-      font-size: 1rem; line-height: 1; padding: 4px;
+
+    textarea {
+      resize: vertical;
+      min-height: 90px;
     }
-    .toggle-pw:hover { color: var(--text); }
+
+    .password-wrap {
+      position: relative;
+    }
+
+    .password-wrap input {
+      padding-right: 40px;
+    }
+
+    .toggle-pw {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      cursor: pointer;
+      color: var(--text-muted);
+      background: none;
+      border: none;
+      font-size: 1rem;
+      line-height: 1;
+      padding: 4px;
+    }
+
+    .toggle-pw:hover {
+      color: var(--text);
+    }
 
     /* ── Toggle switch ────────────────────────────────────────── */
-    .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); }
-    .toggle-row:last-child { border-bottom: none; padding-bottom: 0; }
-    .toggle-row-info label { font-size: 0.875rem; font-weight: 500; color: var(--text); }
-    .toggle-row-info small { display: block; font-size: 0.75rem; color: var(--text-muted); }
-    .switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
-    .switch input { opacity: 0; width: 0; height: 0; }
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .toggle-row:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    .toggle-row-info label {
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .toggle-row-info small {
+      display: block;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 40px;
+      height: 22px;
+      flex-shrink: 0;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
     .slider {
-      position: absolute; cursor: pointer; inset: 0;
-      background: var(--surface2); border-radius: 20px;
-      border: 1px solid var(--border); transition: 0.2s;
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background: var(--surface2);
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      transition: 0.2s;
     }
+
     .slider::before {
-      content: ''; position: absolute; width: 14px; height: 14px;
-      border-radius: 50%; background: var(--text-muted);
-      left: 3px; top: 50%; transform: translateY(-50%); transition: 0.2s;
+      content: '';
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      left: 3px;
+      top: 50%;
+      transform: translateY(-50%);
+      transition: 0.2s;
     }
-    input:checked + .slider { background: var(--accent); border-color: var(--accent); }
-    input:checked + .slider::before { background: #fff; left: calc(100% - 17px); }
+
+    input:checked+.slider {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    input:checked+.slider::before {
+      background: #fff;
+      left: calc(100% - 17px);
+    }
 
     /* ── Buttons ──────────────────────────────────────────────── */
     .btn {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 9px 18px; border-radius: 8px;
-      font-family: inherit; font-size: 0.875rem; font-weight: 600;
-      cursor: pointer; border: none; transition: all var(--transition);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 9px 18px;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 0.875rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all var(--transition);
       white-space: nowrap;
     }
-    .btn-primary { background: var(--accent); color: #fff; }
-    .btn-primary:hover { background: #6a58e5; box-shadow: 0 0 20px var(--accent-glow); }
-    .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
-    .btn-secondary:hover { background: #252a3d; border-color: rgba(255,255,255,0.15); }
-    .btn-danger { background: rgba(248,113,113,0.15); color: var(--danger); border: 1px solid rgba(248,113,113,0.3); }
-    .btn-danger:hover { background: rgba(248,113,113,0.25); }
-    .btn-success { background: rgba(74,222,128,0.15); color: var(--success); border: 1px solid rgba(74,222,128,0.3); }
-    .btn-success:hover { background: rgba(74,222,128,0.25); }
-    .action-row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      background: #6a58e5;
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+
+    .btn-secondary {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+      background: #252a3d;
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .btn-danger {
+      background: rgba(248, 113, 113, 0.15);
+      color: var(--danger);
+      border: 1px solid rgba(248, 113, 113, 0.3);
+    }
+
+    .btn-danger:hover {
+      background: rgba(248, 113, 113, 0.25);
+    }
+
+    .btn-success {
+      background: rgba(74, 222, 128, 0.15);
+      color: var(--success);
+      border: 1px solid rgba(74, 222, 128, 0.3);
+    }
+
+    .btn-success:hover {
+      background: rgba(74, 222, 128, 0.25);
+    }
+
+    .action-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
 
     /* ── Sections ─────────────────────────────────────────────── */
-    .section { display: none; }
-    .section.active { display: block; }
+    .section {
+      display: none;
+    }
+
+    .section.active {
+      display: block;
+    }
 
     /* ── Prompt preview ───────────────────────────────────────── */
     .prompt-preview {
@@ -178,39 +422,99 @@
       line-height: 1.5;
       margin-top: 12px;
     }
-    .prompt-preview em { color: var(--accent2); font-style: normal; }
+
+    .prompt-preview em {
+      color: var(--accent2);
+      font-style: normal;
+    }
 
     /* ── Toast ────────────────────────────────────────────────── */
     #toast {
-      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(20px);
-      background: var(--surface2); border: 1px solid var(--border);
-      color: var(--text); padding: 12px 22px; border-radius: 30px;
-      font-size: 0.875rem; font-weight: 500;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-      opacity: 0; transition: opacity 0.3s, transform 0.3s; pointer-events: none; z-index: 9999;
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 12px 22px;
+      border-radius: 30px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      opacity: 0;
+      transition: opacity 0.3s, transform 0.3s;
+      pointer-events: none;
+      z-index: 9999;
     }
-    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-    #toast.error { border-color: var(--danger); color: var(--danger); }
-    #toast.success { border-color: var(--success); color: var(--success); }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    #toast.error {
+      border-color: var(--danger);
+      color: var(--danger);
+    }
+
+    #toast.success {
+      border-color: var(--success);
+      color: var(--success);
+    }
 
     /* ── Responsive ───────────────────────────────────────────── */
     @media (max-width: 700px) {
-      body { flex-direction: column; }
-      .sidebar { width: 100%; min-height: auto; position: static; flex-direction: row; flex-wrap: wrap; padding: 12px; }
-      .sidebar-logo { border-bottom: none; padding-bottom: 0; }
-      nav { flex-direction: row; flex-wrap: wrap; padding: 4px; gap: 4px; }
-      .nav-label { display: none; }
-      .nav-item { padding: 6px 10px; font-size: 0.8rem; }
-      .main { padding: 16px; }
-      .form-grid { grid-template-columns: 1fr; }
+      body {
+        flex-direction: column;
+      }
+
+      .sidebar {
+        width: 100%;
+        min-height: auto;
+        position: static;
+        flex-direction: row;
+        flex-wrap: wrap;
+        padding: 12px;
+      }
+
+      .sidebar-logo {
+        border-bottom: none;
+        padding-bottom: 0;
+      }
+
+      nav {
+        flex-direction: row;
+        flex-wrap: wrap;
+        padding: 4px;
+        gap: 4px;
+      }
+
+      .nav-label {
+        display: none;
+      }
+
+      .nav-item {
+        padding: 6px 10px;
+        font-size: 0.8rem;
+      }
+
+      .main {
+        padding: 16px;
+      }
+
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
+
 <body>
   <aside class="sidebar">
     <div class="sidebar-logo">
-      <img src="48.png" alt="Logo"/>
-      <div><span>Webnovel Translator</span><small>v3.0.0</small></div>
+      <img src="48.png" alt="Logo" />
+      <div><span>Webnovel Translator</span><small>v3.0.1</small></div>
     </div>
     <nav>
       <div class="nav-label">General</div>
@@ -273,15 +577,15 @@
         <div class="form-grid">
           <div class="field">
             <label for="maxLength">Max Characters per Chunk</label>
-            <input type="number" id="maxLength" min="100" step="100"/>
+            <input type="number" id="maxLength" min="100" step="100" />
           </div>
           <div class="field">
             <label for="retryCount">Retry Count per Chunk</label>
-            <input type="number" id="retryCount" min="1" max="10"/>
+            <input type="number" id="retryCount" min="1" max="10" />
           </div>
           <div class="field">
             <label for="maxSessions">Max Saved Sessions</label>
-            <input type="number" id="maxSessions" min="1" max="20"/>
+            <input type="number" id="maxSessions" min="1" max="20" />
           </div>
         </div>
       </div>
@@ -290,15 +594,15 @@
         <div class="form-grid">
           <div class="field">
             <label for="temperature">Temperature (0–2)</label>
-            <input type="number" id="temperature" min="0" max="2" step="0.05"/>
+            <input type="number" id="temperature" min="0" max="2" step="0.05" />
           </div>
           <div class="field">
             <label for="topK">Top K</label>
-            <input type="number" id="topK" min="1"/>
+            <input type="number" id="topK" min="1" />
           </div>
           <div class="field">
             <label for="topP">Top P (0–1)</label>
-            <input type="number" id="topP" min="0" max="1" step="0.01"/>
+            <input type="number" id="topP" min="0" max="1" step="0.01" />
           </div>
         </div>
       </div>
@@ -340,21 +644,21 @@
           <div class="field" style="grid-column:1/-1">
             <label for="geminiApiKey">API Key</label>
             <div class="password-wrap">
-              <input type="password" id="geminiApiKey" placeholder="AIza..."/>
+              <input type="password" id="geminiApiKey" placeholder="AIza..." />
               <button class="toggle-pw" data-target="geminiApiKey" title="Show/hide">👁</button>
             </div>
           </div>
           <div class="field">
             <label for="geminiModelId">Model ID</label>
-            <input type="text" id="geminiModelId" placeholder="gemini-2.5-flash"/>
+            <input type="text" id="geminiModelId" placeholder="gemini-2.5-flash" />
           </div>
           <div class="field">
             <label for="geminiMaxTokens">Max Output Tokens (optional)</label>
-            <input type="number" id="geminiMaxTokens" placeholder="leave blank for default"/>
+            <input type="number" id="geminiMaxTokens" placeholder="leave blank for default" />
           </div>
           <div class="field">
             <label for="geminiContextWindow">Context Window Hint (optional)</label>
-            <input type="number" id="geminiContextWindow"/>
+            <input type="number" id="geminiContextWindow" />
           </div>
         </div>
       </div>
@@ -362,7 +666,7 @@
         <div class="card-title">⚙️ Behaviour</div>
         <div class="toggle-row">
           <div class="toggle-row-info"><label>Enable Streaming</label><small>Stream tokens as they arrive</small></div>
-          <label class="switch"><input type="checkbox" id="geminiStream"/><span class="slider"></span></label>
+          <label class="switch"><input type="checkbox" id="geminiStream" /><span class="slider"></span></label>
         </div>
       </div>
     </section>
@@ -377,7 +681,8 @@
         <div class="card-title">🔑 Service Account</div>
         <div class="field">
           <label for="vertexServiceAccountKey">Service Account JSON</label>
-          <textarea id="vertexServiceAccountKey" rows="6" placeholder='{"type":"service_account","project_id":"...", ...}'></textarea>
+          <textarea id="vertexServiceAccountKey" rows="6"
+            placeholder='{"type":"service_account","project_id":"...", ...}'></textarea>
         </div>
         <button class="btn btn-secondary" id="testServiceAccount" style="margin-top:12px">🧪 Test Key</button>
         <div id="vertexTestResult" style="margin-top:10px;font-size:0.8rem;"></div>
@@ -387,23 +692,23 @@
         <div class="form-grid">
           <div class="field">
             <label for="vertexLocation">Location</label>
-            <input type="text" id="vertexLocation" placeholder="us-central1"/>
+            <input type="text" id="vertexLocation" placeholder="us-central1" />
           </div>
           <div class="field">
             <label for="vertexProjectId">Project ID</label>
-            <input type="text" id="vertexProjectId"/>
+            <input type="text" id="vertexProjectId" />
           </div>
           <div class="field">
             <label for="vertexModelId">Model ID</label>
-            <input type="text" id="vertexModelId" placeholder="gemini-2.5-flash"/>
+            <input type="text" id="vertexModelId" placeholder="gemini-2.5-flash" />
           </div>
           <div class="field">
             <label for="vertexMaxTokens">Max Output Tokens (optional)</label>
-            <input type="number" id="vertexMaxTokens"/>
+            <input type="number" id="vertexMaxTokens" />
           </div>
           <div class="field">
             <label for="vertexContextWindow">Context Window Hint (optional)</label>
-            <input type="number" id="vertexContextWindow"/>
+            <input type="number" id="vertexContextWindow" />
           </div>
         </div>
       </div>
@@ -411,7 +716,7 @@
         <div class="card-title">⚙️ Behaviour</div>
         <div class="toggle-row">
           <div class="toggle-row-info"><label>Enable Streaming</label></div>
-          <label class="switch"><input type="checkbox" id="vertexStream"/><span class="slider"></span></label>
+          <label class="switch"><input type="checkbox" id="vertexStream" /><span class="slider"></span></label>
         </div>
       </div>
     </section>
@@ -428,25 +733,25 @@
           <div class="field" style="grid-column:1/-1">
             <label for="openRouterApiKey">API Key</label>
             <div class="password-wrap">
-              <input type="password" id="openRouterApiKey" placeholder="sk-or-..."/>
+              <input type="password" id="openRouterApiKey" placeholder="sk-or-..." />
               <button class="toggle-pw" data-target="openRouterApiKey" title="Show/hide">👁</button>
             </div>
           </div>
           <div class="field">
             <label for="openRouterModelId">Model ID</label>
-            <input type="text" id="openRouterModelId" placeholder="deepseek/deepseek-chat-v3-0324"/>
+            <input type="text" id="openRouterModelId" placeholder="deepseek/deepseek-chat-v3-0324" />
           </div>
           <div class="field">
             <label for="openRouterMaxTokens">Max Tokens (optional)</label>
-            <input type="number" id="openRouterMaxTokens"/>
+            <input type="number" id="openRouterMaxTokens" />
           </div>
           <div class="field">
             <label for="openRouterContextWindow">Context Window (optional)</label>
-            <input type="number" id="openRouterContextWindow"/>
+            <input type="number" id="openRouterContextWindow" />
           </div>
           <div class="field" style="grid-column:1/-1">
             <label for="openRouterProviderOrder">Provider Order (comma-separated slugs, optional)</label>
-            <input type="text" id="openRouterProviderOrder" placeholder="Deepseek,Azure"/>
+            <input type="text" id="openRouterProviderOrder" placeholder="Deepseek,Azure" />
           </div>
         </div>
       </div>
@@ -454,11 +759,13 @@
         <div class="card-title">⚙️ Behaviour</div>
         <div class="toggle-row">
           <div class="toggle-row-info"><label>Enable Streaming</label></div>
-          <label class="switch"><input type="checkbox" id="openRouterStream"/><span class="slider"></span></label>
+          <label class="switch"><input type="checkbox" id="openRouterStream" /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
-          <div class="toggle-row-info"><label>Allow Provider Fallback</label><small>Try next provider if first fails</small></div>
-          <label class="switch"><input type="checkbox" id="openRouterAllowFallback"/><span class="slider"></span></label>
+          <div class="toggle-row-info"><label>Allow Provider Fallback</label><small>Try next provider if first
+              fails</small></div>
+          <label class="switch"><input type="checkbox" id="openRouterAllowFallback" /><span
+              class="slider"></span></label>
         </div>
       </div>
     </section>
@@ -475,25 +782,25 @@
           <div class="field" style="grid-column:1/-1">
             <label for="openaiApiKey">API Key</label>
             <div class="password-wrap">
-              <input type="password" id="openaiApiKey" placeholder="sk-..."/>
+              <input type="password" id="openaiApiKey" placeholder="sk-..." />
               <button class="toggle-pw" data-target="openaiApiKey" title="Show/hide">👁</button>
             </div>
           </div>
           <div class="field" style="grid-column:1/-1">
             <label for="openaiBaseUrl">Base URL</label>
-            <input type="text" id="openaiBaseUrl" placeholder="https://api.openai.com/v1"/>
+            <input type="text" id="openaiBaseUrl" placeholder="https://api.openai.com/v1" />
           </div>
           <div class="field">
             <label for="openaiModelId">Model ID</label>
-            <input type="text" id="openaiModelId" placeholder="gpt-4o-mini"/>
+            <input type="text" id="openaiModelId" placeholder="gpt-4o-mini" />
           </div>
           <div class="field">
             <label for="openaiMaxTokens">Max Tokens (optional)</label>
-            <input type="number" id="openaiMaxTokens"/>
+            <input type="number" id="openaiMaxTokens" />
           </div>
           <div class="field">
             <label for="openaiContextWindow">Context Window (optional)</label>
-            <input type="number" id="openaiContextWindow"/>
+            <input type="number" id="openaiContextWindow" />
           </div>
         </div>
       </div>
@@ -501,7 +808,7 @@
         <div class="card-title">⚙️ Behaviour</div>
         <div class="toggle-row">
           <div class="toggle-row-info"><label>Enable Streaming</label></div>
-          <label class="switch"><input type="checkbox" id="openaiStream"/><span class="slider"></span></label>
+          <label class="switch"><input type="checkbox" id="openaiStream" /><span class="slider"></span></label>
         </div>
       </div>
     </section>
@@ -518,21 +825,21 @@
           <div class="field" style="grid-column:1/-1">
             <label for="glmCodingApiKey">API Key</label>
             <div class="password-wrap">
-              <input type="password" id="glmCodingApiKey"/>
+              <input type="password" id="glmCodingApiKey" />
               <button class="toggle-pw" data-target="glmCodingApiKey" title="Show/hide">👁</button>
             </div>
           </div>
           <div class="field">
             <label for="glmCodingModelId">Model ID</label>
-            <input type="text" id="glmCodingModelId" placeholder="GLM-4.5-air"/>
+            <input type="text" id="glmCodingModelId" placeholder="GLM-4.5-air" />
           </div>
           <div class="field">
             <label for="glmCodingMaxTokens">Max Tokens (optional)</label>
-            <input type="number" id="glmCodingMaxTokens"/>
+            <input type="number" id="glmCodingMaxTokens" />
           </div>
           <div class="field">
             <label for="glmCodingContextWindow">Context Window (optional)</label>
-            <input type="number" id="glmCodingContextWindow"/>
+            <input type="number" id="glmCodingContextWindow" />
           </div>
         </div>
       </div>
@@ -540,7 +847,7 @@
         <div class="card-title">⚙️ Behaviour</div>
         <div class="toggle-row">
           <div class="toggle-row-info"><label>Enable Streaming</label></div>
-          <label class="switch"><input type="checkbox" id="glmCodingStream"/><span class="slider"></span></label>
+          <label class="switch"><input type="checkbox" id="glmCodingStream" /><span class="slider"></span></label>
         </div>
       </div>
     </section>
@@ -554,8 +861,10 @@
       <div class="card">
         <div class="card-title">ℹ️ How It Works</div>
         <p style="font-size:0.875rem;color:var(--text-muted);line-height:1.7">
-          When the API Type is set to <strong>ChatGPT Web</strong> or <strong>Gemini Web</strong>, the extension opens (or reuses) a tab for the respective service and pastes each chunk into the input box for you to send manually.<br/><br/>
-          <strong>Delays:</strong> ChatGPT waits 2 s after load · Gemini waits 3 s after load.<br/>
+          When the API Type is set to <strong>ChatGPT Web</strong> or <strong>Gemini Web</strong>, the extension opens
+          (or reuses) a tab for the respective service and pastes each chunk into the input box for you to send
+          manually.<br /><br />
+          <strong>Delays:</strong> ChatGPT waits 2 s after load · Gemini waits 3 s after load.<br />
           <strong>Requirements:</strong> You must be logged in to the service in your browser.
         </p>
       </div>
@@ -580,14 +889,16 @@
       </div>
       <div class="card">
         <div class="card-title">📤 Export Settings</div>
-        <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:14px">Downloads a JSON backup of all settings (excluding saved results).</p>
+        <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:14px">Downloads a JSON backup of all settings
+          (excluding saved results).</p>
         <button class="btn btn-secondary" id="exportButton">⬇️ Download settings.json</button>
       </div>
       <div class="card">
         <div class="card-title">📥 Import Settings</div>
         <div class="field">
           <label for="importFile">Select JSON file</label>
-          <input type="file" id="importFile" accept=".json" style="background:transparent;border:none;padding:0;color:var(--text-muted)"/>
+          <input type="file" id="importFile" accept=".json"
+            style="background:transparent;border:none;padding:0;color:var(--text-muted)" />
         </div>
         <div class="field" style="margin-top:12px">
           <label for="importTextarea">Or paste JSON here</label>
@@ -608,7 +919,8 @@
     </section>
 
     <!-- ── Sticky Save Bar ─────────────────────────────── -->
-    <div style="position:sticky;bottom:0;padding:16px 0 0;margin-top:8px;background:linear-gradient(transparent,var(--bg) 50%);display:flex;gap:10px">
+    <div
+      style="position:sticky;bottom:0;padding:16px 0 0;margin-top:8px;background:linear-gradient(transparent,var(--bg) 50%);display:flex;gap:10px">
       <button class="btn btn-primary" id="saveButton">💾 Save All Settings</button>
     </div>
   </main>
@@ -617,4 +929,5 @@
   <script src="browser-polyfill.min.js"></script>
   <script src="options.js"></script>
 </body>
+
 </html>

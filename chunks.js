@@ -73,13 +73,6 @@ function updateAttemptProgress(attempt, max) {
     document.getElementById('attemptPercent').textContent = pct + '%';
 }
 
-// ─── Floating status ──────────────────────────────────────────────────────────
-function updateFloatingStatus() {
-    const done = processedResults.filter(r => r && r.content).length;
-    document.getElementById('floatingStatus').textContent =
-        isProcessing ? `⏳ Processing chunk ${streamingIndex + 1}…` : `✅ ${done} / ${totalChunks} done`;
-}
-
 // ─── Build chunk cards ────────────────────────────────────────────────────────
 function buildChunkCards(chunks) {
     const container = document.getElementById('chunksContainer');
@@ -148,17 +141,14 @@ function setMicroBar(index, mode) {
 }
 
 // ─── Render content into a chunk ──────────────────────────────────────────────
+const imageBlobCache = new Map();
+
 function renderChunk(index, text, isStreaming = false) {
     const contentEl = document.getElementById(`chunk-content-${index}`);
     if (!contentEl) return;
-    if (isStreaming) {
-        contentEl.classList.add('streaming');
-        contentEl.innerHTML = renderMarkdown(text);
-    } else {
-        contentEl.classList.remove('streaming');
-        contentEl.innerHTML = renderMarkdown(text);
-        handleImages(contentEl);
-    }
+    contentEl.classList.toggle('streaming', isStreaming);
+    contentEl.innerHTML = renderMarkdown(text);
+    handleImages(contentEl);
 }
 
 function renderMultiPart(index, parts) {
@@ -191,12 +181,59 @@ function renderMultiPart(index, parts) {
 function handleImages(el) {
     el.querySelectorAll('img').forEach(img => {
         let src = img.getAttribute('src') || '';
-        if (src && !src.startsWith('http') && !src.startsWith('data:') && !src.startsWith('//')) {
-            img.src = `https://images.novelpia.com${src.startsWith('/') ? '' : '/'}${src}`;
+
+        if (src.startsWith('//')) {
+            src = `https:${src}`;
+        } else if (src && !src.startsWith('http') && !src.startsWith('data:')) {
+            src = `https://images.novelpia.com${src.startsWith('/') ? '' : '/'}${src}`;
         }
+
         img.style.maxWidth = '100%';
-        img.addEventListener('click', () => window.open(img.src, '_blank'));
+
+        if (src.match(/\.file(\?.*)?$/i)) {
+            img.dataset.originalSrc = src;
+
+            if (imageBlobCache.has(src)) {
+                img.src = imageBlobCache.get(src);
+            } else {
+                const loadingSvg = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='50'%3E%3Ctext x='50' y='25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-size='12' fill='%23888'%3ELoading...%3C/text%3E%3C/svg%3E";
+                img.src = loadingSvg;
+                imageBlobCache.set(src, loadingSvg);
+
+                fetch(src)
+                    .then(res => {
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        return res.blob();
+                    })
+                    .then(blob => {
+                        const pngBlob = new Blob([blob], { type: 'image/png' });
+                        const objUrl = URL.createObjectURL(pngBlob);
+                        imageBlobCache.set(src, objUrl);
+                        document.querySelectorAll(`img[data-original-src="${src.replace(/"/g, '\\"')}"]`).forEach(targetImg => {
+                            targetImg.src = objUrl;
+                        });
+                    })
+                    .catch(err => {
+                        console.error('Failed to convert .file image:', err);
+                        imageBlobCache.delete(src);
+                        document.querySelectorAll(`img[data-original-src="${src.replace(/"/g, '\\"')}"]`).forEach(targetImg => {
+                            targetImg.src = src;
+                        });
+                    });
+            }
+        } else if (src) {
+            img.src = src;
+        }
+
+        img.addEventListener('click', () => {
+            const openSrc = img.dataset.originalSrc || img.src;
+            if (openSrc && !openSrc.startsWith('data:image/svg+xml')) {
+                window.open(openSrc, '_blank');
+            }
+        });
+
         img.addEventListener('error', () => {
+            if (img.src && img.src.startsWith('data:image/svg+xml')) return;
             const fallback = document.createElement('div');
             fallback.style.cssText = 'background:rgba(255,255,255,0.05);border:1px dashed rgba(255,255,255,0.1);border-radius:6px;padding:12px;font-size:0.75rem;color:var(--text-muted);text-align:center';
             fallback.textContent = '📷 Image failed to load';
@@ -211,7 +248,6 @@ async function processAllChunks(resume = false) {
     _terminated = false;
     isProcessing = true;
     document.getElementById('terminateBtn').style.display = '';
-    updateFloatingStatus();
 
     for (let i = 0; i < allChunks.length; i++) {
         if (_terminated) break;
@@ -220,7 +256,6 @@ async function processAllChunks(resume = false) {
         streamingIndex = i;
         setChunkStatus(i, 'processing');
         setMicroBar(i, 'pulse');
-        updateFloatingStatus();
         updateAttemptProgress(1, retryCount);
 
         // Expand card being processed
@@ -286,7 +321,6 @@ async function processAllChunks(resume = false) {
     isProcessing = false; streamingIndex = -1;
     document.getElementById('terminateBtn').style.display = 'none';
     updateAttemptProgress(0, retryCount);
-    updateFloatingStatus();
     const allDone = processedResults.filter(r => r?.content).length;
     if (allDone === totalChunks) showBanner(`✅ All ${totalChunks} chunks processed!`, 'success');
 }
@@ -533,9 +567,7 @@ async function initPage() {
 document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('reprocessAllBtn')?.addEventListener('click', reprocessAll);
     document.getElementById('copyAllBtn')?.addEventListener('click', copyAll);
-    document.getElementById('copyAllBtnFloat')?.addEventListener('click', copyAll);
     document.getElementById('downloadAllBtn')?.addEventListener('click', downloadAll);
-    document.getElementById('downloadAllBtnFloat')?.addEventListener('click', downloadAll);
     document.getElementById('terminateBtn')?.addEventListener('click', async () => {
         const idx = streamingIndex; // Save before anything changes
         _terminated = true;

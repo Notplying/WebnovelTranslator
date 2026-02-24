@@ -88,6 +88,9 @@ browser.runtime.onInstalled.addListener(function (details) {
 
 // ─── Message Router ───────────────────────────────────────────────────────────
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.sessionId && sender?.tab?.id) {
+        sessionTabIds[message.sessionId] = sender.tab.id;
+    }
     if (message.action === 'testServiceAccount') {
         getAccessToken(message.serviceAccountKey)
             .then(token => sendResponse({ success: true, message: 'Service account key is valid! Access token obtained.' }))
