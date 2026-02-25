@@ -532,6 +532,11 @@ async function initPage() {
     buildChunkCards(allChunks);
     updateOverallProgress(0, totalChunks);
 
+    // Apply chunk text size and max width from settings
+    const { chunkFontSize = 1, chunkMaxWidth = 0 } = await browser.storage.local.get(['chunkFontSize', 'chunkMaxWidth']);
+    document.documentElement.style.setProperty('--chunk-font-size', `${chunkFontSize}rem`);
+    document.documentElement.style.setProperty('--chunk-max-width', chunkMaxWidth > 0 ? `${chunkMaxWidth}px` : 'none');
+
     // Load saved chunks
     const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
     const saved = processedChunks[sessionId] || [];

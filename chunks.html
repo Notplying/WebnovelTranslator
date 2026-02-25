@@ -24,6 +24,8 @@
             --warning: #fbbf24;
             --radius: 14px;
             --transition: 0.2s ease;
+            --chunk-font-size: 1rem;
+            --chunk-max-width: none;
         }
 
         *,
@@ -207,12 +209,19 @@
         }
 
         /* ── Chunks list ─────────────────────────────────────────────── */
+        #chunksWrapper {
+            display: flex;
+            justify-content: center;
+        }
+
         #chunksContainer {
             padding: 20px 24px;
             display: flex;
             flex-direction: column;
             gap: 14px;
             padding-bottom: 100px;
+            width: 100%;
+            max-width: var(--chunk-max-width);
         }
 
         /* ── Chunk card ──────────────────────────────────────────────── */
@@ -405,7 +414,7 @@
             border: 1px solid var(--border);
             border-radius: 8px;
             padding: 14px;
-            font-size: 0.875rem;
+            font-size: var(--chunk-font-size, 0.875rem);
             line-height: 1.8;
             color: var(--text);
             overflow-wrap: break-word;
@@ -744,6 +753,7 @@
 
             #chunksContainer {
                 padding: 12px 14px;
+                max-width: 100% !important;
             }
         }
     </style>
@@ -788,7 +798,9 @@
         </div>
     </div>
 
-    <div id="chunksContainer"></div>
+    <div id="chunksWrapper">
+        <div id="chunksContainer"></div>
+    </div>
 
     <div id="toast"></div>
 
