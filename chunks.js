@@ -7,6 +7,13 @@ if (typeof marked !== 'undefined') {
     // Disable strikethrough
     const origLexer = marked.Lexer;
     marked.setOptions({ pedantic: false, mangle: false, headerIds: false });
+    // Disable hyperlinks — render as plaintext [text](url)
+    marked.use({
+        useNewRenderer: true,
+        renderer: {
+            link(token) { return token.raw; }
+        }
+    });
 }
 
 function renderMarkdown(text) {
