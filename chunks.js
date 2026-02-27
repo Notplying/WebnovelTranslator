@@ -8,10 +8,17 @@ if (typeof marked !== 'undefined') {
     const origLexer = marked.Lexer;
     marked.setOptions({ pedantic: false, mangle: false, headerIds: false });
     // Disable hyperlinks — render as plaintext [text](url)
+    // Escape HTML tags to prevent custom tags like <example> from being stripped
     marked.use({
         useNewRenderer: true,
         renderer: {
-            link(token) { return token.raw; }
+            link(token) { return token.raw; },
+            html(token) {
+                if (token.raw.trim().toLowerCase().startsWith('<img')) {
+                    return token.raw; // allow image tags to render
+                }
+                return escapeHtml(token.raw);
+            }
         }
     });
 }
