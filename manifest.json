@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Webnovel Translator Experimental",
-  "version": "3.0.5",
+  "version": "3.0.6",
   "browser_specific_settings": {
     "gecko": {
       "id": "{4c5a03a4-c0a1-4978-b840-9cbd90a43e18}",
@@ -13,7 +13,7 @@
       }
     }
   },
-  "description": "Extracts text from Syosetsu/Kakuyomu/Booktoki/generic novel sites and translates them using Gemini, Vertex AI, OpenRouter, OpenAI-compatible, GLM Coding, or ChatGPT/Gemini web automation. Bring your own key.",
+  "description": "Extracts text from Syosetsu/Kakuyomu/Booktoki/generic novel sites and translates them using Gemini, OpenRouter, OpenAI-compatible, or ChatGPT/Gemini web automation. Bring your own key.",
   "permissions": [
     "activeTab",
     "storage",

@@ -10,11 +10,11 @@ const DEFAULTS = {
   temperature: 0.3,
   topK: 30,
   topP: 0.95,
-  geminiApiKey: '', geminiModelId: 'gemini-2.5-flash', geminiMaxTokens: '', geminiContextWindow: '', geminiStream: true,
-  vertexServiceAccountKey: '', vertexLocation: 'us-central1', vertexProjectId: '', vertexModelId: 'gemini-2.5-flash', vertexMaxTokens: '', vertexContextWindow: '', vertexStream: true,
-  openRouterApiKey: '', openRouterModelId: 'deepseek/deepseek-chat-v3-0324', openRouterMaxTokens: '', openRouterContextWindow: '', openRouterStream: true, openRouterProviderOrder: '', openRouterAllowFallback: true,
-  openaiApiKey: '', openaiModelId: 'gpt-4o-mini', openaiMaxTokens: '', openaiContextWindow: '', openaiBaseUrl: 'https://api.openai.com/v1', openaiStream: true,
-  glmCodingApiKey: '', glmCodingModelId: 'GLM-4.5-air', glmCodingMaxTokens: '', glmCodingContextWindow: '', glmCodingStream: true,
+  geminiApiKey: '', geminiModelId: 'gemini-2.5-flash', geminiMaxTokens: '', geminiContextWindow: '',
+
+  openRouterApiKey: '', openRouterModelId: 'deepseek/deepseek-chat-v3-0324', openRouterMaxTokens: '', openRouterContextWindow: '', openRouterProviderOrder: '', openRouterAllowFallback: true,
+  openaiApiKey: '', openaiModelId: 'gpt-4o-mini', openaiMaxTokens: '', openaiContextWindow: '', openaiBaseUrl: 'https://api.openai.com/v1',
+
   maxSessions: 3,
   chunkFontSize: 1.05,
   chunkMaxWidth: 850
@@ -70,11 +70,10 @@ async function loadSettings() {
   const settings = { ...DEFAULTS, ...stored };
 
   ['apiType', 'maxLength', 'prefix', 'suffix', 'retryCount', 'temperature', 'topK', 'topP', 'maxSessions', 'chunkFontSize', 'chunkMaxWidth',
-    'geminiApiKey', 'geminiModelId', 'geminiMaxTokens', 'geminiContextWindow', 'geminiStream',
-    'vertexServiceAccountKey', 'vertexLocation', 'vertexProjectId', 'vertexModelId', 'vertexMaxTokens', 'vertexContextWindow', 'vertexStream',
-    'openRouterApiKey', 'openRouterModelId', 'openRouterMaxTokens', 'openRouterContextWindow', 'openRouterStream', 'openRouterProviderOrder', 'openRouterAllowFallback',
-    'openaiApiKey', 'openaiModelId', 'openaiMaxTokens', 'openaiContextWindow', 'openaiBaseUrl', 'openaiStream',
-    'glmCodingApiKey', 'glmCodingModelId', 'glmCodingMaxTokens', 'glmCodingContextWindow', 'glmCodingStream'
+    'geminiApiKey', 'geminiModelId', 'geminiMaxTokens', 'geminiContextWindow',
+
+    'openRouterApiKey', 'openRouterModelId', 'openRouterMaxTokens', 'openRouterContextWindow', 'openRouterProviderOrder', 'openRouterAllowFallback',
+    'openaiApiKey', 'openaiModelId', 'openaiMaxTokens', 'openaiContextWindow', 'openaiBaseUrl'
   ].forEach(key => setField(key, settings[key]));
 
   updatePromptPreview();
@@ -105,21 +104,13 @@ async function saveSettings() {
     geminiModelId: getField('geminiModelId'),
     geminiMaxTokens: getField('geminiMaxTokens'),
     geminiContextWindow: getField('geminiContextWindow'),
-    geminiStream: getField('geminiStream', true),
 
-    vertexServiceAccountKey: getField('vertexServiceAccountKey'),
-    vertexLocation: getField('vertexLocation'),
-    vertexProjectId: getField('vertexProjectId'),
-    vertexModelId: getField('vertexModelId'),
-    vertexMaxTokens: getField('vertexMaxTokens'),
-    vertexContextWindow: getField('vertexContextWindow'),
-    vertexStream: getField('vertexStream', true),
+
 
     openRouterApiKey: getField('openRouterApiKey'),
     openRouterModelId: getField('openRouterModelId'),
     openRouterMaxTokens: getField('openRouterMaxTokens'),
     openRouterContextWindow: getField('openRouterContextWindow'),
-    openRouterStream: getField('openRouterStream', true),
     openRouterProviderOrder: getField('openRouterProviderOrder'),
     openRouterAllowFallback: getField('openRouterAllowFallback', true),
 
@@ -128,13 +119,8 @@ async function saveSettings() {
     openaiMaxTokens: getField('openaiMaxTokens'),
     openaiContextWindow: getField('openaiContextWindow'),
     openaiBaseUrl: getField('openaiBaseUrl'),
-    openaiStream: getField('openaiStream', true),
 
-    glmCodingApiKey: getField('glmCodingApiKey'),
-    glmCodingModelId: getField('glmCodingModelId'),
-    glmCodingMaxTokens: getField('glmCodingMaxTokens'),
-    glmCodingContextWindow: getField('glmCodingContextWindow'),
-    glmCodingStream: getField('glmCodingStream', true),
+
   });
   showToast('✅ Settings saved!', 'success');
 }
@@ -189,25 +175,7 @@ async function resetSettings() {
   showToast('♻️ Settings reset to defaults.', 'success');
 }
 
-// ─── Vertex test ──────────────────────────────────────────────────────────────
-async function testVertexKey() {
-  const btn = document.getElementById('testServiceAccount');
-  const resultEl = document.getElementById('vertexTestResult');
-  const keyJson = document.getElementById('vertexServiceAccountKey')?.value;
-  if (!keyJson?.trim()) { showToast('Paste your service account JSON first.', 'error'); return; }
-  btn.disabled = true; btn.textContent = '⏳ Testing...';
-  resultEl.textContent = '';
-  try {
-    const result = await browser.runtime.sendMessage({ action: 'testServiceAccount', serviceAccountKey: JSON.parse(keyJson) });
-    resultEl.style.color = result.success ? 'var(--success)' : 'var(--danger)';
-    resultEl.textContent = result.message;
-  } catch (e) {
-    resultEl.style.color = 'var(--danger)';
-    resultEl.textContent = 'Error: ' + e.message;
-  } finally {
-    btn.disabled = false; btn.textContent = '🧪 Test Key';
-  }
-}
+
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -256,8 +224,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     showToast('🗑️ All results cleared.', 'success');
   });
 
-  // Vertex test
-  document.getElementById('testServiceAccount')?.addEventListener('click', testVertexKey);
 
   // Web automation quick-select
   document.getElementById('applyWebApiType')?.addEventListener('click', async () => {

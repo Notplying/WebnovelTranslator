@@ -528,18 +528,14 @@
       <button class="nav-item" data-section="gemini" id="nav-gemini">
         <span class="icon">✨</span> Gemini
       </button>
-      <button class="nav-item" data-section="vertex" id="nav-vertex">
-        <span class="icon">☁️</span> Vertex AI
-      </button>
+
       <button class="nav-item" data-section="openrouter" id="nav-openrouter">
         <span class="icon">🔀</span> OpenRouter
       </button>
       <button class="nav-item" data-section="openai" id="nav-openai">
         <span class="icon">🤖</span> OpenAI Compat.
       </button>
-      <button class="nav-item" data-section="glm" id="nav-glm">
-        <span class="icon">🔬</span> GLM Coding
-      </button>
+
       <button class="nav-item" data-section="webautomation" id="nav-webautomation">
         <span class="icon">🌐</span> Web Automation
       </button>
@@ -571,10 +567,10 @@
           <label for="apiType">API Type</label>
           <select id="apiType">
             <option value="gemini">Gemini API (Direct)</option>
-            <option value="vertex">Vertex AI (Google Cloud)</option>
+
             <option value="openRouter">OpenRouter</option>
             <option value="openai">OpenAI Compatible</option>
-            <option value="glmCoding">GLM Coding Plan (Z.AI)</option>
+
             <option value="chatgptWeb">ChatGPT Web (automation)</option>
             <option value="geminiWeb">Gemini Web (automation)</option>
           </select>
@@ -678,64 +674,8 @@
           </div>
         </div>
       </div>
-      <div class="card">
-        <div class="card-title">⚙️ Behaviour</div>
-        <div class="toggle-row">
-          <div class="toggle-row-info"><label>Enable Streaming</label><small>Stream tokens as they arrive</small></div>
-          <label class="switch"><input type="checkbox" id="geminiStream" /><span class="slider"></span></label>
-        </div>
-      </div>
     </section>
 
-    <!-- ── Vertex ──────────────────────────────────────── -->
-    <section class="section" id="section-vertex">
-      <div class="page-header">
-        <h1>Vertex AI</h1>
-        <p>Google Cloud Vertex AI with Service Account authentication.</p>
-      </div>
-      <div class="card">
-        <div class="card-title">🔑 Service Account</div>
-        <div class="field">
-          <label for="vertexServiceAccountKey">Service Account JSON</label>
-          <textarea id="vertexServiceAccountKey" rows="6"
-            placeholder='{"type":"service_account","project_id":"...", ...}'></textarea>
-        </div>
-        <button class="btn btn-secondary" id="testServiceAccount" style="margin-top:12px">🧪 Test Key</button>
-        <div id="vertexTestResult" style="margin-top:10px;font-size:0.8rem;"></div>
-      </div>
-      <div class="card">
-        <div class="card-title">☁️ Project Configuration</div>
-        <div class="form-grid">
-          <div class="field">
-            <label for="vertexLocation">Location</label>
-            <input type="text" id="vertexLocation" placeholder="us-central1" />
-          </div>
-          <div class="field">
-            <label for="vertexProjectId">Project ID</label>
-            <input type="text" id="vertexProjectId" />
-          </div>
-          <div class="field">
-            <label for="vertexModelId">Model ID</label>
-            <input type="text" id="vertexModelId" placeholder="gemini-2.5-flash" />
-          </div>
-          <div class="field">
-            <label for="vertexMaxTokens">Max Output Tokens (optional)</label>
-            <input type="number" id="vertexMaxTokens" />
-          </div>
-          <div class="field">
-            <label for="vertexContextWindow">Context Window Hint (optional)</label>
-            <input type="number" id="vertexContextWindow" />
-          </div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">⚙️ Behaviour</div>
-        <div class="toggle-row">
-          <div class="toggle-row-info"><label>Enable Streaming</label></div>
-          <label class="switch"><input type="checkbox" id="vertexStream" /><span class="slider"></span></label>
-        </div>
-      </div>
-    </section>
 
     <!-- ── OpenRouter ──────────────────────────────────── -->
     <section class="section" id="section-openrouter">
@@ -773,10 +713,6 @@
       </div>
       <div class="card">
         <div class="card-title">⚙️ Behaviour</div>
-        <div class="toggle-row">
-          <div class="toggle-row-info"><label>Enable Streaming</label></div>
-          <label class="switch"><input type="checkbox" id="openRouterStream" /><span class="slider"></span></label>
-        </div>
         <div class="toggle-row">
           <div class="toggle-row-info"><label>Allow Provider Fallback</label><small>Try next provider if first
               fails</small></div>
@@ -820,53 +756,8 @@
           </div>
         </div>
       </div>
-      <div class="card">
-        <div class="card-title">⚙️ Behaviour</div>
-        <div class="toggle-row">
-          <div class="toggle-row-info"><label>Enable Streaming</label></div>
-          <label class="switch"><input type="checkbox" id="openaiStream" /><span class="slider"></span></label>
-        </div>
-      </div>
     </section>
 
-    <!-- ── GLM Coding ─────────────────────────────────── -->
-    <section class="section" id="section-glm">
-      <div class="page-header">
-        <h1>GLM Coding Plan</h1>
-        <p>Z.AI GLM Coding Plan API (api.z.ai). Thinking mode disabled by default.</p>
-      </div>
-      <div class="card">
-        <div class="card-title">🔑 Credentials</div>
-        <div class="form-grid">
-          <div class="field" style="grid-column:1/-1">
-            <label for="glmCodingApiKey">API Key</label>
-            <div class="password-wrap">
-              <input type="password" id="glmCodingApiKey" />
-              <button class="toggle-pw" data-target="glmCodingApiKey" title="Show/hide">👁</button>
-            </div>
-          </div>
-          <div class="field">
-            <label for="glmCodingModelId">Model ID</label>
-            <input type="text" id="glmCodingModelId" placeholder="GLM-4.5-air" />
-          </div>
-          <div class="field">
-            <label for="glmCodingMaxTokens">Max Tokens (optional)</label>
-            <input type="number" id="glmCodingMaxTokens" />
-          </div>
-          <div class="field">
-            <label for="glmCodingContextWindow">Context Window (optional)</label>
-            <input type="number" id="glmCodingContextWindow" />
-          </div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">⚙️ Behaviour</div>
-        <div class="toggle-row">
-          <div class="toggle-row-info"><label>Enable Streaming</label></div>
-          <label class="switch"><input type="checkbox" id="glmCodingStream" /><span class="slider"></span></label>
-        </div>
-      </div>
-    </section>
 
     <!-- ── Web Automation ─────────────────────────────── -->
     <section class="section" id="section-webautomation">
