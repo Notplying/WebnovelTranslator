@@ -27,6 +27,8 @@
 
             if (!success && navigator.clipboard && navigator.clipboard.writeText) {
                 try {
+                    // Write to clipboard for user-initiated Ctrl+V, but we still
+                    // fall through to the DOM insertion below regardless of the result.
                     await navigator.clipboard.writeText(text);
                 } catch (e) {
                     console.warn("Clipboard write failed", e);
@@ -34,6 +36,7 @@
             }
 
             if (!success) {
+                // DOM insertion fallback: directly set textContent and fire synthetic events.
                 textarea.textContent = text;
                 textarea.dispatchEvent(new Event('input', { bubbles: true }));
                 textarea.dispatchEvent(new Event('change', { bubbles: true }));

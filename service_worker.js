@@ -6,7 +6,7 @@
 if (typeof browser === 'undefined' || !browser.runtime) {
     importScripts('browser-polyfill.min.js');
 }
-try { importScripts('jsrsasign-all-min.js'); } catch (e) { console.warn('importScripts failed:', e); }
+// jsrsasign-all-min.js removed – no KJUR/RSAKey symbols are used in this file.
 
 
 
@@ -18,9 +18,22 @@ const WebAutomationConfig = {
     EXECUTION_TIMEOUT_MS: 10000
 };
 
-let debounceTimeout;
-let lastUpdateTime = 0;
+// Per-session streaming state — keyed by sessionId so concurrent streams don't share timers or counters.
 const UPDATE_DELAY = 500;
+const sessionStreamState = {}; // { [sessionId]: { debounceTimeout, lastUpdateTime } }
+
+function getStreamState(sessionId) {
+    if (!sessionStreamState[sessionId]) {
+        sessionStreamState[sessionId] = { debounceTimeout: undefined, lastUpdateTime: 0 };
+    }
+    return sessionStreamState[sessionId];
+}
+
+function clearStreamState(sessionId) {
+    const state = sessionStreamState[sessionId];
+    if (state) clearTimeout(state.debounceTimeout);
+    delete sessionStreamState[sessionId];
+}
 
 let storedChunks = [];
 let storedPrefix = '';
@@ -211,20 +224,24 @@ async function processSSEStream(reader, sessionId, message, updateChunksPageFn) 
                 const content = parsed.choices?.[0]?.delta?.content;
                 if (content) {
                     fullContent += content;
+                    const state = getStreamState(sessionId);
                     const now = Date.now();
-                    if (now - lastUpdateTime >= UPDATE_DELAY) {
-                        clearTimeout(debounceTimeout);
+                    if (now - state.lastUpdateTime >= UPDATE_DELAY) {
+                        clearTimeout(state.debounceTimeout);
                         updateChunksPageFn(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk });
-                        lastUpdateTime = now;
+                        state.lastUpdateTime = now;
                     } else {
-                        clearTimeout(debounceTimeout);
-                        debounceTimeout = setTimeout(() => {
+                        clearTimeout(state.debounceTimeout);
+                        state.debounceTimeout = setTimeout(() => {
                             updateChunksPageFn(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk });
-                            lastUpdateTime = Date.now();
+                            state.lastUpdateTime = Date.now();
                         }, UPDATE_DELAY);
                     }
                 }
-            } catch (e) { /* ignore parse errors */ }
+            } catch (e) {
+                // Partial SSE chunks are expected during streaming and are non-fatal.
+                console.debug('[SSE parse] Ignoring benign parse error:', e.message, '| raw data:', data);
+            }
         }
     }
     return fullContent;
@@ -299,28 +316,31 @@ async function processChunkWithGemini(message, options) {
                             const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
                             if (text) {
                                 fullContent += text;
+                                const state = getStreamState(sessionId);
                                 const now = Date.now();
-                                if (now - lastUpdateTime >= UPDATE_DELAY) {
-                                    clearTimeout(debounceTimeout);
+                                if (now - state.lastUpdateTime >= UPDATE_DELAY) {
+                                    clearTimeout(state.debounceTimeout);
                                     updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk });
-                                    lastUpdateTime = now;
+                                    state.lastUpdateTime = now;
                                 } else {
-                                    clearTimeout(debounceTimeout);
-                                    debounceTimeout = setTimeout(() => { updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk }); lastUpdateTime = Date.now(); }, UPDATE_DELAY);
+                                    clearTimeout(state.debounceTimeout);
+                                    state.debounceTimeout = setTimeout(() => { updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk }); state.lastUpdateTime = Date.now(); }, UPDATE_DELAY);
                                 }
                             } else if (parsed.error) throw new Error(`Gemini Stream Error: ${parsed.error.message}`);
-                        } catch (e) { if (e.message.startsWith('Gemini Stream')) throw e; }
+                        } catch (e) {
+                            if (e.message.startsWith('Gemini Stream')) throw e;
+                            console.debug('[Gemini SSE parse] Ignoring benign parse error:', e.message, '| raw line:', line);
+                        }
                     }
                 }
             } finally {
                 reader.cancel().catch(() => { });
-                clearTimeout(debounceTimeout);
+                clearStreamState(sessionId);
                 if (tabCloseListener) browser.tabs.onRemoved.removeListener(tabCloseListener);
                 delete sessionControllers[sessionId];
             }
             updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk, isComplete: true });
             await new Promise(r => setTimeout(r, 100));
-            lastUpdateTime = Date.now();
             return { result: fullContent, streaming: true, complete: true };
         }
     } catch (error) {
@@ -355,12 +375,12 @@ async function processChunkWithOpenAICompatible(message, options, apiUrl, header
             fullContent = await processSSEStream(reader, sessionId, message, updateChunksPage);
         } finally {
             reader.cancel().catch(() => { });
-            clearTimeout(debounceTimeout);
+            clearStreamState(sessionId);
             if (tabCloseListener) browser.tabs.onRemoved.removeListener(tabCloseListener);
             delete sessionControllers[sessionId];
         }
         updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk, isComplete: true });
-        await new Promise(r => setTimeout(r, 100)); lastUpdateTime = Date.now();
+        await new Promise(r => setTimeout(r, 100));
         return { result: fullContent, streaming: true, complete: true };
     } catch (error) {
         if (tabCloseListener) browser.tabs.onRemoved.removeListener(tabCloseListener);
@@ -439,11 +459,11 @@ async function processChunkWithChatGPTWeb(message, options) {
         const { tab } = await getOrCreateTab('https://chatgpt.com/', 'https://chatgpt.com/*', sessionId);
         await waitForTabLoad(tab.id, WebAutomationConfig.TAB_LOAD_TIMEOUT_MS, controller.signal);
         if (controller.signal.aborted) throw new Error('Aborted');
-        await new Promise((resolve, reject) => { const t = setTimeout(resolve, WebAutomationConfig.DELAY_CHATGPT_MS); controller.signal.addEventListener('abort', () => { clearTimeout(t); reject(new Error('Aborted')); }); });
+        await new Promise((resolve, reject) => { const t = setTimeout(resolve, WebAutomationConfig.DELAY_CHATGPT_MS); controller.signal.addEventListener('abort', () => { clearTimeout(t); reject(new Error('Aborted')); }, { once: true }); });
         const result = await Promise.race([
             browser.tabs.sendMessage(tab.id, { action: 'paste_chunk_v2', text: fullContent }),
             new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), WebAutomationConfig.EXECUTION_TIMEOUT_MS)),
-            new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error('Aborted'))))
+            new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error('Aborted')), { once: true }))
         ]);
         if (!result?.success) throw new Error(result?.error || 'Unknown error');
         return { result: 'Sent to ChatGPT Web', parts: ['Sent to ChatGPT Web'] };
@@ -463,11 +483,11 @@ async function processChunkWithGeminiWeb(message, options) {
         const { tab } = await getOrCreateTab('https://gemini.google.com/', 'https://gemini.google.com/*', sessionId);
         await waitForTabLoad(tab.id, WebAutomationConfig.TAB_LOAD_TIMEOUT_MS, controller.signal);
         if (controller.signal.aborted) throw new Error('Aborted');
-        await new Promise((resolve, reject) => { const t = setTimeout(resolve, WebAutomationConfig.DELAY_GEMINI_MS); controller.signal.addEventListener('abort', () => { clearTimeout(t); reject(new Error('Aborted')); }); });
+        await new Promise((resolve, reject) => { const t = setTimeout(resolve, WebAutomationConfig.DELAY_GEMINI_MS); controller.signal.addEventListener('abort', () => { clearTimeout(t); reject(new Error('Aborted')); }, { once: true }); });
         const result = await Promise.race([
             browser.tabs.sendMessage(tab.id, { action: 'paste_chunk_gemini', text: fullContent }),
             new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), WebAutomationConfig.EXECUTION_TIMEOUT_MS)),
-            new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error('Aborted'))))
+            new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error('Aborted')), { once: true }))
         ]);
         if (!result?.success) throw new Error(result?.error || 'Unknown error');
         return { result: 'Sent to Gemini Web', parts: ['Sent to Gemini Web'] };

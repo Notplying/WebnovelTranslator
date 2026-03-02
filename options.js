@@ -52,7 +52,9 @@ function setupPasswordToggles() {
       const input = document.getElementById(btn.dataset.target);
       if (!input) return;
       input.type = input.type === 'password' ? 'text' : 'password';
-      btn.textContent = input.type === 'password' ? '👁' : '🙈';
+      const isHidden = input.type === 'password';
+      btn.textContent = isHidden ? '👁' : '🙈';
+      btn.setAttribute('aria-label', isHidden ? 'Show password' : 'Hide password');
     });
   });
 }
@@ -153,11 +155,23 @@ async function exportSettings() {
 }
 
 // ─── Import ───────────────────────────────────────────────────────────────────
+// Only these keys may be written from an imported file (mirrors the DEFAULTS keys
+// and the set loaded by loadSettings). Any extra keys in the JSON are silently dropped.
+const ALLOWED_IMPORT_KEYS = Object.keys(DEFAULTS);
+
 async function importFromJSON(json) {
   try {
     const data = JSON.parse(json);
-    delete data.processedChunks; delete data.translationSessions;
-    await browser.storage.local.set(data);
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+      throw new TypeError('Expected a JSON object');
+    }
+    const whitelisted = {};
+    for (const key of ALLOWED_IMPORT_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(data, key)) {
+        whitelisted[key] = data[key];
+      }
+    }
+    await browser.storage.local.set(whitelisted);
     await loadSettings();
     showToast('✅ Settings imported!', 'success');
   } catch (e) {

@@ -35,9 +35,12 @@ function splitParagraphText(lengthinput) {
         combinedContent += node.innerHTML + '\n\n';
       } else if (node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== '') {
         let lines = node.textContent.trim().split(']');
-        lines.forEach(line => {
+        lines.forEach((line, idx) => {
           if (line.trim() !== '') {
-            combinedContent += line.trim() + ']\n\n';
+            // Re-append ']' only for segments that were followed by a ']' in the original text.
+            // The final segment from split(']') never had a trailing ']'.
+            const suffix = idx < lines.length - 1 ? ']' : '';
+            combinedContent += line.trim() + suffix + '\n\n';
           }
         });
       } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName.toLowerCase() === 'img') {
