@@ -460,7 +460,7 @@ async function reprocessOne(index) {
     if (reprocessingState.isActive) { showToast('Already reprocessing, please wait.', 'error'); return; }
     if (isProcessing && streamingIndex !== index) { showToast('Wait for current chunk to finish.', 'error'); return; }
     const sessId = getSessionId();
-    const storedData = await browser.runtime.sendMessage({ action: 'getStoredData' });
+    const storedData = await browser.runtime.sendMessage({ action: 'getStoredData', sessionId: sessId });
     const pfx = storedData.prefix || prefix;
     const sfx = storedData.suffix || suffix;
     const rc = storedData.retryCount || retryCount;
@@ -534,7 +534,7 @@ async function initPage() {
     const { translationSessions = [] } = await browser.storage.local.get('translationSessions');
     const session = translationSessions.find(s => s.id === sessionId);
 
-    let storedData = await browser.runtime.sendMessage({ action: 'getStoredData' });
+    let storedData = await browser.runtime.sendMessage({ action: 'getStoredData', sessionId });
     allChunks = session?.chunks || storedData.chunks || [];
     prefix = session?.prefix || storedData.prefix || '';
     suffix = session?.suffix || storedData.suffix || '';

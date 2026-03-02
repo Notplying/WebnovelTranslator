@@ -35,10 +35,6 @@ function clearStreamState(sessionId) {
     delete sessionStreamState[sessionId];
 }
 
-let storedChunks = [];
-let storedPrefix = '';
-let storedSuffix = '';
-let storedRetryCount = 3;
 
 // Track tab IDs and AbortControllers per session
 let sessionTabIds = {};
@@ -100,13 +96,10 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message.action === 'openChunksPage') {
         if (message.chunks) {
-            storedChunks = message.chunks;
-            storedPrefix = message.prefix;
-            storedSuffix = message.suffix;
-            storedRetryCount = message.retryCount;
-            browser.storage.local.remove('lastChunksData').then(() => openChunksPage());
+            const payload = { chunks: message.chunks, prefix: message.prefix, suffix: message.suffix, retryCount: message.retryCount };
+            browser.storage.local.remove('lastChunksData').then(() => openChunksPage(payload));
         } else {
-            openChunksPage();
+            openChunksPage(null);
         }
         return false;
     }
@@ -115,8 +108,15 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return false;
     }
     if (message.action === 'getStoredData') {
-        sendResponse({ chunks: storedChunks, prefix: storedPrefix, suffix: storedSuffix, retryCount: storedRetryCount });
-        return false;
+        // Read from the stored session keyed by the requested sessionId
+        browser.storage.local.get('translationSessions').then(({ translationSessions = [] }) => {
+            const session = translationSessions.find(s => s.id === message.sessionId);
+            sendResponse(session
+                ? { chunks: session.chunks, prefix: session.prefix, suffix: session.suffix, retryCount: session.retryCount }
+                : { chunks: [], prefix: '', suffix: '', retryCount: 3 }
+            );
+        }).catch(() => sendResponse({ chunks: [], prefix: '', suffix: '', retryCount: 3 }));
+        return true; // async sendResponse
     }
     if (message.action === 'terminateRequest') {
         terminateRequest(message.sessionId)
@@ -146,11 +146,16 @@ async function updateSessionStorage(sessionId, sessionDataToStore) {
     await browser.storage.local.set({ translationSessions: updatedSessions });
 }
 
-async function openChunksPage() {
-    const contentSessionId = await generateContentHash(storedChunks, storedPrefix, storedSuffix);
+async function openChunksPage(payload) {
+    // If no payload (reopening a session), use data already in storage via session hash
+    const chunks = payload?.chunks ?? [];
+    const prefix = payload?.prefix ?? '';
+    const suffix = payload?.suffix ?? '';
+    const retryCount = payload?.retryCount ?? 3;
+
+    const contentSessionId = await generateContentHash(chunks, prefix, suffix);
     const { translationSessions = [] } = await browser.storage.local.get('translationSessions');
-    const existingSession = translationSessions.find(s => s.id === contentSessionId);
-    const sessionDataForStorage = { chunks: storedChunks, prefix: storedPrefix, suffix: storedSuffix, retryCount: storedRetryCount };
+    const sessionDataForStorage = { chunks, prefix, suffix, retryCount };
     await updateSessionStorage(contentSessionId, sessionDataForStorage);
 
     const url = browser.runtime.getURL(`chunks.html?session=${contentSessionId}`);
@@ -400,7 +405,10 @@ async function processChunkWithOpenRouter(message, options) {
         stream: true
     };
     if (options.openRouterMaxTokens?.trim()) { const t = parseInt(options.openRouterMaxTokens); if (!isNaN(t) && t > 0) requestBody.max_tokens = t; }
-    if (options.temperature?.trim()) { const t = parseFloat(options.temperature); if (!isNaN(t)) requestBody.temperature = t; }
+    const temperature = typeof options.temperature === 'string'
+        ? parseFloat(options.temperature.trim())
+        : Number(options.temperature);
+    if (!isNaN(temperature)) requestBody.temperature = temperature;
     if (options.openRouterProviderOrder?.trim()) {
         const order = options.openRouterProviderOrder.split(',').map(s => s.trim()).filter(Boolean);
         if (order.length) requestBody.provider = { order, allow_fallbacks: options.openRouterAllowFallback !== false };
@@ -416,7 +424,10 @@ async function processChunkWithOpenAI(message, options) {
         stream: true
     };
     if (options.openaiMaxTokens?.trim()) { const t = parseInt(options.openaiMaxTokens); if (!isNaN(t) && t > 0) requestBody.max_tokens = t; }
-    if (options.temperature?.trim()) { const t = parseFloat(options.temperature); if (!isNaN(t)) requestBody.temperature = t; }
+    const temperature = typeof options.temperature === 'string'
+        ? parseFloat(options.temperature.trim())
+        : Number(options.temperature);
+    if (!isNaN(temperature)) requestBody.temperature = temperature;
     const baseUrl = options.openaiBaseUrl?.trim() || 'https://api.openai.com/v1';
     const headers = { 'Authorization': `Bearer ${options.openaiApiKey}`, 'Content-Type': 'application/json' };
     return processChunkWithOpenAICompatible(message, options, `${baseUrl}/chat/completions`, headers, requestBody, 'OpenAI');

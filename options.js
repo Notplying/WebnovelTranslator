@@ -35,6 +35,7 @@ function showToast(msg, type = '') {
 // ─── Navigation ───────────────────────────────────────────────────────────────
 function setupNav() {
   document.querySelectorAll('.nav-item').forEach(btn => {
+    if (!btn.dataset.section || !document.getElementById('section-' + btn.dataset.section)) return;
     btn.addEventListener('click', () => {
       document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
@@ -76,9 +77,27 @@ async function loadSettings() {
 
     'openRouterApiKey', 'openRouterModelId', 'openRouterMaxTokens', 'openRouterContextWindow', 'openRouterProviderOrder', 'openRouterAllowFallback',
     'openaiApiKey', 'openaiModelId', 'openaiMaxTokens', 'openaiContextWindow', 'openaiBaseUrl'
-  ].forEach(key => setField(key, settings[key]));
+  ].forEach(key => { setField(key, settings[key]); });
 
   updatePromptPreview();
+}
+
+// ─── Numeric sanitizer ───────────────────────────────────────────────────────
+function sanitizeNumericSettings(raw) {
+  const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
+  const parseNum = (v, fallback) => { const n = parseFloat(v); return isNaN(n) ? fallback : n; };
+  const parseInt2 = (v, fallback) => { const n = parseInt(v, 10); return isNaN(n) ? fallback : n; };
+  return {
+    ...raw,
+    maxLength: clamp(parseInt2(raw.maxLength, 7000), 1, 500000),
+    retryCount: clamp(parseInt2(raw.retryCount, 3), 0, 20),
+    maxSessions: clamp(parseInt2(raw.maxSessions, 3), 1, 50),
+    chunkFontSize: clamp(parseNum(raw.chunkFontSize, 1.05), 0.1, 10),
+    chunkMaxWidth: clamp(parseInt2(raw.chunkMaxWidth, 0), 0, 10000),
+    temperature: clamp(parseNum(raw.temperature, 0.3), 0, 2),
+    topK: clamp(parseInt2(raw.topK, 30), 1, 1000),
+    topP: clamp(parseNum(raw.topP, 0.95), 0, 1),
+  };
 }
 
 // ─── Save settings from form ──────────────────────────────────────────────────
@@ -89,18 +108,18 @@ function getField(id, isCheckbox = false) {
 }
 
 async function saveSettings() {
-  await browser.storage.local.set({
+  const raw = {
     apiType: getField('apiType'),
-    maxLength: parseInt(getField('maxLength')) || 7000,
+    maxLength: getField('maxLength'),
     prefix: getField('prefix'),
     suffix: getField('suffix'),
-    retryCount: parseInt(getField('retryCount')) || 3,
+    retryCount: getField('retryCount'),
     temperature: getField('temperature'),
     topK: getField('topK'),
     topP: getField('topP'),
-    maxSessions: parseInt(getField('maxSessions')) || 3,
-    chunkFontSize: parseFloat(getField('chunkFontSize')) || 1,
-    chunkMaxWidth: parseInt(getField('chunkMaxWidth')) || 0,
+    maxSessions: getField('maxSessions'),
+    chunkFontSize: getField('chunkFontSize'),
+    chunkMaxWidth: getField('chunkMaxWidth'),
 
     geminiApiKey: getField('geminiApiKey'),
     geminiModelId: getField('geminiModelId'),
@@ -123,7 +142,8 @@ async function saveSettings() {
     openaiBaseUrl: getField('openaiBaseUrl'),
 
 
-  });
+  };
+  await browser.storage.local.set(sanitizeNumericSettings(raw));
   showToast('✅ Settings saved!', 'success');
 }
 
@@ -171,7 +191,7 @@ async function importFromJSON(json) {
         whitelisted[key] = data[key];
       }
     }
-    await browser.storage.local.set(whitelisted);
+    await browser.storage.local.set(sanitizeNumericSettings(whitelisted));
     await loadSettings();
     showToast('✅ Settings imported!', 'success');
   } catch (e) {
