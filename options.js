@@ -37,8 +37,8 @@ function setupNav() {
   document.querySelectorAll('.nav-item').forEach(btn => {
     if (!btn.dataset.section || !document.getElementById('section-' + btn.dataset.section)) return;
     btn.addEventListener('click', () => {
-      document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      document.querySelectorAll('.nav-item').forEach(b => { b.classList.remove('active'); });
+      document.querySelectorAll('.section').forEach(s => { s.classList.remove('active'); });
       btn.classList.add('active');
       const target = document.getElementById('section-' + btn.dataset.section);
       if (target) target.classList.add('active');
@@ -89,9 +89,9 @@ function sanitizeNumericSettings(raw) {
   const parseInt2 = (v, fallback) => { const n = parseInt(v, 10); return isNaN(n) ? fallback : n; };
   return {
     ...raw,
-    maxLength: clamp(parseInt2(raw.maxLength, 7000), 1, 500000),
-    retryCount: clamp(parseInt2(raw.retryCount, 3), 0, 20),
-    maxSessions: clamp(parseInt2(raw.maxSessions, 3), 1, 50),
+    maxLength: clamp(parseInt2(raw.maxLength, DEFAULTS.maxLength), 1, 500000),
+    retryCount: clamp(parseInt2(raw.retryCount, DEFAULTS.retryCount), 0, 20),
+    maxSessions: clamp(parseInt2(raw.maxSessions, DEFAULTS.maxSessions), 1, 50),
     chunkFontSize: clamp(parseNum(raw.chunkFontSize, 1.05), 0.1, 10),
     chunkMaxWidth: clamp(parseInt2(raw.chunkMaxWidth, 0), 0, 10000),
     temperature: clamp(parseNum(raw.temperature, 0.3), 0, 2),
@@ -232,12 +232,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Export
   document.getElementById('exportButton')?.addEventListener('click', exportSettings);
 
+  // Show selected filename next to the file picker
+  document.getElementById('importFile')?.addEventListener('change', e => {
+    const nameEl = document.getElementById('importFileName');
+    if (nameEl) nameEl.textContent = e.target.files?.[0]?.name || 'No file chosen';
+  });
+
   // Import from file
   document.getElementById('importButton')?.addEventListener('click', () => {
     const file = document.getElementById('importFile')?.files?.[0];
     if (!file) { showToast('Select a JSON file first.', 'error'); return; }
     const reader = new FileReader();
     reader.onload = e => importFromJSON(e.target.result);
+    reader.onerror = e => {
+      showToast('Failed to read file: ' + (e?.target?.error?.message || 'unknown error'), 'error');
+      console.error('FileReader error in importFromJSON flow', e);
+    };
     reader.readAsText(file);
   });
 

@@ -135,15 +135,32 @@ async function generateContentHash(chunks, prefix, suffix) {
     return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// Per-sessionId mutex to serialize concurrent updateSessionStorage calls
+const sessionStorageLocks = new Map();
+
 async function updateSessionStorage(sessionId, sessionDataToStore) {
-    let { translationSessions = [] } = await browser.storage.local.get('translationSessions');
-    translationSessions = translationSessions.filter(s => s.id !== sessionId);
-    const sessionEntry = { id: sessionId, timestamp: Date.now(), firstChunk: sessionDataToStore.chunks[0] || '', ...sessionDataToStore };
-    const { maxSessions = 3 } = await browser.storage.local.get('maxSessions');
-    const updatedSessions = [sessionEntry, ...translationSessions]
-        .sort((a, b) => b.timestamp - a.timestamp)
-        .slice(0, maxSessions);
-    await browser.storage.local.set({ translationSessions: updatedSessions });
+    // Acquire lock: chain onto the previous promise for this sessionId
+    const prev = sessionStorageLocks.get(sessionId) ?? Promise.resolve();
+    let releaseLock;
+    const next = new Promise(resolve => { releaseLock = resolve; });
+    sessionStorageLocks.set(sessionId, prev.then(() => next));
+    await prev;
+    try {
+        let { translationSessions = [] } = await browser.storage.local.get('translationSessions');
+        translationSessions = translationSessions.filter(s => s.id !== sessionId);
+        const sessionEntry = { id: sessionId, timestamp: Date.now(), firstChunk: sessionDataToStore.chunks[0] || '', ...sessionDataToStore };
+        const { maxSessions = 3 } = await browser.storage.local.get('maxSessions');
+        const updatedSessions = [sessionEntry, ...translationSessions]
+            .sort((a, b) => b.timestamp - a.timestamp)
+            .slice(0, maxSessions);
+        await browser.storage.local.set({ translationSessions: updatedSessions });
+    } finally {
+        releaseLock();
+        // Clean up the lock entry once it resolves to avoid unbounded growth
+        sessionStorageLocks.get(sessionId)?.then?.(() => {
+            if (sessionStorageLocks.get(sessionId) === next) sessionStorageLocks.delete(sessionId);
+        });
+    }
 }
 
 async function openChunksPage(payload) {
@@ -434,12 +451,19 @@ async function processChunkWithOpenAI(message, options) {
 }
 
 
+// Safely convert a URL match pattern (with * wildcards) into an anchored RegExp.
+// All regex metacharacters except * are escaped so e.g. '.' in 'chatgpt.com' is literal.
+function urlPatternToRegExp(pattern) {
+    const escaped = pattern.split('*').map(part => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'));
+    return new RegExp('^' + escaped.join('.*') + '$');
+}
+
 // ─── Web Automation ───────────────────────────────────────────────────────────
 async function getOrCreateTab(url, urlPattern, sessionId) {
     if (sessionTabIds[sessionId]) {
         try {
             const tab = await browser.tabs.get(sessionTabIds[sessionId]);
-            if (tab.url && new RegExp(urlPattern.replace('*', '.*')).test(tab.url)) return { tab, reused: true };
+            if (tab.url && urlPatternToRegExp(urlPattern).test(tab.url)) return { tab, reused: true };
         } catch (e) { delete sessionTabIds[sessionId]; }
     }
     const tabs = await browser.tabs.query({ url: urlPattern });

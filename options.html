@@ -398,6 +398,19 @@
       flex-wrap: wrap;
     }
 
+    /* Visually hidden but accessible to keyboard/screen readers */
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
     /* ── Sections ─────────────────────────────────────────────── */
     .section {
       display: none;
@@ -807,9 +820,11 @@
       <div class="card">
         <div class="card-title">📥 Import Settings</div>
         <div class="field">
-          <label for="importFile">Select JSON file</label>
-          <input type="file" id="importFile" accept=".json"
-            style="background:transparent;border:none;padding:0;color:var(--text-muted)" />
+          <input type="file" id="importFile" accept=".json" class="visually-hidden"
+            aria-label="Select JSON settings file" />
+          <label for="importFile" class="btn btn-secondary" style="cursor:pointer">📂 Choose JSON file</label>
+          <small id="importFileName" style="color:var(--text-muted);font-size:0.8rem;margin-left:6px">No file
+            chosen</small>
         </div>
         <div class="field" style="margin-top:12px">
           <label for="importTextarea">Or paste JSON here</label>
