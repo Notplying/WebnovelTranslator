@@ -1,526 +1,861 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Options</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Webnovel Translator — Settings</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg-primary: #0a0a0a;
-      --bg-secondary: #1a1a1a;
-      --bg-tertiary: #2a2a2a;
-      --text-primary: #ffffff;
-      --text-secondary: #b3b3b3;
-      --text-muted: #808080;
-      --accent-primary: #6366f1;
-      --accent-secondary: #06b6d4;
-      --accent-success: #10b981;
-      --accent-warning: #f59e0b;
-      --accent-error: #ef4444;
-      --border-color: #374151;
-      --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-      --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-      --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-      --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+      --bg: #0d0f17;
+      --surface: #13161f;
+      --surface2: #1a1e2e;
+      --border: rgba(255, 255, 255, 0.07);
+      --accent: #7c6af7;
+      --accent2: #5eead4;
+      --accent-glow: rgba(124, 106, 247, 0.25);
+      --text: #e2e8f0;
+      --text-muted: #64748b;
+      --danger: #f87171;
+      --success: #4ade80;
+      --radius: 12px;
+      --transition: 0.2s ease;
     }
 
-    * {
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
       margin: 0;
       padding: 0;
-      box-sizing: border-box;
+    }
+
+    html {
+      font-size: 15px;
     }
 
     body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, var(--bg-primary) 0%, #111827 100%);
-      color: var(--text-primary);
-      padding-bottom: 200px;
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
       min-height: 100vh;
       display: flex;
+    }
+
+    /* ── Sidebar ──────────────────────────────────────────────── */
+    .sidebar {
+      width: 240px;
+      min-height: 100vh;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
       flex-direction: column;
-      align-items: center;
-      position: relative;
-      overflow-y: auto;
-      box-sizing: border-box;
-      -webkit-overflow-scrolling: touch;
-    }
-
-    body::before {
-      content: '';
-      position: fixed;
+      padding: 24px 0;
+      position: sticky;
       top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: 
-        radial-gradient(circle at 20% 80%, rgba(99, 102, 241, 0.1) 0%, transparent 50%),
-        radial-gradient(circle at 80% 20%, rgba(6, 182, 212, 0.1) 0%, transparent 50%),
-        radial-gradient(circle at 40% 40%, rgba(16, 185, 129, 0.05) 0%, transparent 50%);
-      pointer-events: none;
-      z-index: -1;
+      flex-shrink: 0;
     }
 
-    h1 {
-      font-size: 2.5rem;
-      font-weight: 700;
-      background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      margin: 40px 0;
-      letter-spacing: -0.02em;
-    }
-
-    form {
-      background: rgba(42, 42, 42, 0.4);
-      backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 16px;
-      padding: 32px;
-      width: 90%;
-      max-width: 700px;
-      box-shadow: var(--shadow-lg);
-      margin: 20px auto;
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    form:hover {
-      box-shadow: var(--shadow-xl);
-      border-color: rgba(99, 102, 241, 0.2);
-    }
-
-    .section {
-      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-      padding-bottom: 32px;
-      margin-bottom: 32px;
-    }
-
-    .section:last-child {
-      border-bottom: none;
-      padding-bottom: 0;
-      margin-bottom: 0;
-    }
-
-    .section-title {
-      font-size: 1.5rem;
-      font-weight: 600;
-      color: var(--text-primary);
-      margin-bottom: 24px;
+    .sidebar-logo {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
+      padding: 0 20px 24px;
+      border-bottom: 1px solid var(--border);
     }
 
-    .section-title::before {
-      content: '';
-      width: 4px;
-      height: 24px;
-      background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
-      border-radius: 2px;
+    .sidebar-logo img {
+      width: 32px;
+      height: 32px;
+    }
+
+    .sidebar-logo span {
+      font-weight: 700;
+      font-size: 0.95rem;
+      color: var(--text);
+    }
+
+    .sidebar-logo small {
+      display: block;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+
+    nav {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 16px 12px;
+    }
+
+    .nav-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      padding: 8px 8px 4px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 12px;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: background var(--transition), color var(--transition);
+      border: none;
+      background: none;
+      width: 100%;
+      text-align: left;
+    }
+
+    .nav-item:hover {
+      background: var(--surface2);
+      color: var(--text);
+    }
+
+    .nav-item.active {
+      background: var(--accent-glow);
+      color: var(--accent);
+    }
+
+    .nav-item .icon {
+      font-size: 1rem;
+      width: 20px;
+      text-align: center;
+    }
+
+    /* ── Main content ─────────────────────────────────────────── */
+    .main {
+      flex: 1;
+      padding: 32px;
+      overflow-y: auto;
+      max-width: 860px;
+    }
+
+    .page-header {
+      margin-bottom: 28px;
+    }
+
+    .page-header h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+
+    .page-header p {
+      color: var(--text-muted);
+      font-size: 0.875rem;
+      margin-top: 4px;
+    }
+
+    /* ── Cards ────────────────────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+
+    .card-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-title .badge {
+      font-size: 0.65rem;
+      padding: 2px 8px;
+      border-radius: 20px;
+      background: var(--accent-glow);
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    /* ── Form controls ────────────────────────────────────────── */
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .form-grid.single {
+      grid-template-columns: 1fr;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
     }
 
     label {
-      display: block;
+      font-size: 0.8rem;
       font-weight: 500;
-      margin-top: 20px;
-      margin-bottom: 8px;
-      color: var(--text-primary);
-      font-size: 0.875rem;
-      letter-spacing: 0.025em;
-    }
-
-    input, textarea, select {
-      width: 100%;
-      padding: 12px 16px;
-      margin-bottom: 16px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 8px;
-      font-size: 0.875rem;
-      background: rgba(26, 26, 26, 0.6);
-      color: var(--text-primary);
-      transition: all 0.2s ease;
-      backdrop-filter: blur(10px);
-    }
-
-    input:focus, textarea:focus, select:focus {
-      outline: none;
-      border-color: var(--accent-primary);
-      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
-      background: rgba(26, 26, 26, 0.8);
-    }
-
-    input::placeholder, textarea::placeholder {
       color: var(--text-muted);
     }
 
+    input[type="text"],
+    input[type="password"],
+    input[type="number"],
+    select,
     textarea {
-      min-height: 120px;
-      resize: vertical;
-      font-family: inherit;
-    }
-
-    select {
-      cursor: pointer;
-      background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%239ca3af' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
-      background-position: right 12px center;
-      background-repeat: no-repeat;
-      background-size: 16px;
-      padding-right: 48px;
-    }
-
-    button {
-      border: none;
-      padding: 12px 24px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
       border-radius: 8px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.875rem;
+      padding: 9px 12px;
+      transition: border-color var(--transition), box-shadow var(--transition);
+      width: 100%;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 90px;
+    }
+
+    .password-wrap {
+      position: relative;
+    }
+
+    .password-wrap input {
+      padding-right: 40px;
+    }
+
+    .toggle-pw {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      cursor: pointer;
+      color: var(--text-muted);
+      background: none;
+      border: none;
+      font-size: 1rem;
+      line-height: 1;
+      padding: 4px;
+    }
+
+    .toggle-pw:hover {
+      color: var(--text);
+    }
+
+    /* ── Toggle switch ────────────────────────────────────────── */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .toggle-row:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    .toggle-row-info label {
       font-size: 0.875rem;
       font-weight: 500;
+      color: var(--text);
+    }
+
+    .toggle-row-info small {
+      display: block;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 40px;
+      height: 22px;
+      flex-shrink: 0;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
       cursor: pointer;
-      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-      backdrop-filter: blur(10px);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      inset: 0;
+      background: var(--surface2);
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      transition: 0.2s;
     }
 
-    .primary-button {
-      background: rgba(99, 102, 241, 0.9);
-      color: white;
-      width: 100%;
-      margin-top: 24px;
-      font-size: 1rem;
-      padding: 16px;
+    .slider::before {
+      content: '';
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      left: 3px;
+      top: 50%;
+      transform: translateY(-50%);
+      transition: 0.2s;
+    }
+
+    input:checked+.slider {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    input:checked+.slider::before {
+      background: #fff;
+      left: calc(100% - 17px);
+    }
+
+    /* ── Buttons ──────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 9px 18px;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 0.875rem;
       font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all var(--transition);
+      white-space: nowrap;
     }
 
-    .primary-button:hover {
-      background: rgba(99, 102, 241, 1);
-      transform: translateY(-1px);
-      box-shadow: var(--shadow-md);
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
     }
 
-    .secondary-button {
-      background: rgba(42, 42, 42, 0.6);
-      color: var(--text-secondary);
-      margin-bottom: 12px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
+    .btn-primary:hover {
+      background: #6a58e5;
+      box-shadow: 0 0 20px var(--accent-glow);
     }
 
-    .secondary-button:hover {
-      background: rgba(42, 42, 42, 0.8);
-      color: var(--text-primary);
-      border-color: rgba(255, 255, 255, 0.2);
+    .btn-secondary {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
     }
 
-    .button-container {
+    .btn-secondary:hover {
+      background: #252a3d;
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .btn-danger {
+      background: rgba(248, 113, 113, 0.15);
+      color: var(--danger);
+      border: 1px solid rgba(248, 113, 113, 0.3);
+    }
+
+    .btn-danger:hover {
+      background: rgba(248, 113, 113, 0.25);
+    }
+
+    .btn-success {
+      background: rgba(74, 222, 128, 0.15);
+      color: var(--success);
+      border: 1px solid rgba(74, 222, 128, 0.3);
+    }
+
+    .btn-success:hover {
+      background: rgba(74, 222, 128, 0.25);
+    }
+
+    .action-row {
       display: flex;
-      gap: 12px;
-      margin-top: 16px;
+      gap: 10px;
       flex-wrap: wrap;
     }
 
-    .button-container .secondary-button {
-      flex: 1;
-      min-width: 120px;
+    /* Visually hidden but accessible to keyboard/screen readers */
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
     }
 
-    .import-textarea {
-      margin-top: 16px;
-      min-height: 100px;
-      background: rgba(26, 26, 26, 0.8);
-    }
-
-    #import-container {
-      margin-top: 16px;
-      width: 100%;
-    }
-
-    @media (max-width: 768px) {
-      form {
-        width: calc(100% - 32px);
-        padding: 24px;
-        margin: 16px;
-      }
-
-      h1 {
-        font-size: 2rem;
-        margin: 32px 0;
-      }
-
-      .section-title {
-        font-size: 1.25rem;
-      }
-
-      .button-container {
-        flex-direction: column;
-      }
-
-      .button-container .secondary-button {
-        width: 100%;
-      }
-    }
-
-    @media (max-width: 480px) {
-      form {
-        padding: 20px;
-        margin: 12px;
-      }
-
-      h1 {
-        font-size: 1.75rem;
-        margin: 24px 0;
-      }
-
-      .section {
-        padding-bottom: 24px;
-        margin-bottom: 24px;
-      }
-    }
-
-    input[type="file"] {
+    /* ── Sections ─────────────────────────────────────────────── */
+    .section {
       display: none;
     }
 
-    .discord-link {
-      color: var(--accent-primary);
-      text-decoration: none;
+    .section.active {
+      display: block;
+    }
+
+    /* ── Prompt preview ───────────────────────────────────────── */
+    .prompt-preview {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      max-height: 160px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      font-family: 'Courier New', monospace;
+      line-height: 1.5;
+      margin-top: 12px;
+    }
+
+    .prompt-preview em {
+      color: var(--accent2);
+      font-style: normal;
+    }
+
+    /* ── Toast ────────────────────────────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 12px 22px;
+      border-radius: 30px;
+      font-size: 0.875rem;
       font-weight: 500;
-      transition: color 0.2s ease;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      opacity: 0;
+      transition: opacity 0.3s, transform 0.3s;
+      pointer-events: none;
+      z-index: 9999;
     }
 
-    .discord-link:hover {
-      color: rgba(99, 102, 241, 0.8);
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
     }
 
-    .highlight {
-      color: var(--accent-warning);
-      font-weight: 600;
+    #toast.error {
+      border-color: var(--danger);
+      color: var(--danger);
     }
 
-    /* Scrollbar styling */
-    ::-webkit-scrollbar {
-      width: 8px;
+    #toast.success {
+      border-color: var(--success);
+      color: var(--success);
     }
 
-    ::-webkit-scrollbar-track {
-      background: rgba(26, 26, 26, 0.5);
-    }
+    /* ── Responsive ───────────────────────────────────────────── */
+    @media (max-width: 700px) {
+      body {
+        flex-direction: column;
+      }
 
-    ::-webkit-scrollbar-thumb {
-      background: rgba(99, 102, 241, 0.5);
-      border-radius: 4px;
-    }
+      .sidebar {
+        width: 100%;
+        min-height: auto;
+        position: static;
+        flex-direction: row;
+        flex-wrap: wrap;
+        padding: 12px;
+      }
 
-    ::-webkit-scrollbar-thumb:hover {
-      background: rgba(99, 102, 241, 0.7);
+      .sidebar-logo {
+        border-bottom: none;
+        padding-bottom: 0;
+      }
+
+      nav {
+        flex-direction: row;
+        flex-wrap: wrap;
+        padding: 4px;
+        gap: 4px;
+      }
+
+      .nav-label {
+        display: none;
+      }
+
+      .nav-item {
+        padding: 6px 10px;
+        font-size: 0.8rem;
+      }
+
+      .main {
+        padding: 16px;
+      }
+
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
+
 <body>
-  <h1>Options</h1>
-  <form id="options-form">
-    <div class="section">
-      <div class="section-title">API Configuration</div>
-      <a href="https://discord.gg/kTQvSuxZ6Y" target="_blank" class="discord-link">
-        Found a bug? Thought of an improvement? Post it to my email or join the discord!
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <img src="48.png" alt="Logo" />
+      <div><span>Webnovel Translator</span><small id="appVersion">v3.0.3</small></div>
+    </div>
+    <nav>
+      <div class="nav-label">General</div>
+      <button class="nav-item active" data-section="general" id="nav-general">
+        <span class="icon">⚙️</span> General
+      </button>
+      <button class="nav-item" data-section="prompt" id="nav-prompt">
+        <span class="icon">✍️</span> Prompt
+      </button>
+      <div class="nav-label">API Providers</div>
+      <button class="nav-item" data-section="gemini" id="nav-gemini">
+        <span class="icon">✨</span> Gemini
+      </button>
+
+      <button class="nav-item" data-section="openrouter" id="nav-openrouter">
+        <span class="icon">🔀</span> OpenRouter
+      </button>
+      <button class="nav-item" data-section="openai" id="nav-openai">
+        <span class="icon">🤖</span> OpenAI Compat.
+      </button>
+
+      <button class="nav-item" data-section="webautomation" id="nav-webautomation">
+        <span class="icon">🌐</span> Web Automation
+      </button>
+      <div class="nav-label">Data</div>
+      <button class="nav-item" data-section="data" id="nav-data">
+        <span class="icon">💾</span> Import / Export
+      </button>
+      <div class="nav-label" style="margin-top: auto; padding-top: 16px;">Community</div>
+      <a href="https://discord.gg/kTQvSuxZ6Y" target="_blank" rel="noopener noreferrer" class="nav-item"
+        style="text-decoration: none;">
+        <span class="icon">💬</span>
+        <div style="line-height: 1.3;">
+          Discord<br>
+          <span style="font-size: 0.65rem; opacity: 0.7;">Bugs / Suggestions</span>
+        </div>
       </a>
-      <label for="api-type">API Type: <span class="highlight">NEW!</span> GLM Coding Plan API!</label>
-      <select id="api-type">
-        <option value="gemini">Gemini API</option>
-        <option value="vertex">Vertex AI API</option>
-        <option value="openRouter">OpenRouter API</option>
-        <option value="glmCoding">GLM Coding Plan API</option>
-        <option value="openai">OpenAI Compatible</option>
-        <option value="chatgptWeb">ChatGPT Web Automation</option>
-        <option value="geminiWeb">Gemini Web Automation</option>
-      </select>
-    </div>
+    </nav>
+  </aside>
 
-    <div class="section">
-      <div class="section-title">Text Processing Settings</div>
-      <label for="max-length">Max Length:</label>
-      <input type="number" id="max-length" placeholder="e.g., 7000">
-
-      <label for="prefix">Prefix:</label>
-      <textarea id="prefix" placeholder="Enter prefix text here..."></textarea>
-
-      <label for="suffix">Suffix:</label>
-      <textarea id="suffix" placeholder="Enter suffix text here..."></textarea>
-
-      <label for="max-sessions">Max Sessions to Keep:</label>
-      <input type="number" id="max-sessions" placeholder="e.g., 5" min="1">
-
-      <button type="button" id="clear-saved-results" class="secondary-button">Clear All Saved Results</button>
-    </div>
-
-    <div class="section">
-      <div class="section-title">Model Parameters</div>
-      <label for="retry-count">Retry Count:</label>
-      <input type="number" id="retry-count" placeholder="e.g., 3">
-
-      <label for="temperature">Temperature (Optional):</label>
-      <input type="number" step="0.1" id="temperature" placeholder="Leave empty to use model default">
-
-      <label for="top-k">Top K:</label>
-      <input type="number" id="top-k" placeholder="e.g., 40">
-
-      <label for="top-p">Top P:</label>
-      <input type="number" step="0.01" id="top-p" placeholder="e.g., 0.95">
-    </div>
-
-    <div id="gemini-settings" class="section" style="display: none;">
-      <div class="section-title">Gemini Settings</div>
-      <label for="gemini-api-key">Gemini API Key:</label>
-      <input type="text" id="gemini-api-key" placeholder="Enter Gemini API key">
-      <label for="gemini-model-id">Model ID:</label>
-      <input type="text" id="gemini-model-id" placeholder="e.g., gemini-1.5-flash-002">
-      <label for="gemini-max-tokens">Max Output Tokens (Optional):</label>
-      <input type="number" id="gemini-max-tokens" placeholder="Leave empty to use model default">
-      <label for="gemini-context-window">Context Window Size (Optional):</label>
-      <input type="number" id="gemini-context-window" placeholder="Leave empty to use model default">
-      <label for="gemini-stream">Streaming:</label>
-      <select id="gemini-stream">
-        <option value="true">Streaming Enabled</option>
-        <option value="false">Streaming Disabled</option>
-      </select>
-    </div>
-
-    <div id="vertex-settings" class="section" style="display: none;">
-      <div class="section-title">Vertex AI Settings</div>
-      <label for="service-account-key">Service Account Key (JSON):</label>
-      <textarea id="service-account-key" placeholder="Paste your service account JSON here"></textarea>
-      <button type="button" id="test-service-account" class="secondary-button">Test Service Account Key</button>
-
-      <label for="location">Location:</label>
-      <input type="text" id="location" placeholder="e.g., us-central1">
-
-      <label for="project-id">Project ID:</label>
-      <input type="text" id="project-id" placeholder="Enter your project ID">
-
-      <label for="model-id">Model ID:</label>
-      <input type="text" id="model-id" placeholder="e.g., gemini-1.5-flash-002">
-      
-      <label for="vertex-max-tokens">Max Output Tokens (Optional):</label>
-      <input type="number" id="vertex-max-tokens" placeholder="Leave empty to use model default">
-      <label for="vertex-context-window">Context Window Size (Optional):</label>
-      <input type="number" id="vertex-context-window" placeholder="Leave empty to use model default">
-      
-      <label for="vertex-stream">Streaming:</label>
-      <select id="vertex-stream">
-        <option value="true">Streaming Enabled</option>
-        <option value="false">Streaming Disabled</option>
-      </select>
-    </div>
-
-    <div id="openRouter-settings" class="section" style="display: none;">
-      <div class="section-title">OpenRouter Settings</div>
-      <label for="openRouter-api-key">OpenRouter API Key:</label>
-      <input type="text" id="openRouter-api-key" placeholder="Enter OpenRouter API key">
-      
-      <label for="openRouter-model-id">Model ID:</label>
-      <input type="text" id="openRouter-model-id" placeholder="e.g., openai/gpt-4">
-
-      <label for="openRouter-max-tokens">Max Output Tokens (Optional):</label>
-      <input type="number" id="openRouter-max-tokens" placeholder="Leave empty to use model default">
-      <label for="openRouter-context-window">Context Window Size (Optional):</label>
-      <input type="number" id="openRouter-context-window" placeholder="Leave empty to use model default">
-      
-      <label for="openRouter-stream">Streaming:</label>
-      <select id="openRouter-stream">
-        <option value="true">Streaming Enabled</option>
-        <option value="false">Streaming Disabled</option>
-      </select>
-
-      <label for="openRouter-provider-order">Provider Order (Optional):</label>
-      <input type="text" id="openRouter-provider-order" placeholder="e.g., openai,together,anthropic - comma-separated provider slugs">
-      
-      <label for="openRouter-allow-fallback">Allow Fallback:</label>
-      <select id="openRouter-allow-fallback">
-        <option value="true">Enabled</option>
-        <option value="false">Disabled</option>
-      </select>
-    </div>
-
-    <div id="openai-settings" class="section" style="display: none;">
-      <div class="section-title">OpenAI Compatible Settings</div>
-      <label for="openai-api-key">OpenAI API Compatible Key:</label>
-      <input type="text" id="openai-api-key" placeholder="Enter OpenAI API key">
-      
-      <label for="openai-model-id">Model ID:</label>
-      <input type="text" id="openai-model-id" placeholder="e.g., gpt-4o-mini">
-
-      <label for="openai-base-url">Base URL:</label>
-      <input type="text" id="openai-base-url" placeholder="e.g., https://api.openai.com/v1">
-
-      <label for="openai-max-tokens">Max Output Tokens (Optional):</label>
-      <input type="number" id="openai-max-tokens" placeholder="Leave empty to use model default">
-      <label for="openai-context-window">Context Window Size (Optional):</label>
-      <input type="number" id="openai-context-window" placeholder="Leave empty to use model default">
-
-      <label for="openai-stream">Streaming:</label>
-      <select id="openai-stream">
-        <option value="true">Streaming Enabled</option>
-        <option value="false">Streaming Disabled</option>
-      </select>
-    </div>
-
-    <div id="glmCoding-settings" class="section" style="display: none;">
-      <div class="section-title">GLM Coding Plan Settings</div>
-      <label for="glmCoding-api-key">GLM Coding Plan API Key:</label>
-      <input type="text" id="glmCoding-api-key" placeholder="Enter your Z.AI API key">
-      
-      <label for="glmCoding-model-id">Model ID:</label>
-      <input type="text" id="glmCoding-model-id" placeholder="e.g., GLM-4.5-air">
-
-      <label for="glmCoding-max-tokens">Max Output Tokens (Optional):</label>
-      <input type="number" id="glmCoding-max-tokens" placeholder="Leave empty to use model default">
-      
-      <label for="glmCoding-context-window">Context Window Size (Optional):</label>
-      <input type="number" id="glmCoding-context-window" placeholder="Leave empty to use model default">
-
-      <label for="glmCoding-stream">Streaming:</label>
-      <select id="glmCoding-stream">
-        <option value="true">Streaming Enabled</option>
-        <option value="false">Streaming Disabled</option>
-      </select>
-    </div>
-
-    <div id="chatgptWeb-settings" class="section" style="display: none;">
-      <div class="section-title">ChatGPT Web Automation</div>
-      <p style="margin-bottom: 10px; color: var(--text-secondary);">This mode automates the process of pasting text into the ChatGPT web interface.</p>
-      <ul style="margin-left: 20px; color: var(--text-secondary); line-height: 1.6;">
-        <li>No API key required.</li>
-        <li>You must be logged into <a href="https://chatgpt.com" target="_blank" rel="noopener noreferrer" style="color: var(--accent-primary);">chatgpt.com</a> in your browser.</li>
-        <li>The extension will open a new tab or reuse an existing one.</li>
-      </ul>
-    </div>
-
-    <div id="geminiWeb-settings" class="section" style="display: none;">
-      <div class="section-title">Gemini Web Automation</div>
-      <p style="margin-bottom: 10px; color: var(--text-secondary);">This mode automates the process of pasting text into the Gemini web interface.</p>
-      <ul style="margin-left: 20px; color: var(--text-secondary); line-height: 1.6;">
-        <li>No API key required.</li>
-        <li>You must be logged into <a href="https://gemini.google.com" target="_blank" rel="noopener noreferrer" style="color: var(--accent-primary);">gemini.google.com</a> in your browser.</li>
-        <li>The extension will open a new tab or reuse an existing one.</li>
-      </ul>
-    </div>
-
-    <div class="section">
-      <button type="submit" class="primary-button">Save Settings</button>
-      <div class="button-container">
-        <button type="button" id="export-settings" class="secondary-button">Export Settings</button>
-        <button type="button" id="import-settings" class="secondary-button">Import Settings</button>
-        <button type="button" id="reset-settings" class="secondary-button">Reset Settings</button>
+  <main class="main">
+    <!-- ── General ─────────────────────────────────────── -->
+    <section class="section active" id="section-general">
+      <div class="page-header">
+        <h1>General Settings</h1>
+        <p>Configure extraction, retry behaviour, and sampling parameters.</p>
       </div>
-      <div id="import-container" style="display: none;">
-        <textarea id="import-text" class="import-textarea" placeholder="Paste your settings JSON here..."></textarea>
-        <div class="button-container" style="margin-top: 8px;">
-          <button type="button" id="import-submit" class="secondary-button">Import</button>
-          <button type="button" id="import-cancel" class="secondary-button">Cancel</button>
+      <div class="card">
+        <div class="card-title">🔌 Active API Provider</div>
+        <div class="field">
+          <label for="apiType">API Type</label>
+          <select id="apiType">
+            <option value="gemini">Gemini API (Direct)</option>
+
+            <option value="openRouter">OpenRouter</option>
+            <option value="openai">OpenAI Compatible</option>
+
+            <option value="chatgptWeb">ChatGPT Web (automation)</option>
+            <option value="geminiWeb">Gemini Web (automation)</option>
+          </select>
         </div>
       </div>
-      <input type="file" id="import-file" accept=".json" style="display: none;">
-    </div>
-  </form>
+      <div class="card">
+        <div class="card-title">✂️ Text Extraction</div>
+        <div class="form-grid">
+          <div class="field">
+            <label for="maxLength">Max Characters per Chunk</label>
+            <input type="number" id="maxLength" min="100" step="100" />
+          </div>
+          <div class="field">
+            <label for="retryCount">Retry Count per Chunk</label>
+            <input type="number" id="retryCount" min="1" max="10" />
+          </div>
+          <div class="field">
+            <label for="maxSessions">Max Saved Sessions</label>
+            <input type="number" id="maxSessions" min="1" max="20" />
+          </div>
+          <div class="field">
+            <label for="chunkFontSize">Chunk Text Size (rem)</label>
+            <input type="number" id="chunkFontSize" min="0.5" max="3" step="0.05" />
+          </div>
+          <div class="field">
+            <label for="chunkMaxWidth">Chunk Max Width (px, 0 = unlimited)</label>
+            <input type="number" id="chunkMaxWidth" min="0" step="50" placeholder="0" />
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">🎛️ Sampling Parameters</div>
+        <div class="form-grid">
+          <div class="field">
+            <label for="temperature">Temperature (0–2)</label>
+            <input type="number" id="temperature" min="0" max="2" step="0.05" />
+          </div>
+          <div class="field">
+            <label for="topK">Top K</label>
+            <input type="number" id="topK" min="1" />
+          </div>
+          <div class="field">
+            <label for="topP">Top P (0–1)</label>
+            <input type="number" id="topP" min="0" max="1" step="0.01" />
+          </div>
+        </div>
+      </div>
+    </section>
 
+    <!-- ── Prompt ──────────────────────────────────────── -->
+    <section class="section" id="section-prompt">
+      <div class="page-header">
+        <h1>Prompt Configuration</h1>
+        <p>Prefix and suffix are wrapped around each chunk before translation.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">✍️ Prefix</div>
+        <div class="field">
+          <textarea id="prefix" rows="8"></textarea>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">✍️ Suffix</div>
+        <div class="field">
+          <textarea id="suffix" rows="3"></textarea>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">👁️ Live Preview <span class="badge">Sample</span></div>
+        <div class="prompt-preview" id="promptPreview"></div>
+      </div>
+    </section>
+
+    <!-- ── Gemini ──────────────────────────────────────── -->
+    <section class="section" id="section-gemini">
+      <div class="page-header">
+        <h1>Gemini API</h1>
+        <p>Direct Google Generative Language API access.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">🔑 Credentials</div>
+        <div class="form-grid">
+          <div class="field" style="grid-column:1/-1">
+            <label for="geminiApiKey">API Key</label>
+            <div class="password-wrap">
+              <input type="password" id="geminiApiKey" placeholder="AIza..." />
+              <button class="toggle-pw" data-target="geminiApiKey" title="Show/hide"
+                aria-label="Show password">👁</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="geminiModelId">Model ID</label>
+            <input type="text" id="geminiModelId" placeholder="gemini-2.5-flash" />
+          </div>
+          <div class="field">
+            <label for="geminiMaxTokens">Max Output Tokens (optional)</label>
+            <input type="number" id="geminiMaxTokens" placeholder="leave blank for default" />
+          </div>
+          <div class="field">
+            <label for="geminiContextWindow">Context Window Hint (optional)</label>
+            <input type="number" id="geminiContextWindow" />
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ── OpenRouter ──────────────────────────────────── -->
+    <section class="section" id="section-openrouter">
+      <div class="page-header">
+        <h1>OpenRouter</h1>
+        <p>Route to 300+ models through OpenRouter's unified API.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">🔑 Credentials</div>
+        <div class="form-grid">
+          <div class="field" style="grid-column:1/-1">
+            <label for="openRouterApiKey">API Key</label>
+            <div class="password-wrap">
+              <input type="password" id="openRouterApiKey" placeholder="sk-or-..." />
+              <button class="toggle-pw" data-target="openRouterApiKey" title="Show/hide"
+                aria-label="Show password">👁</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="openRouterModelId">Model ID</label>
+            <input type="text" id="openRouterModelId" placeholder="deepseek/deepseek-chat-v3-0324" />
+          </div>
+          <div class="field">
+            <label for="openRouterMaxTokens">Max Tokens (optional)</label>
+            <input type="number" id="openRouterMaxTokens" />
+          </div>
+          <div class="field">
+            <label for="openRouterContextWindow">Context Window (optional)</label>
+            <input type="number" id="openRouterContextWindow" />
+          </div>
+          <div class="field" style="grid-column:1/-1">
+            <label for="openRouterProviderOrder">Provider Order (comma-separated slugs, optional)</label>
+            <input type="text" id="openRouterProviderOrder" placeholder="Deepseek,Azure" />
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">⚙️ Behaviour</div>
+        <div class="toggle-row">
+          <div class="toggle-row-info"><label id="openRouterAllowFallback-label">Allow Provider
+              Fallback</label><small>Try next provider if first
+              fails</small></div>
+          <label class="switch"><input type="checkbox" id="openRouterAllowFallback"
+              aria-labelledby="openRouterAllowFallback-label" /><span class="slider"></span></label>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ── OpenAI Compatible ───────────────────────────── -->
+    <section class="section" id="section-openai">
+      <div class="page-header">
+        <h1>OpenAI Compatible</h1>
+        <p>Works with OpenAI, local LM Studio, Ollama, and any OpenAI-compatible endpoint.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">🔑 Credentials</div>
+        <div class="form-grid">
+          <div class="field" style="grid-column:1/-1">
+            <label for="openaiApiKey">API Key</label>
+            <div class="password-wrap">
+              <input type="password" id="openaiApiKey" placeholder="sk-..." />
+              <button class="toggle-pw" data-target="openaiApiKey" title="Show/hide"
+                aria-label="Show password">👁</button>
+            </div>
+          </div>
+          <div class="field" style="grid-column:1/-1">
+            <label for="openaiBaseUrl">Base URL</label>
+            <input type="text" id="openaiBaseUrl" placeholder="https://api.openai.com/v1" />
+          </div>
+          <div class="field">
+            <label for="openaiModelId">Model ID</label>
+            <input type="text" id="openaiModelId" placeholder="gpt-4o-mini" />
+          </div>
+          <div class="field">
+            <label for="openaiMaxTokens">Max Tokens (optional)</label>
+            <input type="number" id="openaiMaxTokens" />
+          </div>
+          <div class="field">
+            <label for="openaiContextWindow">Context Window (optional)</label>
+            <input type="number" id="openaiContextWindow" />
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ── Web Automation ─────────────────────────────── -->
+    <section class="section" id="section-webautomation">
+      <div class="page-header">
+        <h1>Web Automation</h1>
+        <p>Paste text directly into ChatGPT or Gemini's web interface — no API key needed.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">ℹ️ How It Works</div>
+        <p style="font-size:0.875rem;color:var(--text-muted);line-height:1.7">
+          When the API Type is set to <strong>ChatGPT Web</strong> or <strong>Gemini Web</strong>, the extension opens
+          (or reuses) a tab for the respective service and pastes each chunk into the input box for you to send
+          manually.<br /><br />
+          <strong>Delays:</strong> ChatGPT waits 2 s after load · Gemini waits 3 s after load.<br />
+          <strong>Requirements:</strong> You must be logged in to the service in your browser.
+        </p>
+      </div>
+      <div class="card">
+        <div class="card-title">🔌 Select Web Provider</div>
+        <div class="field">
+          <label>Set your active provider on the General page:</label>
+          <select id="webApiTypeProxy">
+            <option value="chatgptWeb">ChatGPT Web (chatgpt.com)</option>
+            <option value="geminiWeb">Gemini Web (gemini.google.com)</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary" style="margin-top:12px" id="applyWebApiType">Apply Selection</button>
+      </div>
+    </section>
+
+    <!-- ── Import / Export ────────────────────────────── -->
+    <section class="section" id="section-data">
+      <div class="page-header">
+        <h1>Import / Export</h1>
+        <p>Backup or restore all your settings.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">📤 Export Settings</div>
+        <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:14px">Downloads a JSON backup of all settings
+          (excluding saved results).</p>
+        <button class="btn btn-secondary" id="exportButton">⬇️ Download settings.json</button>
+      </div>
+      <div class="card">
+        <div class="card-title">📥 Import Settings</div>
+        <div class="field">
+          <input type="file" id="importFile" accept=".json" class="visually-hidden"
+            aria-label="Select JSON settings file" />
+          <label for="importFile" class="btn btn-secondary" style="cursor:pointer">📂 Choose JSON file</label>
+          <small id="importFileName" style="color:var(--text-muted);font-size:0.8rem;margin-left:6px">No file
+            chosen</small>
+        </div>
+        <div class="field" style="margin-top:12px">
+          <label for="importTextarea">Or paste JSON here</label>
+          <textarea id="importTextarea" rows="5" placeholder='{"apiType":"gemini",...}'></textarea>
+        </div>
+        <div class="action-row" style="margin-top:12px">
+          <button class="btn btn-secondary" id="importButton">📥 Import from file</button>
+          <button class="btn btn-secondary" id="importFromTextButton">📋 Import from text</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">🗑️ Data Management</div>
+        <div class="action-row">
+          <button class="btn btn-danger" id="clearResultsButton">🗑️ Clear All Saved Results</button>
+          <button class="btn btn-danger" id="resetButton">♻️ Reset to Defaults</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Sticky Save Bar ─────────────────────────────── -->
+    <div
+      style="position:sticky;bottom:0;padding:16px 0 0;margin-top:8px;background:linear-gradient(transparent,var(--bg) 50%);display:flex;gap:10px">
+      <button class="btn btn-primary" id="saveButton">💾 Save All Settings</button>
+    </div>
+  </main>
+
+  <div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+  <script src="browser-polyfill.min.js"></script>
   <script src="options.js"></script>
 </body>
+
 </html>

@@ -1,679 +1,811 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Processing Text Chunks</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Webnovel Translator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet" />
     <style>
-      :root {
-        --bg-primary: #0a0a0a;
-        --bg-secondary: #1a1a1a;
-        --bg-tertiary: #2a2a2a;
-        --text-primary: #ffffff;
-        --text-secondary: #b3b3b3;
-        --text-muted: #808080;
-        --accent-primary: #6366f1;
-        --accent-secondary: #06b6d4;
-        --accent-success: #10b981;
-        --accent-warning: #f59e0b;
-        --accent-error: #ef4444;
-        --border-color: #374151;
-        --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-        --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-        --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-        --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
-      }
-
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
-
-      body {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        background: linear-gradient(135deg, var(--bg-primary) 0%, #111827 100%);
-        color: var(--text-primary);
-        padding-bottom: 120px;
-        min-height: 100vh;
-        line-height: 1.6;
-      }
-
-      body::before {
-        content: '';
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: 
-          radial-gradient(circle at 20% 80%, rgba(99, 102, 241, 0.1) 0%, transparent 50%),
-          radial-gradient(circle at 80% 20%, rgba(6, 182, 212, 0.1) 0%, transparent 50%),
-          radial-gradient(circle at 40% 40%, rgba(16, 185, 129, 0.05) 0%, transparent 50%);
-        pointer-events: none;
-        z-index: -1;
-      }
-
-      .container {
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: 0 20px;
-      }
-
-      h1 {
-        font-size: 2.5rem;
-        font-weight: 700;
-        background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        text-align: center;
-        margin: 40px 0;
-        letter-spacing: -0.02em;
-      }
-
-      .chunk {
-        background: rgba(42, 42, 42, 0.4);
-        backdrop-filter: blur(20px);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 16px;
-        padding: 32px;
-        margin-bottom: 24px;
-        box-shadow: var(--shadow-lg);
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      }
-
-      .chunk:hover {
-        transform: translateY(-2px);
-        box-shadow: var(--shadow-xl);
-        border-color: rgba(99, 102, 241, 0.3);
-      }
-
-      .chunk-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 20px;
-        padding-bottom: 16px;
-        border-bottom: 1px solid var(--border-color);
-      }
-
-      .chunk-title {
-        font-size: 1.25rem;
-        font-weight: 600;
-        color: var(--text-primary);
-      }
-
-      .chunk-number {
-        font-size: 0.875rem;
-        color: var(--text-muted);
-        background: rgba(99, 102, 241, 0.1);
-        padding: 4px 12px;
-        border-radius: 20px;
-      }
-
-      .markdown-content {
-        font-size: 1rem;
-        line-height: 1.75;
-        color: var(--text-secondary);
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-
-      /* Support for inline styled spans */
-      .markdown-content span {
-        display: inline;
-      }
-
-      .markdown-content span[style*="font-style:italic"] {
-        font-style: italic;
-      }
-
-      .markdown-content span[style*="font-size"] {
-        /* Allow inline font-size styles to be applied */
-      }
-
-      .markdown-content code,
-      .markdown-content pre {
-        font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace;
-        background-color: rgba(255, 255, 255, 0.05);
-        border-radius: 4px;
-        font-size: 0.875em;
-        max-width: 100%;
-        overflow-x: auto;
-      }
-
-      .markdown-content code {
-        padding: 2px 6px;
-        margin: 0 2px;
-        display: inline-block;
-      }
-
-      .markdown-content pre {
-        padding: 16px;
-        margin: 1em 0;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        overflow-x: auto;
-        white-space: pre;
-        word-wrap: normal;
-      }
-
-      .markdown-content pre code {
-        background: none;
-        border: none;
-        padding: 0;
-        margin: 0;
-        font-size: inherit;
-        display: inline;
-        overflow-x: visible;
-        white-space: pre;
-      }
-
-      .markdown-content pre > code {
-        display: block;
-        overflow-x: auto;
-      }
-
-      .markdown-content ul,
-      .markdown-content ol {
-        margin: 1em 0;
-        padding-left: 2em;
-      }
-
-      .markdown-content ul ul,
-      .markdown-content ul ol,
-      .markdown-content ol ul,
-      .markdown-content ol ol {
-        margin: 0.5em 0;
-      }
-
-      .markdown-content li {
-        margin: 0.25em 0;
-        position: relative;
-      }
-
-      .markdown-content ul > li::before {
-        content: '•';
-        color: var(--accent-primary);
-        font-weight: bold;
-        display: inline-block;
-        width: 1em;
-        margin-left: -1em;
-      }
-
-      .markdown-content ul ul > li::before {
-        content: '◦';
-        color: var(--accent-secondary);
-      }
-
-      .markdown-content ul ul ul > li::before {
-        content: '▪';
-        color: var(--text-muted);
-      }
-
-      .markdown-content ol {
-        counter-reset: item;
-      }
-
-      /* Ensure all content containers handle overflow properly */
-      .chunk, .card-body, .content-parts {
-        max-width: 100%;
-        overflow-x: hidden;
-      }
-
-      .markdown-content {
-        overflow-wrap: break-word;
-        overflow-x: auto;
-      }
-
-      .markdown-content ol > li {
-        counter-increment: item;
-      }
-
-      .markdown-content ol > li::before {
-        content: counter(item) ".";
-        color: var(--accent-primary);
-        font-weight: 600;
-        display: inline-block;
-        width: 1.5em;
-        margin-left: -1.5em;
-      }
-
-      .markdown-content ol ol {
-        counter-reset: subitem;
-      }
-
-      .markdown-content ol ol > li {
-        counter-increment: subitem;
-      }
-
-      .markdown-content ol ol > li::before {
-        content: counter(subitem, lower-alpha) ".";
-        color: var(--accent-secondary);
-      }
-
-      .markdown-content ol ol ol > li::before {
-        content: counter(subitem, lower-roman) ".";
-        color: var(--text-muted);
-      }
-
-      .button-container {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-        justify-content: center;
-        margin: 32px 0;
-      }
-
-      .button {
-        background: rgba(99, 102, 241, 0.9);
-        color: white;
-        border: none;
-        padding: 12px 24px;
-        border-radius: 12px;
-        font-size: 0.875rem;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        min-width: 140px;
-        flex: 1 1 auto;
-        max-width: 200px;
-        text-align: center;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      .button:hover {
-        background: rgba(99, 102, 241, 1);
-        transform: translateY(-1px);
-        box-shadow: var(--shadow-md);
-      }
-
-      .button:active {
-        transform: translateY(0);
-      }
-
-      .button.copied {
-        background: var(--accent-success);
-        animation: pulse 0.3s ease;
-      }
-
-      @keyframes pulse {
-        0% { transform: scale(1); }
-        50% { transform: scale(1.05); }
-        100% { transform: scale(1); }
-      }
-
-      .copy-button, .copy-raw-button {
-        background: rgba(16, 185, 129, 0.9);
-      }
-
-      .copy-button:hover, .copy-raw-button:hover {
-        background: rgba(16, 185, 129, 1);
-      }
-
-      .reprocess-button {
-        background: rgba(245, 158, 11, 0.9);
-      }
-
-      .reprocess-button:hover {
-        background: rgba(245, 158, 11, 1);
-      }
-
-      .terminate-button {
-        background: rgba(239, 68, 68, 0.9);
-      }
-
-      .terminate-button:hover {
-        background: rgba(239, 68, 68, 1);
-      }
-
-      .part-buttons {
-        display: flex;
-        gap: 8px;
-        margin: 20px 0;
-        flex-wrap: wrap;
-      }
-
-      .part-button {
-        background: rgba(42, 42, 42, 0.6);
-        color: var(--text-secondary);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        padding: 8px 16px;
-        border-radius: 8px;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        font-size: 0.875rem;
-        font-weight: 500;
-      }
-
-      .part-button.active {
-        background: rgba(99, 102, 241, 0.9);
-        color: white;
-        border-color: rgba(99, 102, 241, 0.5);
-      }
-
-      .part-button:hover:not(.active) {
-        background: rgba(42, 42, 42, 0.8);
-        border-color: rgba(255, 255, 255, 0.2);
-      }
-
-      .part-content {
-        display: none;
-      }
-
-      .part-content.active {
-        display: block;
-        animation: fadeIn 0.3s ease;
-      }
-
-      @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
-      }
-
-      #progress-container {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        background: rgba(26, 26, 26, 0.95);
-        backdrop-filter: blur(20px);
-        border-top: 1px solid rgba(255, 255, 255, 0.1);
-        padding: 24px;
-        z-index: 1000;
-        box-shadow: 0 -10px 25px rgba(0, 0, 0, 0.3);
-        transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out;
-      }
-
-      #progress-container.hidden {
-        transform: translateY(100%);
-        opacity: 0;
-        pointer-events: none;
-      }
-
-      #progress-container.visible {
-        transform: translateY(0);
-        opacity: 1;
-        pointer-events: auto;
-      }
-
-      .progress-wrapper {
-        display: flex;
-        align-items: center;
-        gap: 16px;
-        margin-bottom: 16px;
-      }
-
-      .progress-wrapper:last-child {
-        margin-bottom: 0;
-      }
-
-      .progress-icon {
-        width: 32px;
-        height: 32px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 14px;
-        font-weight: 600;
-        flex-shrink: 0;
-      }
-
-      .progress-icon.attempt {
-        background: linear-gradient(135deg, var(--accent-secondary), #0891b2);
-        color: white;
-      }
-
-      .progress-icon.overall {
-        background: linear-gradient(135deg, var(--accent-primary), #8b5cf6);
-        color: white;
-      }
-
-      .progress-info {
-        flex: 1;
-        min-width: 0;
-      }
-
-      .progress-label {
-        font-size: 0.875rem;
-        font-weight: 600;
-        color: var(--text-primary);
-        margin-bottom: 4px;
-      }
-
-      .progress-bar {
-        width: 100%;
-        height: 6px;
-        background: rgba(255, 255, 255, 0.1);
-        border-radius: 3px;
-        overflow: hidden;
-        position: relative;
-        box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
-      }
-
-      .progress-bar-fill {
-        height: 100%;
-        border-radius: 3px;
-        transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-        position: relative;
-        overflow: hidden;
-      }
-
-      .progress-bar-fill::after {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        bottom: 0;
-        right: 0;
-        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
-        animation: shimmer 1.5s infinite;
-      }
-
-      .progress-text {
-        font-size: 0.75rem;
-        font-weight: 500;
-        color: var(--text-secondary);
-        margin-top: 2px;
-      }
-
-      .feedback {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: rgba(16, 185, 129, 0.9);
-        color: white;
-        padding: 16px 24px;
-        border-radius: 12px;
-        font-weight: 500;
-        box-shadow: var(--shadow-xl);
-        z-index: 1001;
-        animation: slideIn 0.3s ease;
-      }
-
-      @keyframes slideIn {
-        from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
-        to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-      }
-
-      .alert {
-        padding: 16px 20px;
-        margin: 20px 0;
-        border-radius: 12px;
-        font-weight: 500;
-      }
-
-      .alert-warning {
-        background: rgba(245, 158, 11, 0.1);
-        color: #fbbf24;
-        border: 1px solid rgba(245, 158, 11, 0.3);
-      }
-
-      @media (max-width: 768px) {
-        h1 {
-          font-size: 2rem;
-          margin: 30px 0;
+        :root {
+            --bg: #0d0f17;
+            --surface: #13161f;
+            --surface2: #1a1e2e;
+            --border: rgba(255, 255, 255, 0.07);
+            --accent: #7c6af7;
+            --accent2: #5eead4;
+            --accent-glow: rgba(124, 106, 247, 0.2);
+            --text: #e2e8f0;
+            --text-muted: #64748b;
+            --danger: #f87171;
+            --success: #4ade80;
+            --warning: #fbbf24;
+            --radius: 14px;
+            --transition: 0.2s ease;
+            --chunk-font-size: 1rem;
+            --chunk-max-width: none;
         }
 
-        .chunk {
-          padding: 24px;
-          margin-bottom: 16px;
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        /* ── Header ──────────────────────────────────────────────────── */
+        .header {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(13, 15, 23, 0.92);
+            backdrop-filter: blur(14px);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .header-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .header-title img {
+            width: 28px;
+            height: 28px;
+        }
+
+        .header-title h1 {
+            font-size: 1rem;
+            font-weight: 700;
+        }
+
+        .header-title .session-id {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            font-family: monospace;
+        }
+
+        .header-spacer {
+            flex: 1;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        /* ── Status Banner ───────────────────────────────────────────── */
+        #statusBanner {
+            background: rgba(251, 191, 36, 0.12);
+            border: 1px solid rgba(251, 191, 36, 0.25);
+            color: var(--warning);
+            padding: 10px 24px;
+            font-size: 0.82rem;
+            display: none;
+        }
+
+        #statusBanner.error {
+            background: rgba(248, 113, 113, 0.12);
+            border-color: rgba(248, 113, 113, 0.25);
+            color: var(--danger);
+        }
+
+        #statusBanner.success {
+            background: rgba(74, 222, 128, 0.12);
+            border-color: rgba(74, 222, 128, 0.25);
+            color: var(--success);
+        }
+
+        #statusBanner.info {
+            background: rgba(124, 106, 247, 0.12);
+            border-color: rgba(124, 106, 247, 0.25);
+            color: var(--accent);
+        }
+
+        /* ── Overall progress bar ────────────────────────────────────── */
+        #progressSection {
+            padding: 12px 24px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .progress-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+
+        .progress-bar-track {
+            height: 6px;
+            background: var(--surface2);
+            border-radius: 99px;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            border-radius: 99px;
+            transition: width 0.4s ease;
+            background: linear-gradient(90deg, var(--accent), var(--accent2));
+        }
+
+        #attemptProgress {
+            margin-top: 8px;
+        }
+
+        /* ── Buttons ─────────────────────────────────────────────────── */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 7px 14px;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all var(--transition);
+            white-space: nowrap;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background: #6a58e5;
+            box-shadow: 0 0 16px var(--accent-glow);
+        }
+
+        .btn-secondary {
+            background: var(--surface2);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: #252a3d;
+        }
+
+        .btn-danger {
+            background: rgba(248, 113, 113, 0.15);
+            color: var(--danger);
+            border: 1px solid rgba(248, 113, 113, 0.3);
+        }
+
+        .btn-danger:hover {
+            background: rgba(248, 113, 113, 0.25);
+        }
+
+        .btn-sm {
+            padding: 5px 10px;
+            font-size: 0.75rem;
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        /* ── Chunks list ─────────────────────────────────────────────── */
+        #chunksWrapper {
+            display: flex;
+            justify-content: center;
+        }
+
+        #chunksContainer {
+            padding: 20px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            padding-bottom: 100px;
+            width: 100%;
+            max-width: var(--chunk-max-width);
+        }
+
+        /* ── Chunk card ──────────────────────────────────────────────── */
+        .chunk-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            transition: box-shadow var(--transition);
+        }
+
+        .chunk-card.done {
+            border-color: rgba(94, 234, 212, 0.15);
+        }
+
+        .chunk-card.error {
+            border-color: rgba(248, 113, 113, 0.2);
+        }
+
+        .chunk-card.processing {
+            border-color: rgba(124, 106, 247, 0.3);
+            box-shadow: 0 0 20px rgba(124, 106, 247, 0.1);
         }
 
         .chunk-header {
-          flex-direction: column;
-          align-items: flex-start;
-          gap: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 16px;
+            cursor: pointer;
+            border-bottom: 1px solid var(--border);
+            user-select: none;
+            border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
         }
 
-        .button-container {
-          flex-direction: row;
-          flex-wrap: wrap;
-          gap: 8px;
-          justify-content: flex-start;
-          overflow-x: auto;
-          padding-bottom: 8px;
-          -webkit-overflow-scrolling: touch;
+        .chunk-card.collapsed .chunk-header {
+            border-bottom: none;
+            border-radius: calc(var(--radius) - 1px);
         }
 
-        .button {
-          flex: 0 0 auto;
-          min-width: 120px;
-          max-width: none;
-          font-size: 0.8rem;
-          padding: 10px 16px;
+        .chunk-header:hover {
+            background: rgba(255, 255, 255, 0.02);
         }
 
-        .part-buttons {
-          justify-content: center;
+        .chunk-num {
+            width: 26px;
+            height: 26px;
+            border-radius: 6px;
+            background: var(--surface2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+            flex-shrink: 0;
         }
 
-        #progress-container {
-          padding: 16px;
+        .chunk-header-info {
+            flex: 1;
+            min-width: 0;
         }
 
-        .progress-wrapper {
-          gap: 12px;
+        .chunk-header-title {
+            font-size: 0.875rem;
+            font-weight: 600;
         }
 
-        .progress-icon {
-          width: 28px;
-          height: 28px;
-          font-size: 12px;
+        .chunk-header-preview {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-top: 1px;
         }
 
-        .progress-label {
-          font-size: 0.8rem;
-        }
-      }
-
-      @media (max-width: 480px) {
-        .container {
-          padding: 0 16px;
+        .chunk-status-badge {
+            font-size: 0.68rem;
+            font-weight: 600;
+            padding: 3px 9px;
+            border-radius: 20px;
+            flex-shrink: 0;
         }
 
-        .chunk {
-          padding: 20px;
-          margin-bottom: 12px;
+        .status-pending {
+            background: var(--surface2);
+            color: var(--text-muted);
         }
 
-        h1 {
-          font-size: 1.75rem;
-          margin: 24px 0;
+        .status-processing {
+            background: rgba(124, 106, 247, 0.2);
+            color: var(--accent);
         }
 
-        .button-container {
-          gap: 6px;
+        .status-done {
+            background: rgba(94, 234, 212, 0.15);
+            color: var(--accent2);
         }
 
-        .button {
-          min-width: 100px;
-          font-size: 0.75rem;
-          padding: 8px 12px;
+        .status-error {
+            background: rgba(248, 113, 113, 0.15);
+            color: var(--danger);
         }
-      /* Image fallback styles for .file extension */
-      .image-fallback {
-        margin: 16px auto;
-        max-width: 400px;
-      }
 
-      .image-fallback > div {
-        transition: all 0.3s ease;
-      }
+        .chunk-chevron {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            transition: transform var(--transition);
+        }
 
-      .image-fallback > div:hover {
-        background: rgba(255,255,255,0.15) !important;
-        transform: translateY(-1px);
-      }
+        .chunk-card.collapsed .chunk-chevron {
+            transform: rotate(-90deg);
+        }
 
-      .image-loading {
-        background: linear-gradient(90deg, rgba(255,255,255,0.1) 25%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.1) 75%);
-        background-size: 200% 100%;
-        animation: loading 1.5s infinite;
-        border-radius: 12px;
-        height: 200px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: var(--text-muted);
-      }
+        .chunk-body {
+            padding: 16px;
+        }
 
-      @keyframes loading {
-        0% { background-position: 200% 0; }
-        100% { background-position: -200% 0; }
-      }
-      }
-      /* Disable strikethrough - REMOVED, handled by marked config now */
+        .chunk-card.collapsed .chunk-body {
+            display: none;
+        }
+
+        /* ── Streaming bar inside chunk ─────────────────────────────── */
+        .chunk-micro-bar {
+            height: 2px;
+            background: var(--surface2);
+            border-radius: 99px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+
+        .chunk-micro-fill {
+            height: 100%;
+            border-radius: 99px;
+            width: 0;
+            transition: width 0.3s;
+            background: linear-gradient(90deg, var(--accent), var(--accent2));
+        }
+
+        .chunk-micro-bar.pulse .chunk-micro-fill {
+            animation: pulse-width 1s infinite alternate ease-in-out;
+        }
+
+        @keyframes pulse-width {
+            from {
+                width: 20%;
+            }
+
+            to {
+                width: 90%;
+            }
+        }
+
+        /* ── Part tabs ───────────────────────────────────────────────── */
+        .part-tabs {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+
+        .part-tab {
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: var(--surface2);
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            cursor: pointer;
+            transition: all var(--transition);
+        }
+
+        .part-tab.active {
+            background: var(--accent-glow);
+            color: var(--accent);
+            border-color: var(--accent);
+        }
+
+        /* ── Translated content ──────────────────────────────────────── */
+        .part-content {
+            display: none;
+        }
+
+        .part-content.active {
+            display: block;
+        }
+
+        .chunk-content-area {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 14px;
+            font-size: var(--chunk-font-size, 0.875rem);
+            line-height: 1.8;
+            color: var(--text);
+            overflow-wrap: break-word;
+            word-break: break-word;
+        }
+
+        .chunk-content-area p {
+            margin-bottom: 0.75em;
+        }
+
+        .chunk-content-area ul,
+        .chunk-content-area ol {
+            margin: 0.6em 0 0.9em 0;
+            padding-left: 0;
+            list-style: none;
+        }
+
+        /* ── Bullet list ── */
+        .chunk-content-area ul li {
+            position: relative;
+            padding: 5px 10px 5px 28px;
+            margin-bottom: 3px;
+            border-radius: 6px;
+            transition: background var(--transition);
+        }
+
+        .chunk-content-area ul li:hover {
+            background: rgba(124, 106, 247, 0.06);
+        }
+
+        .chunk-content-area ul li::before {
+            content: '';
+            position: absolute;
+            left: 10px;
+            top: calc(0.9em + 2px);
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            box-shadow: 0 0 6px var(--accent-glow);
+            flex-shrink: 0;
+        }
+
+        /* nested bullets */
+        .chunk-content-area ul ul li::before {
+            width: 4px;
+            height: 4px;
+            background: var(--text-muted);
+            box-shadow: none;
+        }
+
+        /* ── Numbered list ── */
+        .chunk-content-area ol {
+            counter-reset: list-counter;
+        }
+
+        .chunk-content-area ol li {
+            position: relative;
+            counter-increment: list-counter;
+            padding: 5px 10px 5px 36px;
+            margin-bottom: 3px;
+            border-radius: 6px;
+            transition: background var(--transition);
+        }
+
+        .chunk-content-area ol li:hover {
+            background: rgba(94, 234, 212, 0.05);
+        }
+
+        .chunk-content-area ol li::before {
+            content: counter(list-counter);
+            position: absolute;
+            left: 6px;
+            top: calc(0.9em);
+            width: 22px;
+            height: 22px;
+            border-radius: 6px;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            font-size: 0.65rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+
+        /* ── Headings ─────────────────────────────────────────────────── */
+        .chunk-content-area h1,
+        .chunk-content-area h2,
+        .chunk-content-area h3,
+        .chunk-content-area h4,
+        .chunk-content-area h5,
+        .chunk-content-area h6 {
+            font-weight: 700;
+            line-height: 1.3;
+            margin: 1.2em 0 0.5em;
+            background: linear-gradient(135deg, var(--text) 60%, var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .chunk-content-area h1 {
+            font-size: 1.3rem;
+        }
+
+        .chunk-content-area h2 {
+            font-size: 1.15rem;
+        }
+
+        .chunk-content-area h3 {
+            font-size: 1.05rem;
+        }
+
+        .chunk-content-area h4,
+        .chunk-content-area h5,
+        .chunk-content-area h6 {
+            font-size: 0.93rem;
+            letter-spacing: 0.02em;
+        }
+
+        /* ── Blockquote ───────────────────────────────────────────────── */
+        .chunk-content-area blockquote {
+            margin: 0.8em 0;
+            padding: 10px 16px;
+            border-left: 3px solid var(--accent);
+            background: rgba(124, 106, 247, 0.07);
+            border-radius: 0 8px 8px 0;
+            color: var(--text-muted);
+            font-style: italic;
+            font-size: 0.875rem;
+        }
+
+        .chunk-content-area blockquote p {
+            margin-bottom: 0;
+        }
+
+        /* ── Inline code ──────────────────────────────────────────────── */
+        .chunk-content-area code {
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            font-size: 0.8rem;
+            background: rgba(124, 106, 247, 0.12);
+            color: var(--accent2);
+            border: 1px solid rgba(124, 106, 247, 0.2);
+            border-radius: 5px;
+            padding: 1px 6px;
+        }
+
+        /* ── Code block ───────────────────────────────────────────────── */
+        .chunk-content-area pre {
+            margin: 0.8em 0;
+            padding: 14px 16px;
+            background: rgba(13, 15, 23, 0.9);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow-x: auto;
+            font-size: 0.8rem;
+            line-height: 1.7;
+        }
+
+        .chunk-content-area pre code {
+            background: none;
+            border: none;
+            padding: 0;
+            color: var(--text);
+            font-size: inherit;
+        }
+
+        /* ── Table ────────────────────────────────────────────────────── */
+        .chunk-content-area table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0.9em 0;
+            font-size: 0.83rem;
+            border-radius: 10px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        .chunk-content-area thead tr {
+            background: rgba(124, 106, 247, 0.15);
+        }
+
+        .chunk-content-area th {
+            padding: 9px 14px;
+            text-align: left;
+            font-weight: 700;
+            color: var(--accent);
+            border-bottom: 1px solid rgba(124, 106, 247, 0.25);
+        }
+
+        .chunk-content-area td {
+            padding: 8px 14px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text);
+        }
+
+        .chunk-content-area tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .chunk-content-area tbody tr:hover {
+            background: rgba(255, 255, 255, 0.025);
+        }
+
+        /* ── Horizontal rule ──────────────────────────────────────────── */
+        .chunk-content-area hr {
+            border: none;
+            height: 1px;
+            margin: 1.2em 0;
+            background: linear-gradient(90deg, transparent, var(--accent), var(--accent2), transparent);
+            opacity: 0.4;
+        }
+
+        /* ── Links ────────────────────────────────────────────────────── */
+        .chunk-content-area a {
+            color: var(--accent);
+            text-decoration: none;
+            border-bottom: 1px solid rgba(124, 106, 247, 0.3);
+            transition: color var(--transition), border-color var(--transition);
+        }
+
+        .chunk-content-area a:hover {
+            color: var(--accent2);
+            border-bottom-color: var(--accent2);
+        }
+
+        /* ── Strong & Em ──────────────────────────────────────────────── */
+        .chunk-content-area strong {
+            font-weight: 700;
+            color: #f1f5f9;
+        }
+
+        .chunk-content-area em {
+            color: var(--accent2);
+            font-style: italic;
+        }
+
+        .chunk-content-area img {
+            max-width: 100%;
+            border-radius: 6px;
+            margin: 8px 0;
+        }
+
+        .chunk-content-area.streaming {
+            border-color: var(--accent);
+        }
+
+        .chunk-error-box {
+            background: rgba(248, 113, 113, 0.08);
+            border: 1px solid rgba(248, 113, 113, 0.2);
+            color: var(--danger);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 0.82rem;
+            line-height: 1.6;
+        }
+
+        /* ── Chunk action buttons ────────────────────────────────────── */
+        .chunk-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+            flex-wrap: wrap;
+            position: sticky;
+            bottom: 0px;
+            background: var(--surface);
+            padding: 12px 16px;
+            margin: 12px -16px -16px -16px;
+            border-top: 1px solid var(--border);
+            border-radius: 0 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px);
+            z-index: 10;
+            box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        /* ── Toast ───────────────────────────────────────────────────── */
+        #toast {
+            position: fixed;
+            bottom: 90px;
+            left: 50%;
+            transform: translateX(-50%) translateY(10px);
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 10px 20px;
+            border-radius: 30px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            opacity: 0;
+            transition: opacity 0.25s, transform 0.25s;
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        #toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        #toast.error {
+            border-color: var(--danger);
+            color: var(--danger);
+        }
+
+        #toast.success {
+            border-color: var(--success);
+            color: var(--success);
+        }
+
+        /* ── Loading spinner ─────────────────────────────────────────── */
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        @media (max-width: 600px) {
+            .header {
+                padding: 10px 14px;
+            }
+
+            #chunksContainer {
+                padding: 12px 14px;
+                max-width: 100% !important;
+            }
+        }
     </style>
 </head>
+
 <body>
-    <div class="container">
-      <h1>Processing Text Chunks</h1>
-      <div class="button-container">
-        <!-- Individual chunk buttons will be added here dynamically -->
-      </div>
-      <div class="button-container" style="margin-top: 10px;">
-        <button id="reprocess-all-button" class="button" style="background: rgba(245, 158, 11, 0.9); min-width: 200px;">Reprocess All Chunks</button>
-        <button id="terminate-request-button" class="button terminate-button" style="min-width: 200px;">Terminate Request</button>
-      </div>
-      <div id="incomplete-session-warning" class="alert alert-warning" style="display: none; margin: 20px 0; padding: 15px; border-radius: 8px; background: rgba(245, 158, 11, 0.1); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">
-        <strong>Process was interrupted before finishing!</strong> Please reprocess all chunks, or clear all results from the settings.
-      </div>
-      <div id="chunks-container"></div>
-    </div>
-    <div id="progress-container">
-      <div class="progress-wrapper">
-        <div class="progress-icon attempt">⚡</div>
-        <div class="progress-info">
-          <div class="progress-label">Processing Attempt</div>
-          <div class="progress-bar">
-            <div id="attempt-progress-bar-fill" class="progress-bar-fill" style="width: 0%;">
+    <header class="header">
+        <div class="header-title">
+            <img src="48.png" alt="logo" />
+            <div>
+                <h1>Webnovel Translator</h1>
+                <div class="session-id" id="sessionId">Loading session...</div>
             </div>
-          </div>
-          <div class="progress-text" id="attempt-progress-text">Ready to start</div>
         </div>
-      </div>
-      <div class="progress-wrapper">
-        <div class="progress-icon overall">📊</div>
-        <div class="progress-info">
-          <div class="progress-label">Overall Progress</div>
-          <div class="progress-bar">
-            <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%;">
+        <div class="header-spacer"></div>
+        <div class="header-actions">
+            <button class="btn btn-secondary btn-sm" id="reprocessAllBtn">↩ Reprocess All</button>
+            <button class="btn btn-secondary btn-sm" id="copyAllBtn">📋 Copy All</button>
+            <button class="btn btn-secondary btn-sm" id="downloadAllBtn">⬇ Download .txt</button>
+            <button class="btn btn-danger btn-sm" id="terminateBtn" style="display:none">⏹ Terminate</button>
+        </div>
+    </header>
+
+    <div id="statusBanner"></div>
+
+    <div id="progressSection">
+        <div class="progress-labels">
+            <span id="overallLabel">Initializing...</span>
+            <span id="overallPercent">0%</span>
+        </div>
+        <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="overallBar" style="width:0%"></div>
+        </div>
+        <div id="attemptProgress" style="margin-top:8px;display:none">
+            <div class="progress-labels">
+                <span id="attemptLabel">Attempt</span>
+                <span id="attemptPercent"></span>
             </div>
-          </div>
-          <div class="progress-text" id="progress-text">0/0 chunks processed</div>
+            <div class="progress-bar-track" style="height:3px">
+                <div class="progress-bar-fill" id="attemptBar" style="width:0%;opacity:0.6"></div>
+            </div>
         </div>
-      </div>
     </div>
+
+    <div id="chunksWrapper">
+        <div id="chunksContainer"></div>
+    </div>
+
+    <div id="toast"></div>
+
+    <script src="browser-polyfill.min.js"></script>
     <script src="marked.min.js"></script>
-    <script src="chunks.js"></script>
     <script src="purify.min.js"></script>
+    <script src="chunks.js"></script>
 </body>
+
 </html>

@@ -1,6 +1,6 @@
-// gemini_injector.js
+// gemini_injector.js — MV3, polyfill loaded before this script
 (function () {
-    console.log("Gemini Injector loaded");
+    console.log("Gemini Injector loaded (v3)");
 
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.action === 'paste_chunk_gemini') {
@@ -28,7 +28,6 @@
             try {
                 inputElement.focus();
 
-                // Safe clear and select
                 const selection = window.getSelection();
                 const range = document.createRange();
                 range.selectNodeContents(inputElement);
@@ -38,7 +37,6 @@
                 let success = document.execCommand('insertText', false, text);
 
                 if (!success) {
-                    // Fallback
                     if (inputElement.disabled || (inputElement.readOnly && (inputElement instanceof HTMLInputElement || inputElement instanceof HTMLTextAreaElement))) {
                         console.error("Input element is disabled or read-only");
                         return false;
