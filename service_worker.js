@@ -143,7 +143,8 @@ async function updateSessionStorage(sessionId, sessionDataToStore) {
     const prev = sessionStorageLocks.get(sessionId) ?? Promise.resolve();
     let releaseLock;
     const next = new Promise(resolve => { releaseLock = resolve; });
-    sessionStorageLocks.set(sessionId, prev.then(() => next));
+    const chained = prev.then(() => next);
+    sessionStorageLocks.set(sessionId, chained);
     await prev;
     try {
         let { translationSessions = [] } = await browser.storage.local.get('translationSessions');
@@ -157,8 +158,8 @@ async function updateSessionStorage(sessionId, sessionDataToStore) {
     } finally {
         releaseLock();
         // Clean up the lock entry once it resolves to avoid unbounded growth
-        sessionStorageLocks.get(sessionId)?.then?.(() => {
-            if (sessionStorageLocks.get(sessionId) === next) sessionStorageLocks.delete(sessionId);
+        chained.then(() => {
+            if (sessionStorageLocks.get(sessionId) === chained) sessionStorageLocks.delete(sessionId);
         });
     }
 }
@@ -280,9 +281,9 @@ async function processChunkWithGemini(message, options) {
     const requestBody = {
         contents: [{ parts: [{ text: `${message.prefix}\n${message.chunk}\n${message.suffix}` }] }],
         generationConfig: {
-            temperature: parseFloat(options.temperature) || 0.9,
-            topK: parseInt(options.topK) || 40,
-            topP: parseFloat(options.topP) || 0.95,
+            temperature: (v => Number.isFinite(v) ? v : 0.9)(parseFloat(options.temperature)),
+            topK: (v => Number.isFinite(v) ? v : 40)(parseInt(options.topK)),
+            topP: (v => Number.isFinite(v) ? v : 0.95)(parseFloat(options.topP)),
             thinkingConfig: {
                 thinkingBudget: 0,
             }

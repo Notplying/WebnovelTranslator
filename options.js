@@ -93,7 +93,7 @@ function sanitizeNumericSettings(raw) {
     retryCount: clamp(parseInt2(raw.retryCount, DEFAULTS.retryCount), 0, 20),
     maxSessions: clamp(parseInt2(raw.maxSessions, DEFAULTS.maxSessions), 1, 50),
     chunkFontSize: clamp(parseNum(raw.chunkFontSize, 1.05), 0.1, 10),
-    chunkMaxWidth: clamp(parseInt2(raw.chunkMaxWidth, 0), 0, 10000),
+    chunkMaxWidth: clamp(parseInt2(raw.chunkMaxWidth, DEFAULTS.chunkMaxWidth), 0, 10000),
     temperature: clamp(parseNum(raw.temperature, 0.3), 0, 2),
     topK: clamp(parseInt2(raw.topK, 30), 1, 1000),
     topP: clamp(parseNum(raw.topP, 0.95), 0, 1),

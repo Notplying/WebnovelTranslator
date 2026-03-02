@@ -730,11 +730,13 @@
       <div class="card">
         <div class="card-title">⚙️ Behaviour</div>
         <div class="toggle-row">
-          <div class="toggle-row-info"><label>Allow Provider Fallback</label><small>Try next provider if first
+          <div class="toggle-row-info"><label id="openRouterAllowFallback-label">Allow Provider
+              Fallback</label><small>Try next provider if first
               fails</small></div>
-          <label class="switch"><input type="checkbox" id="openRouterAllowFallback" /><span
-              class="slider"></span></label>
+          <label class="switch"><input type="checkbox" id="openRouterAllowFallback"
+              aria-labelledby="openRouterAllowFallback-label" /><span class="slider"></span></label>
         </div>
+
       </div>
     </section>
 
@@ -851,7 +853,7 @@
     </div>
   </main>
 
-  <div id="toast"></div>
+  <div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   <script src="browser-polyfill.min.js"></script>
   <script src="options.js"></script>
 </body>
