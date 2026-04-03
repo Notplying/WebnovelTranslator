@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "AI Webnovel Translator",
-  "version": "3.0.7",
+  "name": "AI Webnovel Translator Experimental",
+  "version": "3.0.8",
   "browser_specific_settings": {
     "gecko": {
-      "id": "{5be2f011-6da9-4c6f-a1ac-4c628584e78d}",
+      "id": "{4c5a03a4-c0a1-4978-b840-9cbd90a43e18}",
       "strict_min_version": "109.0",
       "data_collection_permissions": {
         "required": [
@@ -19,6 +19,11 @@
     "storage",
     "tabs",
     "scripting"
+  ],
+  "optional_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://gemini.google.com/*"
   ],
   "action": {
     "default_title": "Translate Webnovel",
@@ -54,25 +59,5 @@
       ]
     }
   ],
-  "content_scripts": [
-    {
-      "matches": [
-        "https://chatgpt.com/*",
-        "https://chat.openai.com/*"
-      ],
-      "js": [
-        "browser-polyfill.min.js",
-        "chatgpt_injector.js"
-      ]
-    },
-    {
-      "matches": [
-        "https://gemini.google.com/*"
-      ],
-      "js": [
-        "browser-polyfill.min.js",
-        "gemini_injector.js"
-      ]
-    }
-  ]
+  "content_scripts": []
 }

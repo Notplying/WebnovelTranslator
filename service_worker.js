@@ -225,55 +225,128 @@ async function processChunk(message) {
     throw new Error('Invalid API type selected');
 }
 
+/**
+ * Finds the longest substring that is both a suffix of oldStr and a prefix of newStr.
+ * Used to trim duplicate overlap at stream boundaries when a retry run continues
+ * from where a previous run left off.
+ *
+ * @param {string} oldStr - The previously accumulated content (ending portion checked).
+ * @param {string} newStr - The new streaming content (starting portion checked).
+ * @returns {{ suffix: string, prefixLength: number }} overlap substring and chars to skip in newStr
+ */
+function longestCommonSuffixPrefix(oldStr, newStr) {
+    const maxLen = Math.min(oldStr.length, newStr.length);
+    let overlapLen = 0;
+    for (let i = 1; i <= maxLen; i++) {
+        const suffix = oldStr.slice(-i);
+        if (newStr.startsWith(suffix)) overlapLen = i;
+    }
+    const suffix = overlapLen > 0 ? oldStr.slice(-overlapLen) : '';
+    return { suffix, prefixLength: overlapLen };
+}
+
+/**
+ * Wraps ReadableStreamDefaultReader.read() with retry logic for transient network errors.
+ *
+ * @param {ReadableStreamDefaultReader} reader
+ * @param {number} maxErrors - Maximum consecutive errors before throwing (default 3)
+ * @param {number} baseDelayMs - Initial delay between retries in ms (default 1000)
+ * @returns {Promise<{done: boolean, value: Uint8Array|null}>}
+ */
+async function readWithRetry(reader, maxErrors = 3, baseDelayMs = 1000) {
+    let errors = 0;
+    let delay = baseDelayMs;
+    while (true) {
+        try {
+            return await reader.read();
+        } catch (e) {
+            // Do not retry on abort/cancel — these are intentional terminations
+            if (e.name === 'AbortError' || (e.name === 'TypeError' && e.message.includes('cancelled'))) {
+                throw e;
+            }
+            // TypeError with "error in input stream" or network-level failures are retryable
+            if (e.name === 'TypeError' || e.message.includes('error in input stream') || e.message.includes('network')) {
+                errors++;
+                if (errors > maxErrors) throw e;
+                console.warn(`[Stream read] Attempt ${errors} failed: ${e.message}. Retrying in ${delay}ms...`);
+                await new Promise(r => setTimeout(r, delay));
+                delay *= 2; // exponential backoff: 1s → 2s → 4s
+                continue;
+            }
+            // Any other error is non-retryable
+            throw e;
+        }
+    }
+}
+
 // ─── Streaming helper (shared SSE logic for OpenAI-compatible APIs) ───────────
-async function processSSEStream(reader, sessionId, message, updateChunksPageFn) {
+async function processSSEStream(reader, sessionId, message, updateChunksPageFn, initialSnapshot = null) {
     const decoder = new TextDecoder();
     let buffer = '';
     let fullContent = '';
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+    let accumulatedSnapshot = initialSnapshot; // accept snapshot from caller for LCS dedup
+    try {
         while (true) {
-            const lineEnd = buffer.indexOf('\n');
-            if (lineEnd === -1) break;
-            const line = buffer.slice(0, lineEnd).trim();
-            buffer = buffer.slice(lineEnd + 1);
-            if (!line.startsWith('data: ')) continue;
-            const data = line.slice(6);
-            if (data === '[DONE]') break;
-            try {
-                const parsed = JSON.parse(data);
-                const content = parsed.choices?.[0]?.delta?.content;
-                if (content) {
-                    fullContent += content;
-                    const state = getStreamState(sessionId);
-                    const now = Date.now();
-                    if (now - state.lastUpdateTime >= UPDATE_DELAY) {
-                        clearTimeout(state.debounceTimeout);
-                        updateChunksPageFn(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk });
-                        state.lastUpdateTime = now;
-                    } else {
-                        clearTimeout(state.debounceTimeout);
-                        state.debounceTimeout = setTimeout(() => {
+            const { done, value } = await readWithRetry(reader);
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            while (true) {
+                const lineEnd = buffer.indexOf('\n');
+                if (lineEnd === -1) break;
+                const line = buffer.slice(0, lineEnd).trim();
+                buffer = buffer.slice(lineEnd + 1);
+                if (!line.startsWith('data: ')) continue;
+                const data = line.slice(6);
+                if (data === '[DONE]') break;
+                try {
+                    const parsed = JSON.parse(data);
+                    const content = parsed.choices?.[0]?.delta?.content;
+                    if (content) {
+                        // Trim duplicate overlap at the boundary between an original run and a retry run
+                        if (accumulatedSnapshot !== null) {
+                            const { suffix, prefixLength } = longestCommonSuffixPrefix(accumulatedSnapshot, content);
+                            if (prefixLength > 0) {
+                                console.debug(`[SSE stream] Trimmed ${prefixLength}-char overlap at resume boundary: "${suffix}"`);
+                                content = content.slice(prefixLength);
+                            }
+                            accumulatedSnapshot = null;
+                        }
+                        if (content) fullContent += content;
+                        const state = getStreamState(sessionId);
+                        const now = Date.now();
+                        if (now - state.lastUpdateTime >= UPDATE_DELAY) {
+                            clearTimeout(state.debounceTimeout);
                             updateChunksPageFn(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk });
-                            state.lastUpdateTime = Date.now();
-                        }, UPDATE_DELAY);
+                            state.lastUpdateTime = now;
+                        } else {
+                            clearTimeout(state.debounceTimeout);
+                            state.debounceTimeout = setTimeout(() => {
+                                updateChunksPageFn(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk });
+                                state.lastUpdateTime = Date.now();
+                            }, UPDATE_DELAY);
+                        }
                     }
+                } catch (e) {
+                    // Partial SSE chunks are expected during streaming and are non-fatal.
+                    console.debug('[SSE parse] Ignoring benign parse error:', e.message, '| raw data:', data);
                 }
-            } catch (e) {
-                // Partial SSE chunks are expected during streaming and are non-fatal.
-                console.debug('[SSE parse] Ignoring benign parse error:', e.message, '| raw data:', data);
             }
         }
+    } catch (e) {
+        // Capture accumulated content for LCS deduplication on retry
+        if (e.name === 'TypeError' || e.message.includes('input stream') || e.message.includes('network')) {
+            accumulatedSnapshot = fullContent;
+        }
+        return { content: fullContent, snapshot: accumulatedSnapshot };
     }
-    return fullContent;
+    return { content: fullContent, snapshot: null };
 }
 
 // ─── Gemini API ───────────────────────────────────────────────────────────────
 async function processChunkWithGemini(message, options) {
     let tabCloseListener;
     let fullContent = '';
+    let accumulatedSnapshot = null; // captures fullContent state at the last successful chunk; used for LCS dedup on retry
     const controller = new AbortController();
     const sessionId = message.sessionId;
     sessionControllers[sessionId] = controller;
@@ -322,7 +395,7 @@ async function processChunkWithGemini(message, options) {
             let buffer = '';
             try {
                 while (true) {
-                    const { done, value } = await reader.read();
+                    const { done, value } = await readWithRetry(reader);
                     if (done) break;
                     buffer += decoder.decode(value, { stream: true });
                     while (true) {
@@ -338,7 +411,16 @@ async function processChunkWithGemini(message, options) {
                             const parsed = JSON.parse(line);
                             const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
                             if (text) {
-                                fullContent += text;
+                                // Trim duplicate overlap at the boundary with any previous stream run
+                                if (accumulatedSnapshot !== null) {
+                                    const { suffix, prefixLength } = longestCommonSuffixPrefix(accumulatedSnapshot, text);
+                                    if (prefixLength > 0) {
+                                        console.debug(`[Gemini stream] Trimmed ${prefixLength}-char overlap at resume boundary: "${suffix}"`);
+                                        text = text.slice(prefixLength);
+                                    }
+                                    accumulatedSnapshot = null; // only deduplicate once at the boundary
+                                }
+                                if (text) fullContent += text;
                                 const state = getStreamState(sessionId);
                                 const now = Date.now();
                                 if (now - state.lastUpdateTime >= UPDATE_DELAY) {
@@ -367,6 +449,10 @@ async function processChunkWithGemini(message, options) {
             return { result: fullContent, streaming: true, complete: true };
         }
     } catch (error) {
+        // Capture accumulated content for LCS deduplication on retry
+        if (error.name === 'TypeError' || error.message.includes('input stream') || error.message.includes('network')) {
+            accumulatedSnapshot = fullContent;
+        }
         if (tabCloseListener) browser.tabs.onRemoved.removeListener(tabCloseListener);
         delete sessionControllers[sessionId];
         updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk, isComplete: true, error: true });
@@ -380,6 +466,7 @@ async function processChunkWithGemini(message, options) {
 async function processChunkWithOpenAICompatible(message, options, apiUrl, headers, requestBody, providerName) {
     let tabCloseListener;
     let fullContent = '';
+    let accumulatedSnapshot = null; // persists across chunk-level retries; used for LCS dedup if stream resumes
     const controller = new AbortController();
     const sessionId = message.sessionId;
     sessionControllers[sessionId] = controller;
@@ -395,7 +482,9 @@ async function processChunkWithOpenAICompatible(message, options, apiUrl, header
         const reader = response.body?.getReader();
         if (!reader) throw new Error('Response body not readable');
         try {
-            fullContent = await processSSEStream(reader, sessionId, message, updateChunksPage);
+            const streamResult = await processSSEStream(reader, sessionId, message, updateChunksPage, accumulatedSnapshot);
+            fullContent = streamResult.content;
+            accumulatedSnapshot = streamResult.snapshot;
         } finally {
             reader.cancel().catch(() => { });
             clearStreamState(sessionId);
@@ -406,6 +495,10 @@ async function processChunkWithOpenAICompatible(message, options, apiUrl, header
         await new Promise(r => setTimeout(r, 100));
         return { result: fullContent, streaming: true, complete: true };
     } catch (error) {
+        // Capture accumulated content for LCS deduplication on retry
+        if (error.name === 'TypeError' || error.message.includes('input stream') || error.message.includes('network')) {
+            accumulatedSnapshot = fullContent;
+        }
         if (tabCloseListener) browser.tabs.onRemoved.removeListener(tabCloseListener);
         delete sessionControllers[sessionId];
         updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent || '', rawContent: message.chunk, isComplete: true, error: true });
@@ -459,6 +552,58 @@ function urlPatternToRegExp(pattern) {
     return new RegExp('^' + escaped.join('.*') + '$');
 }
 
+// ─── Web Permission Management ────────────────────────────────────────────────
+const WEB_PERMISSIONS = {
+    chatgptWeb: ['https://chatgpt.com/*', 'https://chat.openai.com/*'],
+    geminiWeb: ['https://gemini.google.com/*']
+};
+
+async function hasStoredWebPermission(provider) {
+    const { webPermissions = {} } = await browser.storage.local.get('webPermissions');
+    return webPermissions[provider] === true;
+}
+
+async function setStoredWebPermission(provider, granted) {
+    const { webPermissions = {} } = await browser.storage.local.get('webPermissions');
+    webPermissions[provider] = granted;
+    await browser.storage.local.set({ webPermissions });
+}
+
+async function ensureWebPermission(provider) {
+    if (!WEB_PERMISSIONS[provider]) throw new Error(`Unknown web provider: ${provider}`);
+    // Check if already granted (contains checks active permissions)
+    const granted = await browser.permissions.contains({ origins: WEB_PERMISSIONS[provider] });
+    if (granted) {
+        await setStoredWebPermission(provider, true);
+        return true;
+    }
+    // Check stored state (might have been granted in a previous session)
+    const stored = await hasStoredWebPermission(provider);
+    if (stored) return true;
+    // Need to request
+    return false; // Caller should trigger the actual request
+}
+
+async function requestAndStoreWebPermission(provider) {
+    const result = await browser.permissions.request({ origins: WEB_PERMISSIONS[provider] });
+    await setStoredWebPermission(provider, result);
+    return result;
+}
+
+async function injectWebAutomationScript(tabId, scriptType) {
+    if (scriptType === 'chatgptWeb') {
+        await browser.scripting.executeScript({
+            target: { tabId },
+            files: ['browser-polyfill.min.js', 'chatgpt_injector.js']
+        });
+    } else if (scriptType === 'geminiWeb') {
+        await browser.scripting.executeScript({
+            target: { tabId },
+            files: ['browser-polyfill.min.js', 'gemini_injector.js']
+        });
+    }
+}
+
 // ─── Web Automation ───────────────────────────────────────────────────────────
 async function getOrCreateTab(url, urlPattern, sessionId) {
     if (sessionTabIds[sessionId]) {
@@ -487,14 +632,24 @@ function waitForTabLoad(tabId, timeoutMs, signal) {
 }
 
 async function processChunkWithChatGPTWeb(message, options) {
+    // Check permission first
+    const hasPermission = await ensureWebPermission('chatgptWeb');
+    if (!hasPermission) {
+        return { error: 'Permission required: Please enable ChatGPT Web in settings to grant access.' };
+    }
+
     const fullContent = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
     const controller = new AbortController();
     const sessionId = message.sessionId;
     sessionControllers[sessionId] = controller;
     try {
-        const { tab } = await getOrCreateTab('https://chatgpt.com/', 'https://chatgpt.com/*', sessionId);
+        const { tab, reused } = await getOrCreateTab('https://chatgpt.com/', 'https://chatgpt.com/*', sessionId);
         await waitForTabLoad(tab.id, WebAutomationConfig.TAB_LOAD_TIMEOUT_MS, controller.signal);
         if (controller.signal.aborted) throw new Error('Aborted');
+
+        // Inject script if tab was created (not reused) or if we need to ensure it's injected
+        await injectWebAutomationScript(tab.id, 'chatgptWeb');
+
         await new Promise((resolve, reject) => { const t = setTimeout(resolve, WebAutomationConfig.DELAY_CHATGPT_MS); controller.signal.addEventListener('abort', () => { clearTimeout(t); reject(new Error('Aborted')); }, { once: true }); });
         const result = await Promise.race([
             browser.tabs.sendMessage(tab.id, { action: 'paste_chunk_v2', text: fullContent }),
@@ -511,6 +666,12 @@ async function processChunkWithChatGPTWeb(message, options) {
 }
 
 async function processChunkWithGeminiWeb(message, options) {
+    // Check permission first
+    const hasPermission = await ensureWebPermission('geminiWeb');
+    if (!hasPermission) {
+        return { error: 'Permission required: Please enable Gemini Web in settings to grant access.' };
+    }
+
     const fullContent = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
     const controller = new AbortController();
     const sessionId = message.sessionId;
@@ -519,6 +680,10 @@ async function processChunkWithGeminiWeb(message, options) {
         const { tab } = await getOrCreateTab('https://gemini.google.com/', 'https://gemini.google.com/*', sessionId);
         await waitForTabLoad(tab.id, WebAutomationConfig.TAB_LOAD_TIMEOUT_MS, controller.signal);
         if (controller.signal.aborted) throw new Error('Aborted');
+
+        // Inject script dynamically
+        await injectWebAutomationScript(tab.id, 'geminiWeb');
+
         await new Promise((resolve, reject) => { const t = setTimeout(resolve, WebAutomationConfig.DELAY_GEMINI_MS); controller.signal.addEventListener('abort', () => { clearTimeout(t); reject(new Error('Aborted')); }, { once: true }); });
         const result = await Promise.race([
             browser.tabs.sendMessage(tab.id, { action: 'paste_chunk_gemini', text: fullContent }),

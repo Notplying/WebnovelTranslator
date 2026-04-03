@@ -107,6 +107,12 @@ function getField(id, isCheckbox = false) {
   return isCheckbox ? el.checked : el.value;
 }
 
+// Web permission origins for optional permissions
+const WEB_PERMISSIONS = {
+    chatgptWeb: ['https://chatgpt.com/*', 'https://chat.openai.com/*'],
+    geminiWeb: ['https://gemini.google.com/*']
+};
+
 async function saveSettings() {
   const raw = {
     apiType: getField('apiType'),
@@ -145,6 +151,28 @@ async function saveSettings() {
   };
   await browser.storage.local.set(sanitizeNumericSettings(raw));
   showToast('✅ Settings saved!', 'success');
+
+  // Request permission if switching to a web automation API type
+  const apiType = raw.apiType;
+  if (apiType === 'chatgptWeb' || apiType === 'geminiWeb') {
+    const origins = WEB_PERMISSIONS[apiType];
+    if (origins) {
+      try {
+        const granted = await browser.permissions.request({ origins });
+        if (granted) {
+          // Store permission grant for future sessions
+          const { webPermissions = {} } = await browser.storage.local.get('webPermissions');
+          webPermissions[apiType] = true;
+          await browser.storage.local.set({ webPermissions });
+          showToast(`✅ ${apiType === 'chatgptWeb' ? 'ChatGPT' : 'Gemini'} Web access granted!`, 'success');
+        } else {
+          showToast(`⚠️ Permission denied. ${apiType === 'chatgptWeb' ? 'ChatGPT' : 'Gemini'} Web will not function.`, 'error');
+        }
+      } catch (e) {
+        console.error('Permission request failed:', e);
+      }
+    }
+  }
 }
 
 // ─── Prompt preview ───────────────────────────────────────────────────────────
