@@ -40,6 +40,17 @@ function clearStreamState(sessionId) {
 let sessionTabIds = {};
 let sessionControllers = {};
 
+// Periodic cleanup of stale sessionTabIds entries — removes entries for tabs that no longer exist
+setInterval(async () => {
+    const tabs = await browser.tabs.query({}).catch(() => []);
+    const validTabIds = new Set(tabs.map(t => t.id));
+    for (const [sessionId, tabId] of Object.entries(sessionTabIds)) {
+        if (!validTabIds.has(tabId)) {
+            delete sessionTabIds[sessionId];
+        }
+    }
+}, 15 * 60 * 1000); // every 15 minutes
+
 // ─── Toolbar click → inject content script ───────────────────────────────────
 browser.action.onClicked.addListener(function (tab) {
     browser.scripting.executeScript({
@@ -85,7 +96,10 @@ browser.runtime.onInstalled.addListener(function (details) {
 // ─── Message Router ───────────────────────────────────────────────────────────
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.sessionId && sender?.tab?.id) {
-        sessionTabIds[message.sessionId] = sender.tab.id;
+        // Validate before storing in global state
+        if (typeof message.sessionId === 'string' && message.sessionId.length > 0 && Number.isInteger(sender.tab.id)) {
+            sessionTabIds[message.sessionId] = sender.tab.id;
+        }
     }
 
     if (message.action === 'processChunk') {
@@ -97,7 +111,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'openChunksPage') {
         if (message.chunks) {
             const payload = { chunks: message.chunks, prefix: message.prefix, suffix: message.suffix, retryCount: message.retryCount };
-            browser.storage.local.remove('lastChunksData').then(() => openChunksPage(payload));
+            openChunksPage(payload);
         } else {
             openChunksPage(null);
         }
@@ -183,7 +197,9 @@ async function openChunksPage(payload) {
     browser.tabs.onUpdated.addListener(function listener(tabId, info) {
         if (tabId === tab.id && info.status === 'complete') {
             browser.tabs.onUpdated.removeListener(listener);
-            browser.tabs.sendMessage(tab.id, { action: 'initializeChunksPage' });
+            browser.tabs.sendMessage(tab.id, { action: 'initializeChunksPage' }).catch(err => {
+                console.error('Failed to initialize chunks page:', err);
+            });
         }
     });
 }
@@ -192,9 +208,9 @@ function updateChunksPage(sessionId, data) {
     const tabId = sessionTabIds[sessionId];
     if (tabId != null) {
         browser.tabs.sendMessage(tabId, data).catch(error => {
-            if (error.message && error.message.includes('Could not establish connection')) {
-                delete sessionTabIds[sessionId];
-            }
+            // Clean up stale tab mapping for any error (not just connection errors)
+            delete sessionTabIds[sessionId];
+            console.warn('updateChunksPage: tab message failed:', error.message || error);
         });
     }
 }
@@ -610,7 +626,15 @@ async function getOrCreateTab(url, urlPattern, sessionId) {
         try {
             const tab = await browser.tabs.get(sessionTabIds[sessionId]);
             if (tab.url && urlPatternToRegExp(urlPattern).test(tab.url)) return { tab, reused: true };
-        } catch (e) { delete sessionTabIds[sessionId]; }
+        } catch (e) {
+            // Only swallow "tab not found" — rethrow unexpected errors
+            if (e.message && e.message.includes('No tab with id')) {
+                delete sessionTabIds[sessionId];
+            } else {
+                console.error('Unexpected error getting tab:', e);
+                throw e;
+            }
+        }
     }
     const tabs = await browser.tabs.query({ url: urlPattern });
     if (tabs.length > 0) { sessionTabIds[sessionId] = tabs[0].id; await browser.tabs.update(tabs[0].id, { active: true }); return { tab: tabs[0], reused: true }; }
@@ -620,14 +644,29 @@ async function getOrCreateTab(url, urlPattern, sessionId) {
 function waitForTabLoad(tabId, timeoutMs, signal) {
     return new Promise((resolve, reject) => {
         if (signal?.aborted) return reject(new Error('Aborted'));
+        let settled = false;
+        const settle = (fn, val) => { if (!settled) { settled = true; fn(val); } };
+        let cleanup = null;
+        const timer = setTimeout(() => { if (cleanup) cleanup(); settle(reject, new Error('Tab load timeout')); }, timeoutMs);
+        const listener = (tid, changeInfo) => {
+            if (tid === tabId && changeInfo.status === 'complete') {
+                clearTimeout(timer);
+                if (cleanup) cleanup();
+                settle(resolve);
+            }
+        };
+        cleanup = () => {
+            browser.tabs.onUpdated.removeListener(listener);
+            if (signal) signal.removeEventListener('abort', abortHandler);
+        };
+        const abortHandler = () => { clearTimeout(timer); if (cleanup) cleanup(); settle(reject, new Error('Aborted')); };
+        if (signal) signal.addEventListener('abort', abortHandler);
+        browser.tabs.onUpdated.addListener(listener);
+        // Check if tab is already loaded
         browser.tabs.get(tabId).then(tab => {
-            if (signal?.aborted) return reject(new Error('Aborted'));
-            if (tab.status === 'complete') return resolve();
-            const timer = setTimeout(() => { browser.tabs.onUpdated.removeListener(listener); reject(new Error('Tab load timeout')); }, timeoutMs);
-            const listener = (tid, changeInfo) => { if (tid === tabId && changeInfo.status === 'complete') { browser.tabs.onUpdated.removeListener(listener); clearTimeout(timer); resolve(); } };
-            if (signal) signal.addEventListener('abort', () => { browser.tabs.onUpdated.removeListener(listener); clearTimeout(timer); reject(new Error('Aborted')); });
-            browser.tabs.onUpdated.addListener(listener);
-        }).catch(reject);
+            if (signal?.aborted) { clearTimeout(timer); if (cleanup) cleanup(); return settle(reject, new Error('Aborted')); }
+            if (tab.status === 'complete') { clearTimeout(timer); if (cleanup) cleanup(); settle(resolve); }
+        }).catch(e => { clearTimeout(timer); if (cleanup) cleanup(); settle(reject, e); });
     });
 }
 

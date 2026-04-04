@@ -3,21 +3,22 @@
 
 // ─── Marked config ────────────────────────────────────────────────────────────
 if (typeof marked !== 'undefined') {
-    marked.use({ breaks: true, gfm: true });
-    // Disable strikethrough
-    const origLexer = marked.Lexer;
-    marked.setOptions({ pedantic: false, mangle: false, headerIds: false });
     // Disable hyperlinks — render as plaintext [text](url)
     // Escape HTML tags to prevent custom tags like <example> from being stripped
     marked.use({
-        useNewRenderer: true,
+        breaks: true,
+        gfm: true,
+        pedantic: false,
+        mangle: false,
+        headerIds: false,
         renderer: {
-            link(token) { return token.raw; },
+            link(token) { return token.raw ?? ''; },
             html(token) {
-                if (token.raw.trim().toLowerCase().startsWith('<img')) {
-                    return token.raw; // allow image tags to render
+                const raw = token.raw ?? token.text ?? String(token);
+                if (raw.trim().toLowerCase().startsWith('<img')) {
+                    return raw; // allow image tags to render
                 }
-                return escapeHtml(token.raw);
+                return escapeHtml(raw);
             }
         }
     });
@@ -48,6 +49,19 @@ let processedResults = [];   // { content, rawContent } per index
 let streamingIndex = -1;
 let reprocessingState = { isActive: false, targetIndex: -1 };
 let _terminated = false;
+
+// ─── Image Blob Cache cleanup ─────────────────────────────────────────────────
+function cleanupImageBlobCache() {
+    for (const blobUrl of imageBlobCache.values()) {
+        URL.revokeObjectURL(blobUrl);
+    }
+    imageBlobCache.clear();
+    // Abort any in-flight image fetches
+    for (const controller of imageAbortControllers.values()) {
+        controller.abort();
+    }
+    imageAbortControllers.clear();
+}
 
 // ─── URL param ────────────────────────────────────────────────────────────────
 function getSessionId() {
@@ -156,6 +170,15 @@ function setMicroBar(index, mode) {
 
 // ─── Render content into a chunk ──────────────────────────────────────────────
 const imageBlobCache = new Map();
+const imageAbortControllers = new Map(); // src → AbortController
+
+// Escape a string for use as a CSS attribute selector value
+function escapeCssAttr(str) {
+    return str.replace(/[\\"'`\n\r\t\f]/g, c => ({
+        '\\': '\\\\', '"': '\\"', "'": "\\'", '\n': '\\A', '\r': '\\D',
+        '\t': '\\9', '\f': '\\C'
+    })[c]);
+}
 
 function renderChunk(index, text, isStreaming = false) {
     const contentEl = document.getElementById(`chunk-content-${index}`);
@@ -204,6 +227,15 @@ function handleImages(el) {
 
         img.style.maxWidth = '100%';
 
+        // Block dangerous URL schemes — prevents javascript: XSS and similar
+        if (/^javascript:/i.test(src) || /^data:(?!image\/(png|jpeg|gif|webp))/i.test(src)) {
+            const fallback = document.createElement('div');
+            fallback.style.cssText = 'background:rgba(255,255,255,0.05);border:1px dashed rgba(255,255,255,0.1);border-radius:6px;padding:12px;font-size:0.75rem;color:var(--text-muted);text-align:center';
+            fallback.textContent = '📷 Blocked unsafe image URL';
+            img.replaceWith(fallback);
+            return;
+        }
+
         if (src.match(/\.file(\?.*)?$/i)) {
             img.dataset.originalSrc = src;
 
@@ -214,23 +246,39 @@ function handleImages(el) {
                 img.src = loadingSvg;
                 imageBlobCache.set(src, loadingSvg);
 
-                fetch(src)
+                // Abort in-flight fetch if a new fetch for the same src starts (avoid duplicate fetches)
+                if (imageAbortControllers.has(src)) {
+                    imageAbortControllers.get(src).abort();
+                }
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 30000); // 30s timeout
+                imageAbortControllers.set(src, controller);
+
+                fetch(src, { signal: controller.signal })
                     .then(res => {
+                        clearTimeout(timeout);
                         if (!res.ok) throw new Error(`HTTP ${res.status}`);
                         return res.blob();
                     })
                     .then(blob => {
+                        imageAbortControllers.delete(src);
                         const pngBlob = new Blob([blob], { type: 'image/png' });
                         const objUrl = URL.createObjectURL(pngBlob);
                         imageBlobCache.set(src, objUrl);
-                        document.querySelectorAll(`img[data-original-src="${src.replace(/"/g, '\\"')}"]`).forEach(targetImg => {
+                        const escapedSrc = escapeCssAttr(src);
+                        document.querySelectorAll(`img[data-original-src="${escapedSrc}"]`).forEach(targetImg => {
                             targetImg.src = objUrl;
                         });
                     })
                     .catch(err => {
+                        clearTimeout(timeout);
+                        imageAbortControllers.delete(src);
+                        // Ignore AbortError (intentional abort)
+                        if (err.name === 'AbortError') return;
                         console.error('Failed to convert .file image:', err);
                         imageBlobCache.delete(src);
-                        document.querySelectorAll(`img[data-original-src="${src.replace(/"/g, '\\"')}"]`).forEach(targetImg => {
+                        const escapedSrc = escapeCssAttr(src);
+                        document.querySelectorAll(`img[data-original-src="${escapedSrc}"]`).forEach(targetImg => {
                             targetImg.src = src;
                         });
                     });
@@ -238,27 +286,32 @@ function handleImages(el) {
         } else if (src) {
             img.src = src;
         }
-
-        img.addEventListener('click', () => {
-            const openSrc = img.dataset.originalSrc || img.src;
-            if (openSrc && !openSrc.startsWith('data:image/svg+xml')) {
-                window.open(openSrc, '_blank');
-            }
-        });
-
-        img.addEventListener('error', () => {
-            if (img.src && img.src.startsWith('data:image/svg+xml')) return;
-            const fallback = document.createElement('div');
-            fallback.style.cssText = 'background:rgba(255,255,255,0.05);border:1px dashed rgba(255,255,255,0.1);border-radius:6px;padding:12px;font-size:0.75rem;color:var(--text-muted);text-align:center';
-            fallback.textContent = '📷 Image failed to load';
-            img.replaceWith(fallback);
-        });
     });
+
+    // Event delegation for image clicks and errors — avoids duplicate listeners on re-render
+    el.addEventListener('click', e => {
+        const img = e.target.closest('img');
+        if (!img) return;
+        const openSrc = img.dataset.originalSrc || img.src;
+        if (openSrc && !openSrc.startsWith('data:image/svg+xml')) {
+            window.open(openSrc, '_blank');
+        }
+    });
+
+    el.addEventListener('error', e => {
+        const img = e.target.closest('img');
+        if (!img || !img.src || img.src.startsWith('data:image/svg+xml')) return;
+        const fallback = document.createElement('div');
+        fallback.style.cssText = 'background:rgba(255,255,255,0.05);border:1px dashed rgba(255,255,255,0.1);border-radius:6px;padding:12px;font-size:0.75rem;color:var(--text-muted);text-align:center';
+        fallback.textContent = '📷 Image failed to load';
+        img.replaceWith(fallback);
+    }, true);
 }
 
 // ─── Process all chunks sequentially ─────────────────────────────────────────
 async function processAllChunks(resume = false) {
     const sessId = getSessionId();
+    if (!sessId) { showBanner('No session ID — cannot process chunks.', 'error'); isProcessing = false; return; }
     _terminated = false;
     isProcessing = true;
     document.getElementById('terminateBtn').style.display = '';
@@ -280,11 +333,17 @@ async function processAllChunks(resume = false) {
         for (let attempt = 0; attempt < retryCount; attempt++) {
             if (_terminated) break;
             updateAttemptProgress(attempt + 1, retryCount);
+            // Capture accumulated content as checkpoint for this retry attempt
+            const existingContent = processedResults[i]?.content?.text || null;
+            const checkpointPrefix = existingContent
+                ? `${prefix}\n\n[Previously accumulated (checkpoint) — continue from here]:\n${existingContent}\n\n`
+                : prefix;
             try {
                 const result = await browser.runtime.sendMessage({
                     action: 'processChunk',
                     chunk: allChunks[i],
-                    prefix, suffix,
+                    prefix: checkpointPrefix,
+                    suffix,
                     sessionId: sessId
                 });
 
@@ -293,8 +352,10 @@ async function processAllChunks(resume = false) {
 
                 if (result.streaming) {
                     // Streaming updates come via message listener; wait for them
-                    await waitForStreamComplete(i);
+                    const { timedOut } = await waitForStreamComplete(i);
                     if (_terminated) { success = !!processedResults[i]?.content?.text; break; }
+                    // If safety timeout fired, treat as failure to trigger retry
+                    if (timedOut) { throw new Error('Streaming timed out after 5 minutes'); }
                     success = true; break;
                 }
 
@@ -343,10 +404,13 @@ async function processAllChunks(resume = false) {
 function waitForStreamComplete(index) {
     return new Promise(resolve => {
         const check = setInterval(() => {
-            if (!isStreamingActive(index)) { clearInterval(check); resolve(); }
+            if (!isStreamingActive(index)) { clearInterval(check); resolve({ timedOut: false }); }
         }, 200);
-        // Safety timeout 5 min
-        setTimeout(() => { clearInterval(check); resolve(); }, 300000);
+        // Safety timeout 5 min — signal timeout so caller can treat as failure
+        setTimeout(() => {
+            clearInterval(check);
+            resolve({ timedOut: true });
+        }, 300000);
     });
 }
 
@@ -458,12 +522,23 @@ function downloadAll() {
 // ─── Reprocess individual chunk ───────────────────────────────────────────────
 async function reprocessOne(index) {
     if (reprocessingState.isActive) { showToast('Already reprocessing, please wait.', 'error'); return; }
-    if (isProcessing && streamingIndex !== index) { showToast('Wait for current chunk to finish.', 'error'); return; }
+    // Block reprocessing if ANY chunk is actively processing (even if it's this one)
+    if (isProcessing) { showToast('Wait for current processing to finish first.', 'error'); return; }
     const sessId = getSessionId();
-    const storedData = await browser.runtime.sendMessage({ action: 'getStoredData', sessionId: sessId });
+
+    let storedData;
+    try {
+        storedData = await browser.runtime.sendMessage({ action: 'getStoredData', sessionId: sessId });
+    } catch (err) {
+        showToast(`❌ Failed to load session data: ${err.message}`, 'error');
+        return;
+    }
     const pfx = storedData.prefix || prefix;
     const sfx = storedData.suffix || suffix;
     const rc = storedData.retryCount || retryCount;
+
+    // Capture any existing accumulated content before clearing — used as checkpoint on retry
+    const existingContent = processedResults[index]?.content?.text || null;
 
     // Clear saved storage
     const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
@@ -483,10 +558,17 @@ async function reprocessOne(index) {
 
     for (let attempt = 0; attempt < rc; attempt++) {
         updateAttemptProgress(attempt + 1, rc);
+        // Build prefix: prepend accumulated checkpoint content so the model continues from where it left off
+        const checkpointPrefix = existingContent ? `${pfx}\n\n[Previously accumulated (checkpoint) — continue from here]:\n${existingContent}\n\n` : pfx;
         try {
-            const result = await browser.runtime.sendMessage({ action: 'processChunk', chunk: allChunks[index], prefix: pfx, suffix: sfx, sessionId: sessId });
+            const result = await browser.runtime.sendMessage({ action: 'processChunk', chunk: allChunks[index], prefix: checkpointPrefix, suffix: sfx, sessionId: sessId });
             if (result.error) throw new Error(result.error);
-            if (result.streaming) { await waitForStreamComplete(index); return; }
+            if (result.streaming) {
+                const { timedOut } = await waitForStreamComplete(index);
+                reprocessingState.isActive = false;
+                if (timedOut) { throw new Error('Streaming timed out after 5 minutes'); }
+                return;
+            }
             const parts = result.parts || [result.result];
             parts.length > 1 ? renderMultiPart(index, parts) : renderChunk(index, result.result, false);
             processedResults[index] = { content: { parts, text: result.result }, rawContent: allChunks[index] };
@@ -502,13 +584,14 @@ async function reprocessOne(index) {
                 reprocessingState.isActive = false;
                 return;
             }
-            await new Promise(r => setTimeout(r, 5000));
+            await new Promise(r => setTimeout(r, 7000));
         }
     }
 }
 
 // ─── Reprocess all ────────────────────────────────────────────────────────────
 async function reprocessAll() {
+    if (isProcessing) { showToast('Processing already in progress. Please wait or terminate first.', 'error'); return; }
     if (!confirm(`Reprocess all ${totalChunks} chunks? All saved results will be cleared.`)) return;
     const sessId = getSessionId();
     const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
@@ -525,6 +608,7 @@ async function reprocessAll() {
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 async function initPage() {
+    cleanupImageBlobCache(); // Clear any leftover Blob URLs from previous sessions
     sessionId = getSessionId();
     document.getElementById('sessionId').textContent = sessionId ? `Session: ${sessionId.slice(0, 12)}…` : 'No session';
 
@@ -534,7 +618,13 @@ async function initPage() {
     const { translationSessions = [] } = await browser.storage.local.get('translationSessions');
     const session = translationSessions.find(s => s.id === sessionId);
 
-    let storedData = await browser.runtime.sendMessage({ action: 'getStoredData', sessionId });
+    let storedData;
+    try {
+        storedData = await browser.runtime.sendMessage({ action: 'getStoredData', sessionId });
+    } catch (err) {
+        showBanner(`Failed to load session data: ${err.message}`, 'error');
+        return;
+    }
     allChunks = session?.chunks || storedData.chunks || [];
     prefix = session?.prefix || storedData.prefix || '';
     suffix = session?.suffix || storedData.suffix || '';
@@ -584,6 +674,9 @@ async function initPage() {
 
 // ─── Wire up buttons ──────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+    // Clean up Blob URLs when page unloads
+    window.addEventListener('beforeunload', cleanupImageBlobCache);
+
     document.getElementById('reprocessAllBtn')?.addEventListener('click', reprocessAll);
     document.getElementById('copyAllBtn')?.addEventListener('click', copyAll);
     document.getElementById('downloadAllBtn')?.addEventListener('click', downloadAll);
@@ -592,7 +685,11 @@ document.addEventListener('DOMContentLoaded', () => {
         _terminated = true;
         if (idx >= 0) _streamCompleteFlags[idx] = true;
 
-        try { await browser.runtime.sendMessage({ action: 'terminateRequest', sessionId: getSessionId() }); } catch (e) { }
+        try {
+            await browser.runtime.sendMessage({ action: 'terminateRequest', sessionId: getSessionId() });
+        } catch (e) {
+            console.error('Failed to send terminateRequest:', e);
+        }
 
         // Re-render from processedResults to guarantee content is visible
         if (idx >= 0 && processedResults[idx]?.content?.text) {

@@ -69,7 +69,14 @@ function setField(id, value) {
 }
 
 async function loadSettings() {
-  const stored = await browser.storage.local.get(null);
+  let stored;
+  try {
+    stored = await browser.storage.local.get(null);
+  } catch (err) {
+    console.error('Failed to load settings:', err);
+    showToast('❌ Failed to load settings from storage.', 'error');
+    return;
+  }
   const settings = { ...DEFAULTS, ...stored };
 
   ['apiType', 'maxLength', 'prefix', 'suffix', 'retryCount', 'temperature', 'topK', 'topP', 'maxSessions', 'chunkFontSize', 'chunkMaxWidth',
@@ -90,21 +97,22 @@ function sanitizeNumericSettings(raw) {
   return {
     ...raw,
     maxLength: clamp(parseInt2(raw.maxLength, DEFAULTS.maxLength), 1, 500000),
-    retryCount: clamp(parseInt2(raw.retryCount, DEFAULTS.retryCount), 0, 20),
+    retryCount: clamp(parseInt2(raw.retryCount, DEFAULTS.retryCount), 1, 20),
     maxSessions: clamp(parseInt2(raw.maxSessions, DEFAULTS.maxSessions), 1, 50),
     chunkFontSize: clamp(parseNum(raw.chunkFontSize, 1.05), 0.1, 10),
-    chunkMaxWidth: clamp(parseInt2(raw.chunkMaxWidth, DEFAULTS.chunkMaxWidth), 0, 10000),
+    chunkMaxWidth: clamp(parseInt2(raw.chunkMaxWidth, DEFAULTS.chunkMaxWidth), 1, 10000),
     temperature: clamp(parseNum(raw.temperature, 0.3), 0, 2),
     topK: clamp(parseInt2(raw.topK, 30), 1, 1000),
-    topP: clamp(parseNum(raw.topP, 0.95), 0, 1),
+    topP: clamp(parseNum(raw.topP, 0.95), 0.01, 1),
   };
 }
 
 // ─── Save settings from form ──────────────────────────────────────────────────
-function getField(id, isCheckbox = false) {
+function getField(id) {
   const el = document.getElementById(id);
   if (!el) return undefined;
-  return isCheckbox ? el.checked : el.value;
+  // Return boolean for checkboxes, value for all other inputs
+  return el.type === 'checkbox' ? el.checked : el.value;
 }
 
 // Web permission origins for optional permissions
@@ -139,7 +147,7 @@ async function saveSettings() {
     openRouterMaxTokens: getField('openRouterMaxTokens'),
     openRouterContextWindow: getField('openRouterContextWindow'),
     openRouterProviderOrder: getField('openRouterProviderOrder'),
-    openRouterAllowFallback: getField('openRouterAllowFallback', true),
+    openRouterAllowFallback: getField('openRouterAllowFallback'),
 
     openaiApiKey: getField('openaiApiKey'),
     openaiModelId: getField('openaiModelId'),
@@ -149,7 +157,12 @@ async function saveSettings() {
 
 
   };
-  await browser.storage.local.set(sanitizeNumericSettings(raw));
+  try {
+    await browser.storage.local.set(sanitizeNumericSettings(raw));
+  } catch (err) {
+    showToast('❌ Failed to save settings: ' + err.message, 'error');
+    return;
+  }
   showToast('✅ Settings saved!', 'success');
 
   // Request permission if switching to a web automation API type
@@ -160,16 +173,21 @@ async function saveSettings() {
       try {
         const granted = await browser.permissions.request({ origins });
         if (granted) {
-          // Store permission grant for future sessions
-          const { webPermissions = {} } = await browser.storage.local.get('webPermissions');
-          webPermissions[apiType] = true;
-          await browser.storage.local.set({ webPermissions });
+          // Store permission grant for future sessions — verify storage succeeded
+          try {
+            const { webPermissions = {} } = await browser.storage.local.get('webPermissions');
+            webPermissions[apiType] = true;
+            await browser.storage.local.set({ webPermissions });
+          } catch (e) {
+            console.error('Failed to persist permission state:', e);
+          }
           showToast(`✅ ${apiType === 'chatgptWeb' ? 'ChatGPT' : 'Gemini'} Web access granted!`, 'success');
         } else {
           showToast(`⚠️ Permission denied. ${apiType === 'chatgptWeb' ? 'ChatGPT' : 'Gemini'} Web will not function.`, 'error');
         }
       } catch (e) {
         console.error('Permission request failed:', e);
+        showToast('❌ Permission request failed: ' + e.message, 'error');
       }
     }
   }
@@ -190,7 +208,13 @@ function updatePromptPreview() {
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 async function exportSettings() {
-  const all = await browser.storage.local.get(null);
+  let all;
+  try {
+    all = await browser.storage.local.get(null);
+  } catch (err) {
+    showToast('❌ Failed to export settings: ' + err.message, 'error');
+    return;
+  }
   const filtered = Object.fromEntries(
     Object.entries(all).filter(([k]) => !KEYS_TO_EXCLUDE_FROM_EXPORT.includes(k))
   );
@@ -206,6 +230,7 @@ async function exportSettings() {
 // Only these keys may be written from an imported file (mirrors the DEFAULTS keys
 // and the set loaded by loadSettings). Any extra keys in the JSON are silently dropped.
 const ALLOWED_IMPORT_KEYS = Object.keys(DEFAULTS);
+const VALID_API_TYPES = ['gemini', 'openRouter', 'openai', 'chatgptWeb', 'geminiWeb'];
 
 async function importFromJSON(json) {
   try {
@@ -219,20 +244,29 @@ async function importFromJSON(json) {
         whitelisted[key] = data[key];
       }
     }
+    // Validate apiType if present
+    if (whitelisted.apiType && !VALID_API_TYPES.includes(whitelisted.apiType)) {
+      throw new TypeError(`Invalid apiType "${whitelisted.apiType}". Must be one of: ${VALID_API_TYPES.join(', ')}`);
+    }
     await browser.storage.local.set(sanitizeNumericSettings(whitelisted));
     await loadSettings();
     showToast('✅ Settings imported!', 'success');
   } catch (e) {
-    showToast('❌ Invalid JSON: ' + e.message, 'error');
+    showToast('❌ Import failed: ' + e.message, 'error');
   }
 }
 
 // ─── Reset ────────────────────────────────────────────────────────────────────
 async function resetSettings() {
   if (!confirm('Reset ALL settings to defaults? This cannot be undone.')) return;
-  const toKeep = await browser.storage.local.get(['processedChunks', 'translationSessions']);
-  await browser.storage.local.clear();
-  await browser.storage.local.set({ ...DEFAULTS, ...toKeep });
+  try {
+    // Preserve session data — set defaults on top of existing storage atomically
+    const toKeep = await browser.storage.local.get(['processedChunks', 'translationSessions']);
+    await browser.storage.local.set({ ...DEFAULTS, ...toKeep });
+  } catch (err) {
+    showToast('❌ Reset failed: ' + err.message, 'error');
+    return;
+  }
   await loadSettings();
   showToast('♻️ Settings reset to defaults.', 'success');
 }
@@ -246,12 +280,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     versionEl.textContent = `v${browser.runtime.getManifest().version}`;
   }
 
+  // Clean up toast timer on page unload
+  window.addEventListener('beforeunload', () => clearTimeout(toastTimer));
+
   setupNav();
   setupPasswordToggles();
   await loadSettings();
 
   // Save
-  document.getElementById('saveButton')?.addEventListener('click', saveSettings);
+  document.getElementById('saveButton')?.addEventListener('click', () => saveSettings().catch(err => { console.error('saveSettings failed:', err); showToast('❌ Save failed: ' + err.message, 'error'); }));
 
   // Prompt preview live update
   document.getElementById('prefix')?.addEventListener('input', updatePromptPreview);
@@ -273,7 +310,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const reader = new FileReader();
     reader.onload = e => importFromJSON(e.target.result);
     reader.onerror = e => {
-      showToast('Failed to read file: ' + (e?.target?.error?.message || 'unknown error'), 'error');
+      const err = e?.target?.error;
+      const msg = err?.message || err?.name || 'unknown error';
+      showToast('Failed to read file: ' + msg, 'error');
       console.error('FileReader error in importFromJSON flow', e);
     };
     reader.readAsText(file);
