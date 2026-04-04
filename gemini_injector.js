@@ -31,9 +31,15 @@
         let inputElement = null;
         for (const selector of selectors) {
             const el = document.querySelector(selector);
-            if (el && el.offsetParent !== null) { // ensure visible
-                inputElement = el;
-                break;
+            if (el) {
+                const style = getComputedStyle(el);
+                const isVisible = style.visibility !== 'hidden' && style.display !== 'none';
+                const isFixed = style.position === 'fixed';
+                // offsetParent is null for fixed elements and hidden elements — also check computed style
+                if ((el.offsetParent !== null || isFixed) && isVisible) {
+                    inputElement = el;
+                    break;
+                }
             }
         }
 

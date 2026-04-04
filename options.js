@@ -115,12 +115,6 @@ function getField(id) {
   return el.type === 'checkbox' ? el.checked : el.value;
 }
 
-// Web permission origins for optional permissions
-const WEB_PERMISSIONS = {
-    chatgptWeb: { origins: ['https://chatgpt.com/*', 'https://chat.openai.com/*'], permissions: ['tabs'] },
-    geminiWeb: { origins: ['https://gemini.google.com/*'], permissions: ['tabs'] }
-};
-
 async function saveSettings() {
   const raw = {
     apiType: getField('apiType'),
@@ -262,32 +256,31 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadSettings();
 
   // Save
-  document.getElementById('saveButton')?.addEventListener('click', () => {
+  document.getElementById('saveButton')?.addEventListener('click', async () => {
     const apiType = getField('apiType');
 
-    // Request permission synchronously — browser.permissions.request must NOT be
-    // inside an async function or after any await. It must run in the call stack
-    // of the user gesture itself.
+    // browser.permissions.request must run in the call stack of the user gesture,
+    // so we chain the entire flow inside the click handler without pre-awaiting.
     if (apiType === 'chatgptWeb' || apiType === 'geminiWeb') {
       const { origins, permissions } = WEB_PERMISSIONS[apiType] ?? {};
-      browser.permissions.request({ origins: origins ?? [], permissions: permissions ?? [] })
-      .then(granted => {
-        return browser.storage.local.get('webPermissions').then(({ webPermissions = {} }) => {
-          webPermissions[apiType] = granted;
-          return browser.storage.local.set({ webPermissions }).then(() => granted);
-        });
-      })
-      .then(granted => {
+      try {
+        const granted = await browser.permissions.request({ origins: origins ?? [], permissions: permissions ?? [] });
+        // Persist the result to storage
+        const { webPermissions = {} } = await browser.storage.local.get('webPermissions');
+        webPermissions[apiType] = granted;
+        await browser.storage.local.set({ webPermissions });
         if (granted) {
           showToast(`✅ ${apiType === 'chatgptWeb' ? 'ChatGPT' : 'Gemini'} Web access granted!`, 'success');
         } else {
           showToast(`⚠️ Permission denied. ${apiType === 'chatgptWeb' ? 'ChatGPT' : 'Gemini'} Web will not function.`, 'error');
         }
-      })
-      .catch(e => {
+        // Only save settings if permission was granted
+        if (!granted) return;
+      } catch (e) {
         console.error('Permission request failed:', e);
         showToast('❌ Permission request failed: ' + e.message, 'error');
-      });
+        return;
+      }
     }
 
     saveSettings().catch(err => { console.error('saveSettings failed:', err); showToast('❌ Save failed: ' + err.message, 'error'); });

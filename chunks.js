@@ -4,7 +4,6 @@
 // ─── Marked config ────────────────────────────────────────────────────────────
 if (typeof marked !== 'undefined') {
     // Disable hyperlinks — render as plaintext [text](url)
-    // Escape HTML tags to prevent custom tags like <example> from being stripped
     marked.use({
         breaks: true,
         gfm: true,
@@ -12,13 +11,14 @@ if (typeof marked !== 'undefined') {
         mangle: false,
         headerIds: false,
         renderer: {
-            link(token) { return token.raw ?? ''; },
-            html(token) {
-                const raw = token.raw ?? token.text ?? String(token);
-                if (raw.trim().toLowerCase().startsWith('<img')) {
-                    return raw; // allow image tags to render
-                }
-                return escapeHtml(raw);
+            link(token) { return token.raw ?? ''; }
+        },
+        walkTokens(token) {
+            // Convert strikethrough tokens to text so the ~~content~~ is preserved literally
+            if (token.type === 'del') {
+                token.type = 'text';
+                token.text = `~~${token.text ?? ''}~~`;
+                token.raw = token.raw ?? '';
             }
         }
     });
@@ -26,7 +26,17 @@ if (typeof marked !== 'undefined') {
 
 function renderMarkdown(text) {
     if (typeof marked === 'undefined') return `<p>${escapeHtml(text)}</p>`;
-    const html = marked.parse(text || '');
+    // Escape all HTML tags to plaintext except <img> tags which we need for rendering.
+    // We do this BEFORE marked.parse() so marked never sees real HTML tags → no recursion.
+    // Strategy: temporarily extract <img> tags, escape everything else, put <img> back.
+    const imgTags = [];
+    let processed = (text || '').replace(/<img[^>]*>/gi, match => {
+        imgTags.push(match);
+        return `\x00IMG${imgTags.length - 1}\x00`;
+    });
+    processed = escapeHtml(processed); // escapeHtml has no effect on \x00 placeholders
+    imgTags.forEach((tag, i) => { processed = processed.replace(`\x00IMG${i}\x00`, tag); });
+    const html = marked.parse(processed);
     return DOMPurify.sanitize(html, {
         ADD_ATTR: ['target', 'data-original-src', 'style'],
         FORBID_TAGS: ['style', 'script']
@@ -35,6 +45,23 @@ function renderMarkdown(text) {
 
 function escapeHtml(t) {
     return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Extract thinking content from <think>...</think> tags
+function extractThinking(text) {
+    const thinking = [];
+    const regex = /<think>([\s\S]*?)<\/think>/gi;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+        const content = match[1].trim();
+        if (content) thinking.push(content);
+    }
+    return thinking;
+}
+
+// Remove thinking tags from text
+function removeThinking(text) {
+    return text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 }
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -46,6 +73,7 @@ let isProcessing = false;
 let totalChunks = 0;
 let completedChunks = 0;
 let processedResults = [];   // { content, rawContent } per index
+let processedThinking = [];  // thinking content per index (extracted from <think> tags)
 let streamingIndex = -1;
 let reprocessingState = { isActive: false, targetIndex: -1 };
 let _terminated = false;
@@ -183,11 +211,22 @@ function escapeCssAttr(str) {
 function renderChunk(index, text, isStreaming = false) {
     const contentEl = document.getElementById(`chunk-content-${index}`);
     if (!contentEl) return;
+
+    // Extract and store thinking content separately
+    const thinkingParts = extractThinking(text);
+    processedThinking[index] = thinkingParts.join('\n\n');
+
+    // Remove thinking tags from main content
+    const cleanText = removeThinking(text);
+
     contentEl.classList.toggle('streaming', isStreaming);
-    contentEl.innerHTML = renderMarkdown(text);
+    contentEl.innerHTML = renderMarkdown(cleanText);
     // Clear marker so handleImages processes new elements created by innerHTML replacement
     delete contentEl.dataset.imageHandlersBound;
     handleImages(contentEl);
+
+    // Render thinking section if there's thinking content
+    renderThinkingSection(index);
 }
 
 function renderMultiPart(index, parts) {
@@ -196,6 +235,15 @@ function renderMultiPart(index, parts) {
     if (!tabsEl || !contentsEl) return;
     tabsEl.innerHTML = '';
     contentsEl.innerHTML = '';
+
+    // Extract thinking content from all parts
+    const allThinking = [];
+    parts.forEach(part => {
+        const thinking = extractThinking(part);
+        allThinking.push(...thinking);
+    });
+    processedThinking[index] = allThinking.join('\n\n');
+
     parts.forEach((part, pi) => {
         const tab = document.createElement('button');
         tab.className = 'part-tab' + (pi === 0 ? ' active' : '');
@@ -210,11 +258,14 @@ function renderMultiPart(index, parts) {
         content.dataset.part = pi;
         const area = document.createElement('div');
         area.className = 'chunk-content-area';
-        area.innerHTML = renderMarkdown(part);
+        area.innerHTML = renderMarkdown(removeThinking(part));
         handleImages(area);
         content.appendChild(area);
         contentsEl.appendChild(content);
     });
+
+    // Render thinking section if there's thinking content
+    renderThinkingSection(index);
 }
 
 function handleImages(el) {
@@ -312,6 +363,46 @@ function handleImages(el) {
     }, true);
 }
 
+// ─── Render thinking section ────────────────────────────────────────────────────
+function renderThinkingSection(index) {
+    const thinkingContent = processedThinking[index];
+    const card = document.getElementById(`chunk-${index}`);
+    if (!card) return;
+
+    // Remove existing thinking section if any
+    const existingSection = card.querySelector('.thinking-section');
+    if (existingSection) existingSection.remove();
+
+    if (!thinkingContent) return;
+
+    const thinkingSection = document.createElement('div');
+    thinkingSection.className = 'thinking-section';
+    thinkingSection.innerHTML = `
+        <div class="thinking-header" id="thinking-header-${index}">
+            <span class="thinking-toggle">▸</span>
+            <span class="thinking-label">🤔 Thinking</span>
+        </div>
+        <div class="thinking-content" id="thinking-content-${index}">${escapeHtml(thinkingContent)}</div>
+    `;
+
+    // Insert at the beginning of the chunk body (above the content)
+    const chunkBody = card.querySelector('.chunk-body');
+    if (chunkBody) {
+        chunkBody.insertBefore(thinkingSection, chunkBody.firstChild);
+    }
+
+    // Toggle collapse/expand
+    const header = thinkingSection.querySelector('.thinking-header');
+    header.addEventListener('click', (e) => {
+        e.stopPropagation();
+        thinkingSection.classList.toggle('collapsed');
+        header.querySelector('.thinking-toggle').textContent = thinkingSection.classList.contains('collapsed') ? '▸' : '▾';
+    });
+
+    // Start collapsed
+    thinkingSection.classList.add('collapsed');
+}
+
 // ─── Process all chunks sequentially ─────────────────────────────────────────
 async function processAllChunks(resume = false) {
     const sessId = getSessionId();
@@ -338,10 +429,11 @@ async function processAllChunks(resume = false) {
             if (_terminated) break;
             _streamCompleteFlags[i] = false; // Reset per-chunk streaming state before each retry
             updateAttemptProgress(attempt + 1, retryCount);
-            // Capture accumulated content as checkpoint for this retry attempt
+            // Capture accumulated content as checkpoint for this retry attempt.
+            // Uses a minimal directive to avoid confusing LLMs that might echo the marker text.
             const existingContent = processedResults[i]?.content?.text || null;
             const checkpointPrefix = existingContent
-                ? `${prefix}\n\n[Previously accumulated (checkpoint) — continue from here]:\n${existingContent}\n\n`
+                ? `${prefix}\n\nContinue from the following content:\n${existingContent}\n\n`
                 : prefix;
             try {
                 const result = await browser.runtime.sendMessage({
@@ -564,8 +656,9 @@ async function reprocessOne(index) {
     for (let attempt = 0; attempt < rc; attempt++) {
         _streamCompleteFlags[index] = false; // Reset per-chunk streaming state before each retry
         updateAttemptProgress(attempt + 1, rc);
-        // Build prefix: prepend accumulated checkpoint content so the model continues from where it left off
-        const checkpointPrefix = existingContent ? `${pfx}\n\n[Previously accumulated (checkpoint) — continue from here]:\n${existingContent}\n\n` : pfx;
+        // Build prefix: prepend accumulated checkpoint content so the model continues from where it left off.
+        // Uses a minimal directive to avoid confusing LLMs that might echo the marker text.
+        const checkpointPrefix = existingContent ? `${pfx}\n\nContinue from the following content:\n${existingContent}\n\n` : pfx;
         try {
             const result = await browser.runtime.sendMessage({ action: 'processChunk', chunk: allChunks[index], prefix: checkpointPrefix, suffix: sfx, sessionId: sessId });
             if (result.error) throw new Error(result.error);
@@ -604,6 +697,7 @@ async function reprocessAll() {
     delete processedChunks[sessId];
     await browser.storage.local.set({ processedChunks });
     processedResults = [];
+    processedThinking = [];
     completedChunks = 0;
     _terminated = false;
     _streamCompleteFlags = {};
@@ -651,6 +745,7 @@ async function initPage() {
     const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
     const saved = processedChunks[sessionId] || [];
     processedResults = new Array(totalChunks).fill(null);
+    processedThinking = new Array(totalChunks).fill(null);
 
     let hasPartial = false;
     saved.forEach((chunk, i) => {

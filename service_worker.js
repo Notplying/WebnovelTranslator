@@ -322,7 +322,7 @@ async function processSSEStream(reader, sessionId, message, updateChunksPageFn, 
                 if (data === '[DONE]') break;
                 try {
                     const parsed = JSON.parse(data);
-                    const content = parsed.choices?.[0]?.delta?.content;
+                    let content = parsed.choices?.[0]?.delta?.content;
                     if (content) {
                         // Trim duplicate overlap at the boundary between an original run and a retry run
                         if (accumulatedSnapshot !== null) {
@@ -434,7 +434,7 @@ async function processChunkWithGemini(message, options) {
                         if (!line.startsWith('{') || !line.endsWith('}')) continue;
                         try {
                             const parsed = JSON.parse(line);
-                            const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+                            let text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
                             if (text) {
                                 // Trim duplicate overlap at the boundary with any previous stream run
                                 if (accumulatedSnapshot !== null) {
@@ -578,11 +578,6 @@ function urlPatternToRegExp(pattern) {
 }
 
 // ─── Web Permission Management ────────────────────────────────────────────────
-const WEB_PERMISSIONS = {
-    chatgptWeb: { origins: ['https://chatgpt.com/*', 'https://chat.openai.com/*'], permissions: ['tabs'] },
-    geminiWeb: { origins: ['https://gemini.google.com/*'], permissions: ['tabs'] }
-};
-
 async function hasStoredWebPermission(provider) {
     const { webPermissions = {} } = await browser.storage.local.get('webPermissions');
     return webPermissions[provider] === true;
@@ -630,6 +625,16 @@ async function injectWebAutomationScript(tabId, scriptType) {
     }
     injectedTabs.add(tabId);
 }
+
+// Clear injectedTabs when a tab navigates (loading) or is closed so re-injection works on revisit
+browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo.status === 'loading' || changeInfo.url) {
+        injectedTabs.delete(tabId);
+    }
+});
+browser.tabs.onRemoved.addListener((tabId) => {
+    injectedTabs.delete(tabId);
+});
 
 // ─── Web Automation ───────────────────────────────────────────────────────────
 async function getOrCreateTab(url, urlPattern, sessionId) {

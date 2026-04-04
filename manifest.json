@@ -20,7 +20,9 @@
     "scripting"
   ],
   "optional_permissions": [
-    "tabs",
+    "tabs"
+  ],
+  "optional_host_permissions": [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
     "https://gemini.google.com/*"
@@ -35,6 +37,7 @@
     "service_worker": "service_worker.js",
     "scripts": [
       "browser-polyfill.min.js",
+      "shared_web_permissions.js",
       "service_worker.js"
     ]
   },
