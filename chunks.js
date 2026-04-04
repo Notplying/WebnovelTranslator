@@ -24,29 +24,72 @@ if (typeof marked !== 'undefined') {
     });
 }
 
+// function renderMarkdown(text) {
+//     if (typeof marked === 'undefined') return `<p>${escapeHtml(text)}</p>`;
+//     // Escape all HTML tags to plaintext except <img> tags which we need for rendering.
+//     // We do this BEFORE marked.parse() so marked never sees real HTML tags → no recursion.
+//     // Strategy: temporarily extract <img> tags, escape everything else, put <img> back.
+//     const imgTags = [];
+//     let processed = (text || '').replace(/<img[^>]*>/gi, match => {
+//         imgTags.push(match);
+//         return `\x00IMG${imgTags.length - 1}\x00`;
+//     });
+//     processed = escapeHtml(processed); // escapeHtml has no effect on \x00 placeholders
+//     imgTags.forEach((tag, i) => { processed = processed.replace(`\x00IMG${i}\x00`, tag); });
+//     const html = marked.parse(processed);
+//     return DOMPurify.sanitize(html, {
+//         ADD_ATTR: ['target', 'data-original-src', 'style'],
+//         FORBID_TAGS: ['style', 'script']
+//     });
+// }
+
+// function escapeHtml(t) {
+//     return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+// }
+function decodeHtmlEntities(t) {
+    return t
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'");
+}
+
+function escapeHtml(t) {
+    return t
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
 function renderMarkdown(text) {
     if (typeof marked === 'undefined') return `<p>${escapeHtml(text)}</p>`;
-    // Escape all HTML tags to plaintext except <img> tags which we need for rendering.
-    // We do this BEFORE marked.parse() so marked never sees real HTML tags → no recursion.
-    // Strategy: temporarily extract <img> tags, escape everything else, put <img> back.
+
     const imgTags = [];
-    let processed = (text || '').replace(/<img[^>]*>/gi, match => {
+    // Decode entities first so we always work with literal chars, never double-encoded strings
+    let processed = decodeHtmlEntities(text || '');
+
+    // Extract <img> tags before escaping
+    processed = processed.replace(/<img[^>]*>/gi, match => {
         imgTags.push(match);
         return `\x00IMG${imgTags.length - 1}\x00`;
     });
-    processed = escapeHtml(processed); // escapeHtml has no effect on \x00 placeholders
-    imgTags.forEach((tag, i) => { processed = processed.replace(`\x00IMG${i}\x00`, tag); });
+
+    // Now escape everything (starting from clean literals, so no double-encoding)
+    processed = escapeHtml(processed);
+
+    // Restore <img> tags
+    imgTags.forEach((tag, i) => {
+        processed = processed.replace(`\x00IMG${i}\x00`, tag);
+    });
+
     const html = marked.parse(processed);
     return DOMPurify.sanitize(html, {
         ADD_ATTR: ['target', 'data-original-src', 'style'],
         FORBID_TAGS: ['style', 'script']
     });
 }
-
-function escapeHtml(t) {
-    return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
 // Extract thinking content from <think>...</think> tags
 function extractThinking(text) {
     const thinking = [];
