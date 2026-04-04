@@ -2,8 +2,7 @@
 (function () {
     console.log("Gemini Injector loaded (v3)");
 
-    let removeListener;
-    browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    const messageHandler = (message, sender, sendResponse) => {
         if (message.action === 'paste_chunk_gemini') {
             console.log("Received paste_chunk_gemini message");
             if (typeof message.text !== 'string') {
@@ -14,16 +13,13 @@
             sendResponse({ success: success });
             return true;
         }
-    });
+    };
+    browser.runtime.onMessage.addListener(messageHandler);
 
     // Remove listener on page unload to prevent memory leaks
-    removeListener = () => {
-        if (removeListener) {
-            browser.runtime.onMessage.removeListener(browser.runtime.onMessage.listeners[0]);
-            removeListener = null;
-        }
-    };
-    window.addEventListener('unload', removeListener);
+    window.addEventListener('unload', () => {
+        browser.runtime.onMessage.removeListener(messageHandler);
+    });
 
     function pasteTextToGemini(text) {
         const selectors = [

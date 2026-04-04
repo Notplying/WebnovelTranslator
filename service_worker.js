@@ -109,13 +109,13 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
     }
     if (message.action === 'openChunksPage') {
-        if (message.chunks) {
-            const payload = { chunks: message.chunks, prefix: message.prefix, suffix: message.suffix, retryCount: message.retryCount };
-            openChunksPage(payload);
-        } else {
-            openChunksPage(null);
-        }
-        return false;
+        const payload = message.chunks
+            ? { chunks: message.chunks, prefix: message.prefix, suffix: message.suffix, retryCount: message.retryCount }
+            : null;
+        openChunksPage(payload)
+            .then(() => sendResponse({ success: true }))
+            .catch(error => { console.error('Error in openChunksPage:', error); sendResponse({ success: false, error: error.message }); });
+        return true;
     }
     if (message.action === 'updateChunksPage') {
         updateChunksPage(message.sessionId, message.data);
@@ -191,7 +191,13 @@ async function openChunksPage(payload) {
     await updateSessionStorage(contentSessionId, sessionDataForStorage);
 
     const url = browser.runtime.getURL(`chunks.html?session=${contentSessionId}`);
-    const tab = await browser.tabs.create({ url });
+    let tab;
+    try {
+        tab = await browser.tabs.create({ url });
+    } catch (err) {
+        console.error('Failed to create chunks tab (tabs permission may be denied):', err);
+        return;
+    }
     sessionTabIds[contentSessionId] = tab.id;
 
     browser.tabs.onUpdated.addListener(function listener(tabId, info) {
@@ -352,8 +358,11 @@ async function processSSEStream(reader, sessionId, message, updateChunksPageFn, 
         // Capture accumulated content for LCS deduplication on retry
         if (e.name === 'TypeError' || e.message.includes('input stream') || e.message.includes('network')) {
             accumulatedSnapshot = fullContent;
+            // Throw to signal retry is needed — caller will catch and handle as error
+            throw e;
         }
-        return { content: fullContent, snapshot: accumulatedSnapshot };
+        // Non-retryable errors propagate
+        throw e;
     }
     return { content: fullContent, snapshot: null };
 }
@@ -570,8 +579,8 @@ function urlPatternToRegExp(pattern) {
 
 // ─── Web Permission Management ────────────────────────────────────────────────
 const WEB_PERMISSIONS = {
-    chatgptWeb: ['https://chatgpt.com/*', 'https://chat.openai.com/*'],
-    geminiWeb: ['https://gemini.google.com/*']
+    chatgptWeb: { origins: ['https://chatgpt.com/*', 'https://chat.openai.com/*'], permissions: ['tabs'] },
+    geminiWeb: { origins: ['https://gemini.google.com/*'], permissions: ['tabs'] }
 };
 
 async function hasStoredWebPermission(provider) {
@@ -587,26 +596,27 @@ async function setStoredWebPermission(provider, granted) {
 
 async function ensureWebPermission(provider) {
     if (!WEB_PERMISSIONS[provider]) throw new Error(`Unknown web provider: ${provider}`);
-    // Check if already granted (contains checks active permissions)
-    const granted = await browser.permissions.contains({ origins: WEB_PERMISSIONS[provider] });
-    if (granted) {
-        await setStoredWebPermission(provider, true);
-        return true;
-    }
-    // Check stored state (might have been granted in a previous session)
-    const stored = await hasStoredWebPermission(provider);
-    if (stored) return true;
-    // Need to request
-    return false; // Caller should trigger the actual request
+    const { origins, permissions } = WEB_PERMISSIONS[provider];
+    const hasOrigins = origins.length === 0 || await browser.permissions.contains({ origins });
+    const hasPerms = permissions.length === 0 || await browser.permissions.contains({ permissions });
+    return hasOrigins && hasPerms;
 }
 
 async function requestAndStoreWebPermission(provider) {
-    const result = await browser.permissions.request({ origins: WEB_PERMISSIONS[provider] });
-    await setStoredWebPermission(provider, result);
-    return result;
+    if (!WEB_PERMISSIONS[provider]) throw new Error(`Unknown web provider: ${provider}`);
+    const { origins, permissions } = WEB_PERMISSIONS[provider];
+    const granted = await browser.permissions.request({
+        origins: origins ?? [],
+        permissions: permissions ?? []
+    });
+    await setStoredWebPermission(provider, granted);
+    return granted;
 }
 
+const injectedTabs = new Set();
+
 async function injectWebAutomationScript(tabId, scriptType) {
+    if (injectedTabs.has(tabId)) return;
     if (scriptType === 'chatgptWeb') {
         await browser.scripting.executeScript({
             target: { tabId },
@@ -618,6 +628,7 @@ async function injectWebAutomationScript(tabId, scriptType) {
             files: ['browser-polyfill.min.js', 'gemini_injector.js']
         });
     }
+    injectedTabs.add(tabId);
 }
 
 // ─── Web Automation ───────────────────────────────────────────────────────────
@@ -636,9 +647,14 @@ async function getOrCreateTab(url, urlPattern, sessionId) {
             }
         }
     }
-    const tabs = await browser.tabs.query({ url: urlPattern });
-    if (tabs.length > 0) { sessionTabIds[sessionId] = tabs[0].id; await browser.tabs.update(tabs[0].id, { active: true }); return { tab: tabs[0], reused: true }; }
-    const tab = await browser.tabs.create({ url }); sessionTabIds[sessionId] = tab.id; return { tab, reused: false };
+    try {
+        const tabs = await browser.tabs.query({ url: urlPattern });
+        if (tabs.length > 0) { sessionTabIds[sessionId] = tabs[0].id; await browser.tabs.update(tabs[0].id, { active: true }); return { tab: tabs[0], reused: true }; }
+        const tab = await browser.tabs.create({ url }); sessionTabIds[sessionId] = tab.id; return { tab, reused: false };
+    } catch (err) {
+        console.error('Tabs operation failed (tabs permission may be denied):', err);
+        throw err;
+    }
 }
 
 function waitForTabLoad(tabId, timeoutMs, signal) {

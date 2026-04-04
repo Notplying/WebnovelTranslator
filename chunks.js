@@ -185,6 +185,8 @@ function renderChunk(index, text, isStreaming = false) {
     if (!contentEl) return;
     contentEl.classList.toggle('streaming', isStreaming);
     contentEl.innerHTML = renderMarkdown(text);
+    // Clear marker so handleImages processes new elements created by innerHTML replacement
+    delete contentEl.dataset.imageHandlersBound;
     handleImages(contentEl);
 }
 
@@ -288,7 +290,9 @@ function handleImages(el) {
         }
     });
 
-    // Event delegation for image clicks and errors — avoids duplicate listeners on re-render
+    // Event delegation for image clicks and errors — bind once per container to avoid duplicates
+    if (el.dataset.imageHandlersBound) return;
+    el.dataset.imageHandlersBound = true;
     el.addEventListener('click', e => {
         const img = e.target.closest('img');
         if (!img) return;
@@ -332,6 +336,7 @@ async function processAllChunks(resume = false) {
         let success = false;
         for (let attempt = 0; attempt < retryCount; attempt++) {
             if (_terminated) break;
+            _streamCompleteFlags[i] = false; // Reset per-chunk streaming state before each retry
             updateAttemptProgress(attempt + 1, retryCount);
             // Capture accumulated content as checkpoint for this retry attempt
             const existingContent = processedResults[i]?.content?.text || null;
@@ -557,6 +562,7 @@ async function reprocessOne(index) {
     document.getElementById(`chunk-${index}`)?.classList.remove('collapsed');
 
     for (let attempt = 0; attempt < rc; attempt++) {
+        _streamCompleteFlags[index] = false; // Reset per-chunk streaming state before each retry
         updateAttemptProgress(attempt + 1, rc);
         // Build prefix: prepend accumulated checkpoint content so the model continues from where it left off
         const checkpointPrefix = existingContent ? `${pfx}\n\n[Previously accumulated (checkpoint) — continue from here]:\n${existingContent}\n\n` : pfx;

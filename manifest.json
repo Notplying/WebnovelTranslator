@@ -17,10 +17,10 @@
   "permissions": [
     "activeTab",
     "storage",
-    "tabs",
     "scripting"
   ],
   "optional_permissions": [
+    "tabs",
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
     "https://gemini.google.com/*"
