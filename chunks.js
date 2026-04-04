@@ -221,8 +221,6 @@ function renderChunk(index, text, isStreaming = false) {
 
     contentEl.classList.toggle('streaming', isStreaming);
     contentEl.innerHTML = renderMarkdown(cleanText);
-    // Clear marker so handleImages processes new elements created by innerHTML replacement
-    delete contentEl.dataset.imageHandlersBound;
     handleImages(contentEl);
 
     // Render thinking section if there's thinking content
@@ -315,8 +313,7 @@ function handleImages(el) {
                     })
                     .then(blob => {
                         imageAbortControllers.delete(src);
-                        const pngBlob = new Blob([blob], { type: 'image/png' });
-                        const objUrl = URL.createObjectURL(pngBlob);
+                        const objUrl = URL.createObjectURL(blob);
                         imageBlobCache.set(src, objUrl);
                         const escapedSrc = escapeCssAttr(src);
                         document.querySelectorAll(`img[data-original-src="${escapedSrc}"]`).forEach(targetImg => {
@@ -342,25 +339,26 @@ function handleImages(el) {
     });
 
     // Event delegation for image clicks and errors — bind once per container to avoid duplicates
-    if (el.dataset.imageHandlersBound) return;
-    el.dataset.imageHandlersBound = true;
-    el.addEventListener('click', e => {
-        const img = e.target.closest('img');
-        if (!img) return;
-        const openSrc = img.dataset.originalSrc || img.src;
-        if (openSrc && !openSrc.startsWith('data:image/svg+xml')) {
-            window.open(openSrc, '_blank');
-        }
-    });
+    if (!el.dataset.imageHandlersBound) {
+        el.dataset.imageHandlersBound = true;
+        el.addEventListener('click', e => {
+            const img = e.target.closest('img');
+            if (!img) return;
+            const openSrc = img.dataset.originalSrc || img.src;
+            if (openSrc && !openSrc.startsWith('data:image/svg+xml')) {
+                window.open(openSrc, '_blank');
+            }
+        });
 
-    el.addEventListener('error', e => {
-        const img = e.target.closest('img');
-        if (!img || !img.src || img.src.startsWith('data:image/svg+xml')) return;
-        const fallback = document.createElement('div');
-        fallback.style.cssText = 'background:rgba(255,255,255,0.05);border:1px dashed rgba(255,255,255,0.1);border-radius:6px;padding:12px;font-size:0.75rem;color:var(--text-muted);text-align:center';
-        fallback.textContent = '📷 Image failed to load';
-        img.replaceWith(fallback);
-    }, true);
+        el.addEventListener('error', e => {
+            const img = e.target.closest('img');
+            if (!img || !img.src || img.src.startsWith('data:image/svg+xml')) return;
+            const fallback = document.createElement('div');
+            fallback.style.cssText = 'background:rgba(255,255,255,0.05);border:1px dashed rgba(255,255,255,0.1);border-radius:6px;padding:12px;font-size:0.75rem;color:var(--text-muted);text-align:center';
+            fallback.textContent = '📷 Image failed to load';
+            img.replaceWith(fallback);
+        }, true);
+    }
 }
 
 // ─── Render thinking section ────────────────────────────────────────────────────
@@ -451,7 +449,13 @@ async function processAllChunks(resume = false) {
                     // Streaming updates come via message listener; wait for them
                     const { timedOut } = await waitForStreamComplete(i);
                     if (_terminated) { success = !!processedResults[i]?.content?.text; break; }
-                    // If safety timeout fired, treat as failure to trigger retry
+                    // If safety timeout fired but we have a direct response, use it instead of retrying
+                    if (timedOut && result.result) {
+                        processedResults[i] = { content: { parts: [result.result], text: result.result }, rawContent: allChunks[i] };
+                        renderChunk(i, result.result, false);
+                        await saveChunk(i, processedResults[i].content, allChunks[i]);
+                        success = true; break;
+                    }
                     if (timedOut) { throw new Error('Streaming timed out after 5 minutes'); }
                     success = true; break;
                 }
@@ -634,9 +638,6 @@ async function reprocessOne(index) {
     const sfx = storedData.suffix || suffix;
     const rc = storedData.retryCount || retryCount;
 
-    // Capture any existing accumulated content before clearing — used as checkpoint on retry
-    const existingContent = processedResults[index]?.content?.text || null;
-
     // Clear saved storage
     const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
     const sessChunks = processedChunks[sessId] || [];
@@ -656,15 +657,24 @@ async function reprocessOne(index) {
     for (let attempt = 0; attempt < rc; attempt++) {
         _streamCompleteFlags[index] = false; // Reset per-chunk streaming state before each retry
         updateAttemptProgress(attempt + 1, rc);
-        // Build prefix: prepend accumulated checkpoint content so the model continues from where it left off.
-        // Uses a minimal directive to avoid confusing LLMs that might echo the marker text.
-        const checkpointPrefix = existingContent ? `${pfx}\n\nContinue from the following content:\n${existingContent}\n\n` : pfx;
+        // Recompute checkpoint from current partial output each attempt (supports streaming resume)
+        const currentContent = processedResults[index]?.content?.text || null;
+        const checkpointPrefix = currentContent ? `${pfx}\n\nContinue from the following content:\n${currentContent}\n\n` : pfx;
         try {
             const result = await browser.runtime.sendMessage({ action: 'processChunk', chunk: allChunks[index], prefix: checkpointPrefix, suffix: sfx, sessionId: sessId });
             if (result.error) throw new Error(result.error);
             if (result.streaming) {
                 const { timedOut } = await waitForStreamComplete(index);
                 reprocessingState.isActive = false;
+                // If safety timeout fired but we have a direct response, use it instead of retrying
+                if (timedOut && result.result) {
+                    processedResults[index] = { content: { parts: [result.result], text: result.result }, rawContent: allChunks[index] };
+                    renderChunk(index, result.result, false);
+                    await saveChunk(index, processedResults[index].content, allChunks[index]);
+                    setChunkStatus(index, 'done'); setMicroBar(index, 'done');
+                    showToast('✅ Reprocessed!', 'success');
+                    return;
+                }
                 if (timedOut) { throw new Error('Streaming timed out after 5 minutes'); }
                 return;
             }

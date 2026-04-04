@@ -10,7 +10,7 @@ const DEFAULTS = {
   temperature: 0.3,
   topK: 30,
   topP: 0.95,
-  geminiApiKey: '', geminiModelId: '', geminiMaxTokens: '', geminiContextWindow: '',
+  geminiApiKey: '', geminiModelId: 'gemini-2.5-flash', geminiMaxTokens: '', geminiContextWindow: '',
 
   openRouterApiKey: '', openRouterModelId: 'deepseek/deepseek-chat-v3-0324', openRouterMaxTokens: '', openRouterContextWindow: '', openRouterProviderOrder: '', openRouterAllowFallback: true,
   openaiApiKey: '', openaiModelId: '', openaiMaxTokens: '', openaiContextWindow: '', openaiBaseUrl: 'https://api.openai.com/v1',
@@ -100,7 +100,7 @@ function sanitizeNumericSettings(raw) {
     retryCount: clamp(parseInt2(raw.retryCount, DEFAULTS.retryCount), 1, 20),
     maxSessions: clamp(parseInt2(raw.maxSessions, DEFAULTS.maxSessions), 1, 50),
     chunkFontSize: clamp(parseNum(raw.chunkFontSize, 1.05), 0.1, 10),
-    chunkMaxWidth: clamp(parseInt2(raw.chunkMaxWidth, DEFAULTS.chunkMaxWidth), 1, 10000),
+    chunkMaxWidth: clamp(parseInt2(raw.chunkMaxWidth, DEFAULTS.chunkMaxWidth), 0, 10000),
     temperature: clamp(parseNum(raw.temperature, 0.3), 0, 2),
     topK: clamp(parseInt2(raw.topK, 30), 1, 1000),
     topP: clamp(parseNum(raw.topP, 0.95), 0.01, 1),
@@ -155,9 +155,10 @@ async function saveSettings() {
     await browser.storage.local.set(sanitizeNumericSettings(raw));
   } catch (err) {
     showToast('❌ Failed to save settings: ' + err.message, 'error');
-    return;
+    return false;
   }
   showToast('✅ Settings saved!', 'success');
+  return true;
 
 }
 
@@ -228,8 +229,11 @@ async function importFromJSON(json) {
 async function resetSettings() {
   if (!confirm('Reset ALL settings to defaults? This cannot be undone.')) return;
   try {
-    // Preserve session data — set defaults on top of existing storage atomically
+    // Preserve session data
     const toKeep = await browser.storage.local.get(['processedChunks', 'translationSessions']);
+    // Clear all storage so no legacy or webPermissions entries remain
+    await browser.storage.local.clear();
+    // Write defaults merged with preserved keys
     await browser.storage.local.set({ ...DEFAULTS, ...toKeep });
   } catch (err) {
     showToast('❌ Reset failed: ' + err.message, 'error');
@@ -240,6 +244,28 @@ async function resetSettings() {
 }
 
 
+
+// ─── Web permission helper ────────────────────────────────────────────────────
+async function ensureWebPermissionsForApiType(apiType) {
+  if (apiType !== 'chatgptWeb' && apiType !== 'geminiWeb') return true;
+  const { origins, permissions } = WEB_PERMISSIONS[apiType] ?? {};
+  try {
+    const granted = await browser.permissions.request({ origins: origins ?? [], permissions: permissions ?? [] });
+    const { webPermissions = {} } = await browser.storage.local.get('webPermissions');
+    webPermissions[apiType] = granted;
+    await browser.storage.local.set({ webPermissions });
+    if (granted) {
+      showToast(`✅ ${apiType === 'chatgptWeb' ? 'ChatGPT' : 'Gemini'} Web access granted!`, 'success');
+    } else {
+      showToast(`⚠️ Permission denied. ${apiType === 'chatgptWeb' ? 'ChatGPT' : 'Gemini'} Web will not function.`, 'error');
+    }
+    return granted;
+  } catch (e) {
+    console.error('Permission request failed:', e);
+    showToast('❌ Permission request failed: ' + e.message, 'error');
+    return false;
+  }
+}
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -261,29 +287,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // browser.permissions.request must run in the call stack of the user gesture,
     // so we chain the entire flow inside the click handler without pre-awaiting.
-    if (apiType === 'chatgptWeb' || apiType === 'geminiWeb') {
-      const { origins, permissions } = WEB_PERMISSIONS[apiType] ?? {};
-      try {
-        const granted = await browser.permissions.request({ origins: origins ?? [], permissions: permissions ?? [] });
-        // Persist the result to storage
-        const { webPermissions = {} } = await browser.storage.local.get('webPermissions');
-        webPermissions[apiType] = granted;
-        await browser.storage.local.set({ webPermissions });
-        if (granted) {
-          showToast(`✅ ${apiType === 'chatgptWeb' ? 'ChatGPT' : 'Gemini'} Web access granted!`, 'success');
-        } else {
-          showToast(`⚠️ Permission denied. ${apiType === 'chatgptWeb' ? 'ChatGPT' : 'Gemini'} Web will not function.`, 'error');
-        }
-        // Only save settings if permission was granted
-        if (!granted) return;
-      } catch (e) {
-        console.error('Permission request failed:', e);
-        showToast('❌ Permission request failed: ' + e.message, 'error');
-        return;
-      }
-    }
-
-    saveSettings().catch(err => { console.error('saveSettings failed:', err); showToast('❌ Save failed: ' + err.message, 'error'); });
+    if (!(await ensureWebPermissionsForApiType(apiType))) return;
+    if (!(await saveSettings())) return;
   });
 
   // Prompt preview live update
@@ -335,10 +340,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Web automation quick-select
   document.getElementById('applyWebApiType')?.addEventListener('click', async () => {
     const val = document.getElementById('webApiTypeProxy')?.value;
-    if (val) {
-      document.getElementById('apiType').value = val;
-      await saveSettings();
-      showToast(`✅ API type set to ${val}`, 'success');
-    }
+    if (!val) return;
+    document.getElementById('apiType').value = val;
+
+    if (!(await ensureWebPermissionsForApiType(val))) return;
+    if (!(await saveSettings())) return;
+    showToast(`✅ API type set to ${val}`, 'success');
   });
 });

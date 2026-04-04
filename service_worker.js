@@ -1,10 +1,14 @@
 // service_worker.js — Manifest V3 Service Worker for AI Webnovel Translator
 // Cross-browser (Firefox + Chrome) via webextension-polyfill
 
-// In Chrome: service_worker.js runs as a true SW, so we load both via importScripts
-// In Firefox: background.scripts loads both before this file, so we guard against double load
+// In Firefox: background.scripts loads these before this file runs, so no importScripts needed.
+// In Chrome: service_worker runs as a true SW with no background.scripts, so we load via importScripts.
+// Guard against double-load in either case.
 if (typeof browser === 'undefined' || !browser.runtime) {
     importScripts('browser-polyfill.min.js');
+    if (typeof WEB_PERMISSIONS === 'undefined') {
+        importScripts('shared_web_permissions.js');
+    }
 }
 // jsrsasign-all-min.js removed – no KJUR/RSAKey symbols are used in this file.
 
@@ -196,7 +200,7 @@ async function openChunksPage(payload) {
         tab = await browser.tabs.create({ url });
     } catch (err) {
         console.error('Failed to create chunks tab (tabs permission may be denied):', err);
-        return;
+        throw err;
     }
     sessionTabIds[contentSessionId] = tab.id;
 
