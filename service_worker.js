@@ -402,6 +402,16 @@ async function processChunkWithGemini(message, options) {
         if (!isNaN(t) && t > 0) requestBody.generationConfig.maxOutputTokens = t;
     }
 
+    // AbortController-based timeout (works with the session's controller)
+    const timeoutMs = (parseInt(options.apiTimeout) || 120) * 1000;
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('API response timeout')), timeoutMs);
+    });
+    const controllerWithTimeout = new AbortController();
+    const originalSignal = controller.signal;
+    originalSignal.addEventListener('abort', () => { clearTimeout(timeoutId); controllerWithTimeout.abort(); }, { once: true });
+
     try {
         {
             tabCloseListener = tabId => {
@@ -410,9 +420,12 @@ async function processChunkWithGemini(message, options) {
             browser.tabs.onRemoved.addListener(tabCloseListener);
             updateChunksPage(sessionId, { action: 'updateStreamContent', content: '', rawContent: message.chunk, isInitial: true });
 
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${options.geminiModelId}:streamGenerateContent?key=${options.geminiApiKey}&alt=sse`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody), signal: controller.signal,
-            });
+            const response = await Promise.race([
+                fetch(`https://generativelanguage.googleapis.com/v1beta/models/${options.geminiModelId}:streamGenerateContent?key=${options.geminiApiKey}&alt=sse`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody), signal: controllerWithTimeout.signal,
+                }),
+                timeoutPromise
+            ]);
             if (!response.ok) {
                 const err = await response.json().catch(() => ({}));
                 throw new Error(`HTTP ${response.status}: ${err.error?.message || ''}`);
@@ -500,12 +513,26 @@ async function processChunkWithOpenAICompatible(message, options, apiUrl, header
     const sessionId = message.sessionId;
     sessionControllers[sessionId] = controller;
     const isStreaming = true;
+
+    // AbortController-based timeout (works with the session's controller)
+    const timeoutMs = (parseInt(options.apiTimeout) || 120) * 1000;
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('API response timeout')), timeoutMs);
+    });
+    const controllerWithTimeout = new AbortController();
+    const originalSignal = controller.signal;
+    originalSignal.addEventListener('abort', () => { clearTimeout(timeoutId); controllerWithTimeout.abort(); }, { once: true });
+
     try {
         tabCloseListener = tabId => { if (tabId === sessionTabIds[sessionId]) { controller.abort(); browser.tabs.onRemoved.removeListener(tabCloseListener); delete sessionTabIds[sessionId]; } };
         browser.tabs.onRemoved.addListener(tabCloseListener);
         if (isStreaming) updateChunksPage(sessionId, { action: 'updateStreamContent', content: '', rawContent: message.chunk, isInitial: true });
 
-        const response = await fetch(apiUrl, { method: 'POST', headers, body: JSON.stringify(requestBody), signal: controller.signal });
+        const response = await Promise.race([
+            fetch(apiUrl, { method: 'POST', headers, body: JSON.stringify(requestBody), signal: controllerWithTimeout.signal }),
+            timeoutPromise
+        ]);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const reader = response.body?.getReader();
@@ -553,7 +580,7 @@ async function processChunkWithOpenRouter(message, options) {
         const order = options.openRouterProviderOrder.split(',').map(s => s.trim()).filter(Boolean);
         if (order.length) requestBody.provider = { order, allow_fallbacks: options.openRouterAllowFallback !== false };
     }
-    const headers = { 'Authorization': `Bearer ${options.openRouterApiKey}`, 'HTTP-Referer': 'https://addons.mozilla.org/en-US/firefox/addon/ai-webnovel-translator/', 'X-Title': 'AI Webnovel Translator', 'Content-Type': 'application/json' };
+    const headers = { 'Authorization': `Bearer ${options.openRouterApiKey}`, 'HTTP-Referer': 'https://addons.mozilla.org/en-US/firefox/addon/ai-webnovel-translator/', 'X-OpenRouter-Title': 'AI Webnovel Translator', 'Content-Type': 'application/json' };
     return processChunkWithOpenAICompatible(message, options, 'https://openrouter.ai/api/v1/chat/completions', headers, requestBody, 'OpenRouter');
 }
 
@@ -715,9 +742,10 @@ async function processChunkWithChatGPTWeb(message, options) {
         await injectWebAutomationScript(tab.id, 'chatgptWeb');
 
         await new Promise((resolve, reject) => { const t = setTimeout(resolve, WebAutomationConfig.DELAY_CHATGPT_MS); controller.signal.addEventListener('abort', () => { clearTimeout(t); reject(new Error('Aborted')); }, { once: true }); });
+        const execTimeout = (parseInt(options.webAutomationTimeout) || 30) * 1000;
         const result = await Promise.race([
             browser.tabs.sendMessage(tab.id, { action: 'paste_chunk_v2', text: fullContent }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), WebAutomationConfig.EXECUTION_TIMEOUT_MS)),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), execTimeout)),
             new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error('Aborted')), { once: true }))
         ]);
         if (!result?.success) throw new Error(result?.error || 'Unknown error');
@@ -749,9 +777,10 @@ async function processChunkWithGeminiWeb(message, options) {
         await injectWebAutomationScript(tab.id, 'geminiWeb');
 
         await new Promise((resolve, reject) => { const t = setTimeout(resolve, WebAutomationConfig.DELAY_GEMINI_MS); controller.signal.addEventListener('abort', () => { clearTimeout(t); reject(new Error('Aborted')); }, { once: true }); });
+        const execTimeout = (parseInt(options.webAutomationTimeout) || 30) * 1000;
         const result = await Promise.race([
             browser.tabs.sendMessage(tab.id, { action: 'paste_chunk_gemini', text: fullContent }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), WebAutomationConfig.EXECUTION_TIMEOUT_MS)),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), execTimeout)),
             new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error('Aborted')), { once: true }))
         ]);
         if (!result?.success) throw new Error(result?.error || 'Unknown error');

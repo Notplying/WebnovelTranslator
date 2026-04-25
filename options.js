@@ -17,7 +17,10 @@ const DEFAULTS = {
 
   maxSessions: 3,
   chunkFontSize: 1.05,
-  chunkMaxWidth: 850
+  chunkMaxWidth: 850,
+
+  apiTimeout: 120,
+  webAutomationTimeout: 30,
 };
 
 const KEYS_TO_EXCLUDE_FROM_EXPORT = ['processedChunks', 'translationSessions'];
@@ -83,7 +86,9 @@ async function loadSettings() {
     'geminiApiKey', 'geminiModelId', 'geminiMaxTokens', 'geminiContextWindow',
 
     'openRouterApiKey', 'openRouterModelId', 'openRouterMaxTokens', 'openRouterContextWindow', 'openRouterProviderOrder', 'openRouterAllowFallback',
-    'openaiApiKey', 'openaiModelId', 'openaiMaxTokens', 'openaiContextWindow', 'openaiBaseUrl'
+    'openaiApiKey', 'openaiModelId', 'openaiMaxTokens', 'openaiContextWindow', 'openaiBaseUrl',
+
+    'apiTimeout', 'webAutomationTimeout'
   ].forEach(key => { setField(key, settings[key]); });
 
   updatePromptPreview();
@@ -101,6 +106,8 @@ function sanitizeNumericSettings(raw) {
     maxSessions: clamp(parseInt2(raw.maxSessions, DEFAULTS.maxSessions), 1, 50),
     chunkFontSize: clamp(parseNum(raw.chunkFontSize, 1.05), 0.1, 10),
     chunkMaxWidth: clamp(parseInt2(raw.chunkMaxWidth, DEFAULTS.chunkMaxWidth), 0, 10000),
+    apiTimeout: clamp(parseInt2(raw.apiTimeout, DEFAULTS.apiTimeout), 30, 600),
+    webAutomationTimeout: clamp(parseInt2(raw.webAutomationTimeout, DEFAULTS.webAutomationTimeout), 10, 120),
     temperature: clamp(parseNum(raw.temperature, 0.3), 0, 2),
     topK: clamp(parseInt2(raw.topK, 30), 1, 1000),
     topP: clamp(parseNum(raw.topP, 0.95), 0.01, 1),
@@ -149,6 +156,8 @@ async function saveSettings() {
     openaiContextWindow: getField('openaiContextWindow'),
     openaiBaseUrl: getField('openaiBaseUrl'),
 
+    apiTimeout: getField('apiTimeout'),
+    webAutomationTimeout: getField('webAutomationTimeout'),
 
   };
   try {
