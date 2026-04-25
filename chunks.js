@@ -251,12 +251,13 @@ function escapeCssAttr(str) {
     })[c]);
 }
 
-function renderChunk(index, text, isStreaming = false) {
+function renderChunk(index, text, isStreaming = false, reasoning = '') {
     const contentEl = document.getElementById(`chunk-content-${index}`);
     if (!contentEl) return;
 
-    // Extract and store thinking content separately
+    // Extract thinking from <think> tags and combine with OpenRouter reasoning
     const thinkingParts = extractThinking(text);
+    if (reasoning) thinkingParts.push(reasoning);
     processedThinking[index] = thinkingParts.join('\n\n');
 
     // Remove thinking tags from main content
@@ -579,7 +580,7 @@ browser.runtime.onMessage.addListener((msg) => {
             if (el) el.innerHTML = '<span class="spinner"></span>';
             setMicroBar(index, 'pulse');
         } else {
-            renderChunk(index, msg.content, !msg.isComplete);
+            renderChunk(index, msg.content, !msg.isComplete, msg.reasoning || '');
             // Save incrementally on every streaming update
             const text = msg.content || '';
             processedResults[index] = { content: { parts: [text], text }, rawContent: msg.rawContent || allChunks[index] };

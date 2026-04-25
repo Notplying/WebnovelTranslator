@@ -310,6 +310,7 @@ async function processSSEStream(reader, sessionId, message, updateChunksPageFn, 
     const decoder = new TextDecoder();
     let buffer = '';
     let fullContent = '';
+    let fullReasoning = ''; // OpenRouter stores thinking/reasoning separately
     let accumulatedSnapshot = initialSnapshot; // accept snapshot from caller for LCS dedup
     try {
         while (true) {
@@ -327,27 +328,29 @@ async function processSSEStream(reader, sessionId, message, updateChunksPageFn, 
                 try {
                     const parsed = JSON.parse(data);
                     let content = parsed.choices?.[0]?.delta?.content;
-                    if (content) {
+                    let reasoning = parsed.choices?.[0]?.delta?.reasoning; // OpenRouter reasoning field
+                    if (content || reasoning) {
                         // Trim duplicate overlap at the boundary between an original run and a retry run
                         if (accumulatedSnapshot !== null) {
-                            const { suffix, prefixLength } = longestCommonSuffixPrefix(accumulatedSnapshot, content);
+                            const { suffix, prefixLength } = longestCommonSuffixPrefix(accumulatedSnapshot, content || '');
                             if (prefixLength > 0) {
                                 console.debug(`[SSE stream] Trimmed ${prefixLength}-char overlap at resume boundary: "${suffix}"`);
-                                content = content.slice(prefixLength);
+                                content = (content || '').slice(prefixLength);
                             }
                             accumulatedSnapshot = null;
                         }
                         if (content) fullContent += content;
+                        if (reasoning) fullReasoning += reasoning;
                         const state = getStreamState(sessionId);
                         const now = Date.now();
                         if (now - state.lastUpdateTime >= UPDATE_DELAY) {
                             clearTimeout(state.debounceTimeout);
-                            updateChunksPageFn(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk });
+                            updateChunksPageFn(sessionId, { action: 'updateStreamContent', content: fullContent, reasoning: fullReasoning, rawContent: message.chunk });
                             state.lastUpdateTime = now;
                         } else {
                             clearTimeout(state.debounceTimeout);
                             state.debounceTimeout = setTimeout(() => {
-                                updateChunksPageFn(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk });
+                                updateChunksPageFn(sessionId, { action: 'updateStreamContent', content: fullContent, reasoning: fullReasoning, rawContent: message.chunk });
                                 state.lastUpdateTime = Date.now();
                             }, UPDATE_DELAY);
                         }
@@ -368,7 +371,7 @@ async function processSSEStream(reader, sessionId, message, updateChunksPageFn, 
         // Non-retryable errors propagate
         throw e;
     }
-    return { content: fullContent, snapshot: null };
+    return { content: fullContent, reasoning: fullReasoning, snapshot: null };
 }
 
 // ─── Gemini API ───────────────────────────────────────────────────────────────
@@ -537,8 +540,9 @@ async function processChunkWithOpenAICompatible(message, options, apiUrl, header
 
         const reader = response.body?.getReader();
         if (!reader) throw new Error('Response body not readable');
+        let streamResult;
         try {
-            const streamResult = await processSSEStream(reader, sessionId, message, updateChunksPage, accumulatedSnapshot);
+            streamResult = await processSSEStream(reader, sessionId, message, updateChunksPage, accumulatedSnapshot);
             fullContent = streamResult.content;
             accumulatedSnapshot = streamResult.snapshot;
         } finally {
@@ -547,7 +551,7 @@ async function processChunkWithOpenAICompatible(message, options, apiUrl, header
             if (tabCloseListener) browser.tabs.onRemoved.removeListener(tabCloseListener);
             delete sessionControllers[sessionId];
         }
-        updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk, isComplete: true });
+        updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, reasoning: streamResult.reasoning || '', rawContent: message.chunk, isComplete: true });
         await new Promise(r => setTimeout(r, 100));
         return { result: fullContent, streaming: true, complete: true };
     } catch (error) {
@@ -557,7 +561,7 @@ async function processChunkWithOpenAICompatible(message, options, apiUrl, header
         }
         if (tabCloseListener) browser.tabs.onRemoved.removeListener(tabCloseListener);
         delete sessionControllers[sessionId];
-        updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent || '', rawContent: message.chunk, isComplete: true, error: true });
+        updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent || '', reasoning: streamResult?.reasoning || '', rawContent: message.chunk, isComplete: true, error: true });
         if (error.name === 'AbortError') return { error: `${providerName} request cancelled` };
         if (error.message.includes('401')) return { error: `${providerName}: Invalid API key` };
         if (error.message.includes('429')) return { error: `${providerName}: Rate limit exceeded` };
