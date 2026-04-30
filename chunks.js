@@ -3,37 +3,108 @@
 
 // ─── Marked config ────────────────────────────────────────────────────────────
 if (typeof marked !== 'undefined') {
-    marked.use({ breaks: true, gfm: true });
-    // Disable strikethrough
-    const origLexer = marked.Lexer;
-    marked.setOptions({ pedantic: false, mangle: false, headerIds: false });
     // Disable hyperlinks — render as plaintext [text](url)
-    // Escape HTML tags to prevent custom tags like <example> from being stripped
     marked.use({
-        useNewRenderer: true,
+        breaks: true,
+        gfm: true,
+        pedantic: false,
+        mangle: false,
+        headerIds: false,
         renderer: {
-            link(token) { return token.raw; },
-            html(token) {
-                if (token.raw.trim().toLowerCase().startsWith('<img')) {
-                    return token.raw; // allow image tags to render
-                }
-                return escapeHtml(token.raw);
+            link(token) { return token.raw ?? ''; }
+        },
+        walkTokens(token) {
+            // Convert strikethrough tokens to text so the ~~content~~ is preserved literally
+            if (token.type === 'del') {
+                token.type = 'text';
+                token.text = `~~${token.text ?? ''}~~`;
+                token.raw = token.raw ?? '';
             }
         }
     });
 }
 
+// function renderMarkdown(text) {
+//     if (typeof marked === 'undefined') return `<p>${escapeHtml(text)}</p>`;
+//     // Escape all HTML tags to plaintext except <img> tags which we need for rendering.
+//     // We do this BEFORE marked.parse() so marked never sees real HTML tags → no recursion.
+//     // Strategy: temporarily extract <img> tags, escape everything else, put <img> back.
+//     const imgTags = [];
+//     let processed = (text || '').replace(/<img[^>]*>/gi, match => {
+//         imgTags.push(match);
+//         return `\x00IMG${imgTags.length - 1}\x00`;
+//     });
+//     processed = escapeHtml(processed); // escapeHtml has no effect on \x00 placeholders
+//     imgTags.forEach((tag, i) => { processed = processed.replace(`\x00IMG${i}\x00`, tag); });
+//     const html = marked.parse(processed);
+//     return DOMPurify.sanitize(html, {
+//         ADD_ATTR: ['target', 'data-original-src', 'style'],
+//         FORBID_TAGS: ['style', 'script']
+//     });
+// }
+
+// function escapeHtml(t) {
+//     return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+// }
+function decodeHtmlEntities(t) {
+    return t
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'");
+}
+
+function escapeHtml(t) {
+    return t
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
 function renderMarkdown(text) {
     if (typeof marked === 'undefined') return `<p>${escapeHtml(text)}</p>`;
-    const html = marked.parse(text || '');
+
+    const imgTags = [];
+    // Decode entities first so we always work with literal chars, never double-encoded strings
+    let processed = decodeHtmlEntities(text || '');
+
+    // Extract <img> tags before escaping
+    processed = processed.replace(/<img[^>]*>/gi, match => {
+        imgTags.push(match);
+        return `\x00IMG${imgTags.length - 1}\x00`;
+    });
+
+    // Now escape everything (starting from clean literals, so no double-encoding)
+    processed = escapeHtml(processed);
+
+    // Restore <img> tags
+    imgTags.forEach((tag, i) => {
+        processed = processed.replace(`\x00IMG${i}\x00`, tag);
+    });
+
+    const html = marked.parse(processed);
     return DOMPurify.sanitize(html, {
         ADD_ATTR: ['target', 'data-original-src', 'style'],
         FORBID_TAGS: ['style', 'script']
     });
 }
+// Extract thinking content from <think>...</think> tags
+function extractThinking(text) {
+    const thinking = [];
+    const regex = /<think>([\s\S]*?)<\/think>/gi;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+        const content = match[1].trim();
+        if (content) thinking.push(content);
+    }
+    return thinking;
+}
 
-function escapeHtml(t) {
-    return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+// Remove thinking tags from text
+function removeThinking(text) {
+    return text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 }
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -45,9 +116,23 @@ let isProcessing = false;
 let totalChunks = 0;
 let completedChunks = 0;
 let processedResults = [];   // { content, rawContent } per index
+let processedThinking = [];  // thinking content per index (extracted from <think> tags)
 let streamingIndex = -1;
 let reprocessingState = { isActive: false, targetIndex: -1 };
 let _terminated = false;
+
+// ─── Image Blob Cache cleanup ─────────────────────────────────────────────────
+function cleanupImageBlobCache() {
+    for (const blobUrl of imageBlobCache.values()) {
+        URL.revokeObjectURL(blobUrl);
+    }
+    imageBlobCache.clear();
+    // Abort any in-flight image fetches
+    for (const controller of imageAbortControllers.values()) {
+        controller.abort();
+    }
+    imageAbortControllers.clear();
+}
 
 // ─── URL param ────────────────────────────────────────────────────────────────
 function getSessionId() {
@@ -156,13 +241,34 @@ function setMicroBar(index, mode) {
 
 // ─── Render content into a chunk ──────────────────────────────────────────────
 const imageBlobCache = new Map();
+const imageAbortControllers = new Map(); // src → AbortController
 
-function renderChunk(index, text, isStreaming = false) {
+// Escape a string for use as a CSS attribute selector value
+function escapeCssAttr(str) {
+    return str.replace(/[\\"'`\n\r\t\f]/g, c => ({
+        '\\': '\\\\', '"': '\\"', "'": "\\'", '\n': '\\A', '\r': '\\D',
+        '\t': '\\9', '\f': '\\C'
+    })[c]);
+}
+
+function renderChunk(index, text, isStreaming = false, reasoning = '') {
     const contentEl = document.getElementById(`chunk-content-${index}`);
     if (!contentEl) return;
+
+    // Extract thinking from <think> tags and combine with OpenRouter reasoning
+    const thinkingParts = extractThinking(text);
+    if (reasoning) thinkingParts.push(reasoning);
+    processedThinking[index] = thinkingParts.join('\n\n');
+
+    // Remove thinking tags from main content
+    const cleanText = removeThinking(text);
+
     contentEl.classList.toggle('streaming', isStreaming);
-    contentEl.innerHTML = renderMarkdown(text);
+    contentEl.innerHTML = renderMarkdown(cleanText);
     handleImages(contentEl);
+
+    // Render thinking section if there's thinking content
+    renderThinkingSection(index);
 }
 
 function renderMultiPart(index, parts) {
@@ -171,6 +277,15 @@ function renderMultiPart(index, parts) {
     if (!tabsEl || !contentsEl) return;
     tabsEl.innerHTML = '';
     contentsEl.innerHTML = '';
+
+    // Extract thinking content from all parts
+    const allThinking = [];
+    parts.forEach(part => {
+        const thinking = extractThinking(part);
+        allThinking.push(...thinking);
+    });
+    processedThinking[index] = allThinking.join('\n\n');
+
     parts.forEach((part, pi) => {
         const tab = document.createElement('button');
         tab.className = 'part-tab' + (pi === 0 ? ' active' : '');
@@ -185,11 +300,14 @@ function renderMultiPart(index, parts) {
         content.dataset.part = pi;
         const area = document.createElement('div');
         area.className = 'chunk-content-area';
-        area.innerHTML = renderMarkdown(part);
+        area.innerHTML = renderMarkdown(removeThinking(part));
         handleImages(area);
         content.appendChild(area);
         contentsEl.appendChild(content);
     });
+
+    // Render thinking section if there's thinking content
+    renderThinkingSection(index);
 }
 
 function handleImages(el) {
@@ -204,6 +322,15 @@ function handleImages(el) {
 
         img.style.maxWidth = '100%';
 
+        // Block dangerous URL schemes — prevents javascript: XSS and similar
+        if (/^javascript:/i.test(src) || /^data:(?!image\/(png|jpeg|gif|webp))/i.test(src)) {
+            const fallback = document.createElement('div');
+            fallback.style.cssText = 'background:rgba(255,255,255,0.05);border:1px dashed rgba(255,255,255,0.1);border-radius:6px;padding:12px;font-size:0.75rem;color:var(--text-muted);text-align:center';
+            fallback.textContent = '📷 Blocked unsafe image URL';
+            img.replaceWith(fallback);
+            return;
+        }
+
         if (src.match(/\.file(\?.*)?$/i)) {
             img.dataset.originalSrc = src;
 
@@ -214,23 +341,38 @@ function handleImages(el) {
                 img.src = loadingSvg;
                 imageBlobCache.set(src, loadingSvg);
 
-                fetch(src)
+                // Abort in-flight fetch if a new fetch for the same src starts (avoid duplicate fetches)
+                if (imageAbortControllers.has(src)) {
+                    imageAbortControllers.get(src).abort();
+                }
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 30000); // 30s timeout
+                imageAbortControllers.set(src, controller);
+
+                fetch(src, { signal: controller.signal })
                     .then(res => {
+                        clearTimeout(timeout);
                         if (!res.ok) throw new Error(`HTTP ${res.status}`);
                         return res.blob();
                     })
                     .then(blob => {
-                        const pngBlob = new Blob([blob], { type: 'image/png' });
-                        const objUrl = URL.createObjectURL(pngBlob);
+                        imageAbortControllers.delete(src);
+                        const objUrl = URL.createObjectURL(blob);
                         imageBlobCache.set(src, objUrl);
-                        document.querySelectorAll(`img[data-original-src="${src.replace(/"/g, '\\"')}"]`).forEach(targetImg => {
+                        const escapedSrc = escapeCssAttr(src);
+                        document.querySelectorAll(`img[data-original-src="${escapedSrc}"]`).forEach(targetImg => {
                             targetImg.src = objUrl;
                         });
                     })
                     .catch(err => {
+                        clearTimeout(timeout);
+                        imageAbortControllers.delete(src);
+                        // Ignore AbortError (intentional abort)
+                        if (err.name === 'AbortError') return;
                         console.error('Failed to convert .file image:', err);
                         imageBlobCache.delete(src);
-                        document.querySelectorAll(`img[data-original-src="${src.replace(/"/g, '\\"')}"]`).forEach(targetImg => {
+                        const escapedSrc = escapeCssAttr(src);
+                        document.querySelectorAll(`img[data-original-src="${escapedSrc}"]`).forEach(targetImg => {
                             targetImg.src = src;
                         });
                     });
@@ -238,27 +380,75 @@ function handleImages(el) {
         } else if (src) {
             img.src = src;
         }
+    });
 
-        img.addEventListener('click', () => {
+    // Event delegation for image clicks and errors — bind once per container to avoid duplicates
+    if (!el.dataset.imageHandlersBound) {
+        el.dataset.imageHandlersBound = true;
+        el.addEventListener('click', e => {
+            const img = e.target.closest('img');
+            if (!img) return;
             const openSrc = img.dataset.originalSrc || img.src;
             if (openSrc && !openSrc.startsWith('data:image/svg+xml')) {
                 window.open(openSrc, '_blank');
             }
         });
 
-        img.addEventListener('error', () => {
-            if (img.src && img.src.startsWith('data:image/svg+xml')) return;
+        el.addEventListener('error', e => {
+            const img = e.target.closest('img');
+            if (!img || !img.src || img.src.startsWith('data:image/svg+xml')) return;
             const fallback = document.createElement('div');
             fallback.style.cssText = 'background:rgba(255,255,255,0.05);border:1px dashed rgba(255,255,255,0.1);border-radius:6px;padding:12px;font-size:0.75rem;color:var(--text-muted);text-align:center';
             fallback.textContent = '📷 Image failed to load';
             img.replaceWith(fallback);
-        });
+        }, true);
+    }
+}
+
+// ─── Render thinking section ────────────────────────────────────────────────────
+function renderThinkingSection(index) {
+    const thinkingContent = processedThinking[index];
+    const card = document.getElementById(`chunk-${index}`);
+    if (!card) return;
+
+    // Remove existing thinking section if any
+    const existingSection = card.querySelector('.thinking-section');
+    if (existingSection) existingSection.remove();
+
+    if (!thinkingContent) return;
+
+    const thinkingSection = document.createElement('div');
+    thinkingSection.className = 'thinking-section';
+    thinkingSection.innerHTML = `
+        <div class="thinking-header" id="thinking-header-${index}">
+            <span class="thinking-toggle">▸</span>
+            <span class="thinking-label">🤔 Thinking</span>
+        </div>
+        <div class="thinking-content" id="thinking-content-${index}">${escapeHtml(thinkingContent)}</div>
+    `;
+
+    // Insert at the beginning of the chunk body (above the content)
+    const chunkBody = card.querySelector('.chunk-body');
+    if (chunkBody) {
+        chunkBody.insertBefore(thinkingSection, chunkBody.firstChild);
+    }
+
+    // Toggle collapse/expand
+    const header = thinkingSection.querySelector('.thinking-header');
+    header.addEventListener('click', (e) => {
+        e.stopPropagation();
+        thinkingSection.classList.toggle('collapsed');
+        header.querySelector('.thinking-toggle').textContent = thinkingSection.classList.contains('collapsed') ? '▸' : '▾';
     });
+
+    // Start collapsed
+    thinkingSection.classList.add('collapsed');
 }
 
 // ─── Process all chunks sequentially ─────────────────────────────────────────
 async function processAllChunks(resume = false) {
     const sessId = getSessionId();
+    if (!sessId) { showBanner('No session ID — cannot process chunks.', 'error'); isProcessing = false; return; }
     _terminated = false;
     isProcessing = true;
     document.getElementById('terminateBtn').style.display = '';
@@ -279,12 +469,20 @@ async function processAllChunks(resume = false) {
         let success = false;
         for (let attempt = 0; attempt < retryCount; attempt++) {
             if (_terminated) break;
+            _streamCompleteFlags[i] = false; // Reset per-chunk streaming state before each retry
             updateAttemptProgress(attempt + 1, retryCount);
+            // Capture accumulated content as checkpoint for this retry attempt.
+            // Uses a minimal directive to avoid confusing LLMs that might echo the marker text.
+            const existingContent = processedResults[i]?.content?.text || null;
+            const checkpointPrefix = existingContent
+                ? `${prefix}\n\nContinue from the following content:\n${existingContent}\n\n`
+                : prefix;
             try {
                 const result = await browser.runtime.sendMessage({
                     action: 'processChunk',
                     chunk: allChunks[i],
-                    prefix, suffix,
+                    prefix: checkpointPrefix,
+                    suffix,
                     sessionId: sessId
                 });
 
@@ -293,8 +491,16 @@ async function processAllChunks(resume = false) {
 
                 if (result.streaming) {
                     // Streaming updates come via message listener; wait for them
-                    await waitForStreamComplete(i);
+                    const { timedOut } = await waitForStreamComplete(i);
                     if (_terminated) { success = !!processedResults[i]?.content?.text; break; }
+                    // If safety timeout fired but we have a direct response, use it instead of retrying
+                    if (timedOut && result.result) {
+                        processedResults[i] = { content: { parts: [result.result], text: result.result }, rawContent: allChunks[i] };
+                        renderChunk(i, result.result, false);
+                        await saveChunk(i, processedResults[i].content, allChunks[i]);
+                        success = true; break;
+                    }
+                    if (timedOut) { throw new Error('Streaming timed out after 5 minutes'); }
                     success = true; break;
                 }
 
@@ -343,10 +549,13 @@ async function processAllChunks(resume = false) {
 function waitForStreamComplete(index) {
     return new Promise(resolve => {
         const check = setInterval(() => {
-            if (!isStreamingActive(index)) { clearInterval(check); resolve(); }
+            if (!isStreamingActive(index)) { clearInterval(check); resolve({ timedOut: false }); }
         }, 200);
-        // Safety timeout 5 min
-        setTimeout(() => { clearInterval(check); resolve(); }, 300000);
+        // Safety timeout 5 min — signal timeout so caller can treat as failure
+        setTimeout(() => {
+            clearInterval(check);
+            resolve({ timedOut: true });
+        }, 300000);
     });
 }
 
@@ -371,7 +580,7 @@ browser.runtime.onMessage.addListener((msg) => {
             if (el) el.innerHTML = '<span class="spinner"></span>';
             setMicroBar(index, 'pulse');
         } else {
-            renderChunk(index, msg.content, !msg.isComplete);
+            renderChunk(index, msg.content, !msg.isComplete, msg.reasoning || '');
             // Save incrementally on every streaming update
             const text = msg.content || '';
             processedResults[index] = { content: { parts: [text], text }, rawContent: msg.rawContent || allChunks[index] };
@@ -458,9 +667,17 @@ function downloadAll() {
 // ─── Reprocess individual chunk ───────────────────────────────────────────────
 async function reprocessOne(index) {
     if (reprocessingState.isActive) { showToast('Already reprocessing, please wait.', 'error'); return; }
-    if (isProcessing && streamingIndex !== index) { showToast('Wait for current chunk to finish.', 'error'); return; }
+    // Block reprocessing if ANY chunk is actively processing (even if it's this one)
+    if (isProcessing) { showToast('Wait for current processing to finish first.', 'error'); return; }
     const sessId = getSessionId();
-    const storedData = await browser.runtime.sendMessage({ action: 'getStoredData', sessionId: sessId });
+
+    let storedData;
+    try {
+        storedData = await browser.runtime.sendMessage({ action: 'getStoredData', sessionId: sessId });
+    } catch (err) {
+        showToast(`❌ Failed to load session data: ${err.message}`, 'error');
+        return;
+    }
     const pfx = storedData.prefix || prefix;
     const sfx = storedData.suffix || suffix;
     const rc = storedData.retryCount || retryCount;
@@ -482,11 +699,29 @@ async function reprocessOne(index) {
     document.getElementById(`chunk-${index}`)?.classList.remove('collapsed');
 
     for (let attempt = 0; attempt < rc; attempt++) {
+        _streamCompleteFlags[index] = false; // Reset per-chunk streaming state before each retry
         updateAttemptProgress(attempt + 1, rc);
+        // Recompute checkpoint from current partial output each attempt (supports streaming resume)
+        const currentContent = processedResults[index]?.content?.text || null;
+        const checkpointPrefix = currentContent ? `${pfx}\n\nContinue from the following content:\n${currentContent}\n\n` : pfx;
         try {
-            const result = await browser.runtime.sendMessage({ action: 'processChunk', chunk: allChunks[index], prefix: pfx, suffix: sfx, sessionId: sessId });
+            const result = await browser.runtime.sendMessage({ action: 'processChunk', chunk: allChunks[index], prefix: checkpointPrefix, suffix: sfx, sessionId: sessId });
             if (result.error) throw new Error(result.error);
-            if (result.streaming) { await waitForStreamComplete(index); return; }
+            if (result.streaming) {
+                const { timedOut } = await waitForStreamComplete(index);
+                reprocessingState.isActive = false;
+                // If safety timeout fired but we have a direct response, use it instead of retrying
+                if (timedOut && result.result) {
+                    processedResults[index] = { content: { parts: [result.result], text: result.result }, rawContent: allChunks[index] };
+                    renderChunk(index, result.result, false);
+                    await saveChunk(index, processedResults[index].content, allChunks[index]);
+                    setChunkStatus(index, 'done'); setMicroBar(index, 'done');
+                    showToast('✅ Reprocessed!', 'success');
+                    return;
+                }
+                if (timedOut) { throw new Error('Streaming timed out after 5 minutes'); }
+                return;
+            }
             const parts = result.parts || [result.result];
             parts.length > 1 ? renderMultiPart(index, parts) : renderChunk(index, result.result, false);
             processedResults[index] = { content: { parts, text: result.result }, rawContent: allChunks[index] };
@@ -502,19 +737,21 @@ async function reprocessOne(index) {
                 reprocessingState.isActive = false;
                 return;
             }
-            await new Promise(r => setTimeout(r, 5000));
+            await new Promise(r => setTimeout(r, 7000));
         }
     }
 }
 
 // ─── Reprocess all ────────────────────────────────────────────────────────────
 async function reprocessAll() {
+    if (isProcessing) { showToast('Processing already in progress. Please wait or terminate first.', 'error'); return; }
     if (!confirm(`Reprocess all ${totalChunks} chunks? All saved results will be cleared.`)) return;
     const sessId = getSessionId();
     const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
     delete processedChunks[sessId];
     await browser.storage.local.set({ processedChunks });
     processedResults = [];
+    processedThinking = [];
     completedChunks = 0;
     _terminated = false;
     _streamCompleteFlags = {};
@@ -525,6 +762,7 @@ async function reprocessAll() {
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 async function initPage() {
+    cleanupImageBlobCache(); // Clear any leftover Blob URLs from previous sessions
     sessionId = getSessionId();
     document.getElementById('sessionId').textContent = sessionId ? `Session: ${sessionId.slice(0, 12)}…` : 'No session';
 
@@ -534,7 +772,13 @@ async function initPage() {
     const { translationSessions = [] } = await browser.storage.local.get('translationSessions');
     const session = translationSessions.find(s => s.id === sessionId);
 
-    let storedData = await browser.runtime.sendMessage({ action: 'getStoredData', sessionId });
+    let storedData;
+    try {
+        storedData = await browser.runtime.sendMessage({ action: 'getStoredData', sessionId });
+    } catch (err) {
+        showBanner(`Failed to load session data: ${err.message}`, 'error');
+        return;
+    }
     allChunks = session?.chunks || storedData.chunks || [];
     prefix = session?.prefix || storedData.prefix || '';
     suffix = session?.suffix || storedData.suffix || '';
@@ -555,6 +799,7 @@ async function initPage() {
     const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
     const saved = processedChunks[sessionId] || [];
     processedResults = new Array(totalChunks).fill(null);
+    processedThinking = new Array(totalChunks).fill(null);
 
     let hasPartial = false;
     saved.forEach((chunk, i) => {
@@ -584,6 +829,9 @@ async function initPage() {
 
 // ─── Wire up buttons ──────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+    // Clean up Blob URLs when page unloads
+    window.addEventListener('beforeunload', cleanupImageBlobCache);
+
     document.getElementById('reprocessAllBtn')?.addEventListener('click', reprocessAll);
     document.getElementById('copyAllBtn')?.addEventListener('click', copyAll);
     document.getElementById('downloadAllBtn')?.addEventListener('click', downloadAll);
@@ -592,7 +840,11 @@ document.addEventListener('DOMContentLoaded', () => {
         _terminated = true;
         if (idx >= 0) _streamCompleteFlags[idx] = true;
 
-        try { await browser.runtime.sendMessage({ action: 'terminateRequest', sessionId: getSessionId() }); } catch (e) { }
+        try {
+            await browser.runtime.sendMessage({ action: 'terminateRequest', sessionId: getSessionId() });
+        } catch (e) {
+            console.error('Failed to send terminateRequest:', e);
+        }
 
         // Re-render from processedResults to guarantee content is visible
         if (idx >= 0 && processedResults[idx]?.content?.text) {

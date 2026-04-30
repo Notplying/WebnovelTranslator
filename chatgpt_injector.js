@@ -5,11 +5,24 @@
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.action === 'paste_chunk_v2') {
             console.log("Received paste_chunk_v2 message");
+            if (typeof message.text !== 'string') {
+                sendResponse({ success: false, error: 'invalid text' });
+                return true;
+            }
             pasteTextToChatGPT(message.text).then(success => {
                 sendResponse({ success: success });
+            }).catch(err => {
+                console.error('pasteTextToChatGPT error:', err);
+                sendResponse({ success: false, error: err.message });
             });
             return true;
         }
+    });
+
+    // Remove listener on page unload to prevent memory leaks
+    window.addEventListener('unload', () => {
+        // Message listeners in content scripts are cleaned up automatically on page unload,
+        // but we keep this for explicitness and compatibility.
     });
 
     async function pasteTextToChatGPT(text) {
@@ -21,28 +34,19 @@
 
         try {
             textarea.focus();
-            textarea.textContent = '';
 
             let success = document.execCommand('insertText', false, text);
 
-            if (!success && navigator.clipboard && navigator.clipboard.writeText) {
-                try {
-                    // Write to clipboard for user-initiated Ctrl+V, but we still
-                    // fall through to the DOM insertion below regardless of the result.
-                    await navigator.clipboard.writeText(text);
-                } catch (e) {
-                    console.warn("Clipboard write failed", e);
-                }
-            }
-
             if (!success) {
-                // DOM insertion fallback: directly set textContent and fire synthetic events.
-                textarea.textContent = text;
+                // DOM insertion fallback: directly set value and fire synthetic events.
+                textarea.value = text;
                 textarea.dispatchEvent(new Event('input', { bubbles: true }));
                 textarea.dispatchEvent(new Event('change', { bubbles: true }));
-                if (textarea.textContent === text) success = true;
+                if (textarea.value === text) success = true;
             }
 
+            // Reset min-height and adjust height for auto-growing textarea
+            textarea.style.minHeight = '0';
             textarea.style.height = 'auto';
             textarea.style.height = textarea.scrollHeight + 'px';
 

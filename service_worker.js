@@ -1,10 +1,14 @@
 // service_worker.js — Manifest V3 Service Worker for AI Webnovel Translator
 // Cross-browser (Firefox + Chrome) via webextension-polyfill
 
-// In Chrome: service_worker.js runs as a true SW, so we load both via importScripts
-// In Firefox: background.scripts loads both before this file, so we guard against double load
+// In Firefox: background.scripts loads these before this file runs, so no importScripts needed.
+// In Chrome: service_worker runs as a true SW with no background.scripts, so we load via importScripts.
+// Guard against double-load in either case.
 if (typeof browser === 'undefined' || !browser.runtime) {
     importScripts('browser-polyfill.min.js');
+    if (typeof WEB_PERMISSIONS === 'undefined') {
+        importScripts('shared_web_permissions.js');
+    }
 }
 // jsrsasign-all-min.js removed – no KJUR/RSAKey symbols are used in this file.
 
@@ -39,6 +43,17 @@ function clearStreamState(sessionId) {
 // Track tab IDs and AbortControllers per session
 let sessionTabIds = {};
 let sessionControllers = {};
+
+// Periodic cleanup of stale sessionTabIds entries — removes entries for tabs that no longer exist
+setInterval(async () => {
+    const tabs = await browser.tabs.query({}).catch(() => []);
+    const validTabIds = new Set(tabs.map(t => t.id));
+    for (const [sessionId, tabId] of Object.entries(sessionTabIds)) {
+        if (!validTabIds.has(tabId)) {
+            delete sessionTabIds[sessionId];
+        }
+    }
+}, 15 * 60 * 1000); // every 15 minutes
 
 // ─── Toolbar click → inject content script ───────────────────────────────────
 browser.action.onClicked.addListener(function (tab) {
@@ -85,7 +100,10 @@ browser.runtime.onInstalled.addListener(function (details) {
 // ─── Message Router ───────────────────────────────────────────────────────────
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.sessionId && sender?.tab?.id) {
-        sessionTabIds[message.sessionId] = sender.tab.id;
+        // Validate before storing in global state
+        if (typeof message.sessionId === 'string' && message.sessionId.length > 0 && Number.isInteger(sender.tab.id)) {
+            sessionTabIds[message.sessionId] = sender.tab.id;
+        }
     }
 
     if (message.action === 'processChunk') {
@@ -95,13 +113,13 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
     }
     if (message.action === 'openChunksPage') {
-        if (message.chunks) {
-            const payload = { chunks: message.chunks, prefix: message.prefix, suffix: message.suffix, retryCount: message.retryCount };
-            browser.storage.local.remove('lastChunksData').then(() => openChunksPage(payload));
-        } else {
-            openChunksPage(null);
-        }
-        return false;
+        const payload = message.chunks
+            ? { chunks: message.chunks, prefix: message.prefix, suffix: message.suffix, retryCount: message.retryCount }
+            : null;
+        openChunksPage(payload)
+            .then(() => sendResponse({ success: true }))
+            .catch(error => { console.error('Error in openChunksPage:', error); sendResponse({ success: false, error: error.message }); });
+        return true;
     }
     if (message.action === 'updateChunksPage') {
         updateChunksPage(message.sessionId, message.data);
@@ -177,13 +195,21 @@ async function openChunksPage(payload) {
     await updateSessionStorage(contentSessionId, sessionDataForStorage);
 
     const url = browser.runtime.getURL(`chunks.html?session=${contentSessionId}`);
-    const tab = await browser.tabs.create({ url });
+    let tab;
+    try {
+        tab = await browser.tabs.create({ url });
+    } catch (err) {
+        console.error('Failed to create chunks tab (tabs permission may be denied):', err);
+        throw err;
+    }
     sessionTabIds[contentSessionId] = tab.id;
 
     browser.tabs.onUpdated.addListener(function listener(tabId, info) {
         if (tabId === tab.id && info.status === 'complete') {
             browser.tabs.onUpdated.removeListener(listener);
-            browser.tabs.sendMessage(tab.id, { action: 'initializeChunksPage' });
+            browser.tabs.sendMessage(tab.id, { action: 'initializeChunksPage' }).catch(err => {
+                console.error('Failed to initialize chunks page:', err);
+            });
         }
     });
 }
@@ -192,9 +218,9 @@ function updateChunksPage(sessionId, data) {
     const tabId = sessionTabIds[sessionId];
     if (tabId != null) {
         browser.tabs.sendMessage(tabId, data).catch(error => {
-            if (error.message && error.message.includes('Could not establish connection')) {
-                delete sessionTabIds[sessionId];
-            }
+            // Clean up stale tab mapping for any error (not just connection errors)
+            delete sessionTabIds[sessionId];
+            console.warn('updateChunksPage: tab message failed:', error.message || error);
         });
     }
 }
@@ -225,55 +251,134 @@ async function processChunk(message) {
     throw new Error('Invalid API type selected');
 }
 
+/**
+ * Finds the longest substring that is both a suffix of oldStr and a prefix of newStr.
+ * Used to trim duplicate overlap at stream boundaries when a retry run continues
+ * from where a previous run left off.
+ *
+ * @param {string} oldStr - The previously accumulated content (ending portion checked).
+ * @param {string} newStr - The new streaming content (starting portion checked).
+ * @returns {{ suffix: string, prefixLength: number }} overlap substring and chars to skip in newStr
+ */
+function longestCommonSuffixPrefix(oldStr, newStr) {
+    const maxLen = Math.min(oldStr.length, newStr.length);
+    let overlapLen = 0;
+    for (let i = 1; i <= maxLen; i++) {
+        const suffix = oldStr.slice(-i);
+        if (newStr.startsWith(suffix)) overlapLen = i;
+    }
+    const suffix = overlapLen > 0 ? oldStr.slice(-overlapLen) : '';
+    return { suffix, prefixLength: overlapLen };
+}
+
+/**
+ * Wraps ReadableStreamDefaultReader.read() with retry logic for transient network errors.
+ *
+ * @param {ReadableStreamDefaultReader} reader
+ * @param {number} maxErrors - Maximum consecutive errors before throwing (default 3)
+ * @param {number} baseDelayMs - Initial delay between retries in ms (default 1000)
+ * @returns {Promise<{done: boolean, value: Uint8Array|null}>}
+ */
+async function readWithRetry(reader, maxErrors = 3, baseDelayMs = 1000) {
+    let errors = 0;
+    let delay = baseDelayMs;
+    while (true) {
+        try {
+            return await reader.read();
+        } catch (e) {
+            // Do not retry on abort/cancel — these are intentional terminations
+            if (e.name === 'AbortError' || (e.name === 'TypeError' && e.message.includes('cancelled'))) {
+                throw e;
+            }
+            // TypeError with "error in input stream" or network-level failures are retryable
+            if (e.name === 'TypeError' || e.message.includes('error in input stream') || e.message.includes('network')) {
+                errors++;
+                if (errors > maxErrors) throw e;
+                console.warn(`[Stream read] Attempt ${errors} failed: ${e.message}. Retrying in ${delay}ms...`);
+                await new Promise(r => setTimeout(r, delay));
+                delay *= 2; // exponential backoff: 1s → 2s → 4s
+                continue;
+            }
+            // Any other error is non-retryable
+            throw e;
+        }
+    }
+}
+
 // ─── Streaming helper (shared SSE logic for OpenAI-compatible APIs) ───────────
-async function processSSEStream(reader, sessionId, message, updateChunksPageFn) {
+async function processSSEStream(reader, sessionId, message, updateChunksPageFn, initialSnapshot = null) {
     const decoder = new TextDecoder();
     let buffer = '';
     let fullContent = '';
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+    let fullReasoning = ''; // OpenRouter stores thinking/reasoning separately
+    let accumulatedSnapshot = initialSnapshot; // accept snapshot from caller for LCS dedup
+    try {
         while (true) {
-            const lineEnd = buffer.indexOf('\n');
-            if (lineEnd === -1) break;
-            const line = buffer.slice(0, lineEnd).trim();
-            buffer = buffer.slice(lineEnd + 1);
-            if (!line.startsWith('data: ')) continue;
-            const data = line.slice(6);
-            if (data === '[DONE]') break;
-            try {
-                const parsed = JSON.parse(data);
-                const content = parsed.choices?.[0]?.delta?.content;
-                if (content) {
-                    fullContent += content;
-                    const state = getStreamState(sessionId);
-                    const now = Date.now();
-                    if (now - state.lastUpdateTime >= UPDATE_DELAY) {
-                        clearTimeout(state.debounceTimeout);
-                        updateChunksPageFn(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk });
-                        state.lastUpdateTime = now;
-                    } else {
-                        clearTimeout(state.debounceTimeout);
-                        state.debounceTimeout = setTimeout(() => {
-                            updateChunksPageFn(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk });
-                            state.lastUpdateTime = Date.now();
-                        }, UPDATE_DELAY);
+            const { done, value } = await readWithRetry(reader);
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            while (true) {
+                const lineEnd = buffer.indexOf('\n');
+                if (lineEnd === -1) break;
+                const line = buffer.slice(0, lineEnd).trim();
+                buffer = buffer.slice(lineEnd + 1);
+                if (!line.startsWith('data: ')) continue;
+                const data = line.slice(6);
+                if (data === '[DONE]') break;
+                try {
+                    const parsed = JSON.parse(data);
+                    let content = parsed.choices?.[0]?.delta?.content;
+                    let reasoning = parsed.choices?.[0]?.delta?.reasoning; // OpenRouter reasoning field
+                    if (content || reasoning) {
+                        // Trim duplicate overlap at the boundary between an original run and a retry run
+                        if (accumulatedSnapshot !== null) {
+                            const { suffix, prefixLength } = longestCommonSuffixPrefix(accumulatedSnapshot, content || '');
+                            if (prefixLength > 0) {
+                                console.debug(`[SSE stream] Trimmed ${prefixLength}-char overlap at resume boundary: "${suffix}"`);
+                                content = (content || '').slice(prefixLength);
+                            }
+                            accumulatedSnapshot = null;
+                        }
+                        if (content) fullContent += content;
+                        if (reasoning) fullReasoning += reasoning;
+                        const state = getStreamState(sessionId);
+                        const now = Date.now();
+                        if (now - state.lastUpdateTime >= UPDATE_DELAY) {
+                            clearTimeout(state.debounceTimeout);
+                            updateChunksPageFn(sessionId, { action: 'updateStreamContent', content: fullContent, reasoning: fullReasoning, rawContent: message.chunk });
+                            state.lastUpdateTime = now;
+                        } else {
+                            clearTimeout(state.debounceTimeout);
+                            state.debounceTimeout = setTimeout(() => {
+                                updateChunksPageFn(sessionId, { action: 'updateStreamContent', content: fullContent, reasoning: fullReasoning, rawContent: message.chunk });
+                                state.lastUpdateTime = Date.now();
+                            }, UPDATE_DELAY);
+                        }
                     }
+                } catch (e) {
+                    // Partial SSE chunks are expected during streaming and are non-fatal.
+                    console.debug('[SSE parse] Ignoring benign parse error:', e.message, '| raw data:', data);
                 }
-            } catch (e) {
-                // Partial SSE chunks are expected during streaming and are non-fatal.
-                console.debug('[SSE parse] Ignoring benign parse error:', e.message, '| raw data:', data);
             }
         }
+    } catch (e) {
+        // Capture accumulated content for LCS deduplication on retry
+        if (e.name === 'TypeError' || e.message.includes('input stream') || e.message.includes('network')) {
+            accumulatedSnapshot = fullContent;
+            // Throw to signal retry is needed — caller will catch and handle as error
+            throw e;
+        }
+        // Non-retryable errors propagate
+        throw e;
     }
-    return fullContent;
+    return { content: fullContent, reasoning: fullReasoning, snapshot: null };
 }
 
 // ─── Gemini API ───────────────────────────────────────────────────────────────
 async function processChunkWithGemini(message, options) {
     let tabCloseListener;
     let fullContent = '';
+    let accumulatedSnapshot = null; // captures fullContent state at the last successful chunk; used for LCS dedup on retry
     const controller = new AbortController();
     const sessionId = message.sessionId;
     sessionControllers[sessionId] = controller;
@@ -300,6 +405,16 @@ async function processChunkWithGemini(message, options) {
         if (!isNaN(t) && t > 0) requestBody.generationConfig.maxOutputTokens = t;
     }
 
+    // AbortController-based timeout (works with the session's controller)
+    const timeoutMs = (parseInt(options.apiTimeout) || 120) * 1000;
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('API response timeout')), timeoutMs);
+    });
+    const controllerWithTimeout = new AbortController();
+    const originalSignal = controller.signal;
+    originalSignal.addEventListener('abort', () => { clearTimeout(timeoutId); controllerWithTimeout.abort(); }, { once: true });
+
     try {
         {
             tabCloseListener = tabId => {
@@ -308,9 +423,12 @@ async function processChunkWithGemini(message, options) {
             browser.tabs.onRemoved.addListener(tabCloseListener);
             updateChunksPage(sessionId, { action: 'updateStreamContent', content: '', rawContent: message.chunk, isInitial: true });
 
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${options.geminiModelId}:streamGenerateContent?key=${options.geminiApiKey}&alt=sse`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody), signal: controller.signal,
-            });
+            const response = await Promise.race([
+                fetch(`https://generativelanguage.googleapis.com/v1beta/models/${options.geminiModelId}:streamGenerateContent?key=${options.geminiApiKey}&alt=sse`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody), signal: controllerWithTimeout.signal,
+                }),
+                timeoutPromise
+            ]);
             if (!response.ok) {
                 const err = await response.json().catch(() => ({}));
                 throw new Error(`HTTP ${response.status}: ${err.error?.message || ''}`);
@@ -322,7 +440,7 @@ async function processChunkWithGemini(message, options) {
             let buffer = '';
             try {
                 while (true) {
-                    const { done, value } = await reader.read();
+                    const { done, value } = await readWithRetry(reader);
                     if (done) break;
                     buffer += decoder.decode(value, { stream: true });
                     while (true) {
@@ -336,9 +454,18 @@ async function processChunkWithGemini(message, options) {
                         if (!line.startsWith('{') || !line.endsWith('}')) continue;
                         try {
                             const parsed = JSON.parse(line);
-                            const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+                            let text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
                             if (text) {
-                                fullContent += text;
+                                // Trim duplicate overlap at the boundary with any previous stream run
+                                if (accumulatedSnapshot !== null) {
+                                    const { suffix, prefixLength } = longestCommonSuffixPrefix(accumulatedSnapshot, text);
+                                    if (prefixLength > 0) {
+                                        console.debug(`[Gemini stream] Trimmed ${prefixLength}-char overlap at resume boundary: "${suffix}"`);
+                                        text = text.slice(prefixLength);
+                                    }
+                                    accumulatedSnapshot = null; // only deduplicate once at the boundary
+                                }
+                                if (text) fullContent += text;
                                 const state = getStreamState(sessionId);
                                 const now = Date.now();
                                 if (now - state.lastUpdateTime >= UPDATE_DELAY) {
@@ -367,6 +494,10 @@ async function processChunkWithGemini(message, options) {
             return { result: fullContent, streaming: true, complete: true };
         }
     } catch (error) {
+        // Capture accumulated content for LCS deduplication on retry
+        if (error.name === 'TypeError' || error.message.includes('input stream') || error.message.includes('network')) {
+            accumulatedSnapshot = fullContent;
+        }
         if (tabCloseListener) browser.tabs.onRemoved.removeListener(tabCloseListener);
         delete sessionControllers[sessionId];
         updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk, isComplete: true, error: true });
@@ -380,35 +511,57 @@ async function processChunkWithGemini(message, options) {
 async function processChunkWithOpenAICompatible(message, options, apiUrl, headers, requestBody, providerName) {
     let tabCloseListener;
     let fullContent = '';
+    let accumulatedSnapshot = null; // persists across chunk-level retries; used for LCS dedup if stream resumes
     const controller = new AbortController();
     const sessionId = message.sessionId;
     sessionControllers[sessionId] = controller;
     const isStreaming = true;
+
+    // AbortController-based timeout (works with the session's controller)
+    const timeoutMs = (parseInt(options.apiTimeout) || 120) * 1000;
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('API response timeout')), timeoutMs);
+    });
+    const controllerWithTimeout = new AbortController();
+    const originalSignal = controller.signal;
+    originalSignal.addEventListener('abort', () => { clearTimeout(timeoutId); controllerWithTimeout.abort(); }, { once: true });
+
     try {
         tabCloseListener = tabId => { if (tabId === sessionTabIds[sessionId]) { controller.abort(); browser.tabs.onRemoved.removeListener(tabCloseListener); delete sessionTabIds[sessionId]; } };
         browser.tabs.onRemoved.addListener(tabCloseListener);
         if (isStreaming) updateChunksPage(sessionId, { action: 'updateStreamContent', content: '', rawContent: message.chunk, isInitial: true });
 
-        const response = await fetch(apiUrl, { method: 'POST', headers, body: JSON.stringify(requestBody), signal: controller.signal });
+        const response = await Promise.race([
+            fetch(apiUrl, { method: 'POST', headers, body: JSON.stringify(requestBody), signal: controllerWithTimeout.signal }),
+            timeoutPromise
+        ]);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const reader = response.body?.getReader();
         if (!reader) throw new Error('Response body not readable');
+        let streamResult;
         try {
-            fullContent = await processSSEStream(reader, sessionId, message, updateChunksPage);
+            streamResult = await processSSEStream(reader, sessionId, message, updateChunksPage, accumulatedSnapshot);
+            fullContent = streamResult.content;
+            accumulatedSnapshot = streamResult.snapshot;
         } finally {
             reader.cancel().catch(() => { });
             clearStreamState(sessionId);
             if (tabCloseListener) browser.tabs.onRemoved.removeListener(tabCloseListener);
             delete sessionControllers[sessionId];
         }
-        updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk, isComplete: true });
+        updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, reasoning: streamResult.reasoning || '', rawContent: message.chunk, isComplete: true });
         await new Promise(r => setTimeout(r, 100));
         return { result: fullContent, streaming: true, complete: true };
     } catch (error) {
+        // Capture accumulated content for LCS deduplication on retry
+        if (error.name === 'TypeError' || error.message.includes('input stream') || error.message.includes('network')) {
+            accumulatedSnapshot = fullContent;
+        }
         if (tabCloseListener) browser.tabs.onRemoved.removeListener(tabCloseListener);
         delete sessionControllers[sessionId];
-        updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent || '', rawContent: message.chunk, isComplete: true, error: true });
+        updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent || '', reasoning: streamResult?.reasoning || '', rawContent: message.chunk, isComplete: true, error: true });
         if (error.name === 'AbortError') return { error: `${providerName} request cancelled` };
         if (error.message.includes('401')) return { error: `${providerName}: Invalid API key` };
         if (error.message.includes('429')) return { error: `${providerName}: Rate limit exceeded` };
@@ -431,7 +584,7 @@ async function processChunkWithOpenRouter(message, options) {
         const order = options.openRouterProviderOrder.split(',').map(s => s.trim()).filter(Boolean);
         if (order.length) requestBody.provider = { order, allow_fallbacks: options.openRouterAllowFallback !== false };
     }
-    const headers = { 'Authorization': `Bearer ${options.openRouterApiKey}`, 'HTTP-Referer': 'https://addons.mozilla.org/en-US/firefox/addon/ai-webnovel-translator/', 'X-Title': 'AI Webnovel Translator', 'Content-Type': 'application/json' };
+    const headers = { 'Authorization': `Bearer ${options.openRouterApiKey}`, 'HTTP-Referer': 'https://addons.mozilla.org/en-US/firefox/addon/ai-webnovel-translator/', 'X-OpenRouter-Title': 'AI Webnovel Translator', 'Content-Type': 'application/json' };
     return processChunkWithOpenAICompatible(message, options, 'https://openrouter.ai/api/v1/chat/completions', headers, requestBody, 'OpenRouter');
 }
 
@@ -459,46 +612,144 @@ function urlPatternToRegExp(pattern) {
     return new RegExp('^' + escaped.join('.*') + '$');
 }
 
+// ─── Web Permission Management ────────────────────────────────────────────────
+async function hasStoredWebPermission(provider) {
+    const { webPermissions = {} } = await browser.storage.local.get('webPermissions');
+    return webPermissions[provider] === true;
+}
+
+async function setStoredWebPermission(provider, granted) {
+    const { webPermissions = {} } = await browser.storage.local.get('webPermissions');
+    webPermissions[provider] = granted;
+    await browser.storage.local.set({ webPermissions });
+}
+
+async function ensureWebPermission(provider) {
+    if (!WEB_PERMISSIONS[provider]) throw new Error(`Unknown web provider: ${provider}`);
+    const { origins, permissions } = WEB_PERMISSIONS[provider];
+    const hasOrigins = origins.length === 0 || await browser.permissions.contains({ origins });
+    const hasPerms = permissions.length === 0 || await browser.permissions.contains({ permissions });
+    return hasOrigins && hasPerms;
+}
+
+async function requestAndStoreWebPermission(provider) {
+    if (!WEB_PERMISSIONS[provider]) throw new Error(`Unknown web provider: ${provider}`);
+    const { origins, permissions } = WEB_PERMISSIONS[provider];
+    const granted = await browser.permissions.request({
+        origins: origins ?? [],
+        permissions: permissions ?? []
+    });
+    await setStoredWebPermission(provider, granted);
+    return granted;
+}
+
+const injectedTabs = new Set();
+
+async function injectWebAutomationScript(tabId, scriptType) {
+    if (injectedTabs.has(tabId)) return;
+    if (scriptType === 'chatgptWeb') {
+        await browser.scripting.executeScript({
+            target: { tabId },
+            files: ['browser-polyfill.min.js', 'chatgpt_injector.js']
+        });
+    } else if (scriptType === 'geminiWeb') {
+        await browser.scripting.executeScript({
+            target: { tabId },
+            files: ['browser-polyfill.min.js', 'gemini_injector.js']
+        });
+    }
+    injectedTabs.add(tabId);
+}
+
+// Clear injectedTabs when a tab navigates (loading) or is closed so re-injection works on revisit
+browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo.status === 'loading' || changeInfo.url) {
+        injectedTabs.delete(tabId);
+    }
+});
+browser.tabs.onRemoved.addListener((tabId) => {
+    injectedTabs.delete(tabId);
+});
+
 // ─── Web Automation ───────────────────────────────────────────────────────────
 async function getOrCreateTab(url, urlPattern, sessionId) {
     if (sessionTabIds[sessionId]) {
         try {
             const tab = await browser.tabs.get(sessionTabIds[sessionId]);
             if (tab.url && urlPatternToRegExp(urlPattern).test(tab.url)) return { tab, reused: true };
-        } catch (e) { delete sessionTabIds[sessionId]; }
+        } catch (e) {
+            // Only swallow "tab not found" — rethrow unexpected errors
+            if (e.message && e.message.includes('No tab with id')) {
+                delete sessionTabIds[sessionId];
+            } else {
+                console.error('Unexpected error getting tab:', e);
+                throw e;
+            }
+        }
     }
-    const tabs = await browser.tabs.query({ url: urlPattern });
-    if (tabs.length > 0) { sessionTabIds[sessionId] = tabs[0].id; await browser.tabs.update(tabs[0].id, { active: true }); return { tab: tabs[0], reused: true }; }
-    const tab = await browser.tabs.create({ url }); sessionTabIds[sessionId] = tab.id; return { tab, reused: false };
+    try {
+        const tabs = await browser.tabs.query({ url: urlPattern });
+        if (tabs.length > 0) { sessionTabIds[sessionId] = tabs[0].id; await browser.tabs.update(tabs[0].id, { active: true }); return { tab: tabs[0], reused: true }; }
+        const tab = await browser.tabs.create({ url }); sessionTabIds[sessionId] = tab.id; return { tab, reused: false };
+    } catch (err) {
+        console.error('Tabs operation failed (tabs permission may be denied):', err);
+        throw err;
+    }
 }
 
 function waitForTabLoad(tabId, timeoutMs, signal) {
     return new Promise((resolve, reject) => {
         if (signal?.aborted) return reject(new Error('Aborted'));
+        let settled = false;
+        const settle = (fn, val) => { if (!settled) { settled = true; fn(val); } };
+        let cleanup = null;
+        const timer = setTimeout(() => { if (cleanup) cleanup(); settle(reject, new Error('Tab load timeout')); }, timeoutMs);
+        const listener = (tid, changeInfo) => {
+            if (tid === tabId && changeInfo.status === 'complete') {
+                clearTimeout(timer);
+                if (cleanup) cleanup();
+                settle(resolve);
+            }
+        };
+        cleanup = () => {
+            browser.tabs.onUpdated.removeListener(listener);
+            if (signal) signal.removeEventListener('abort', abortHandler);
+        };
+        const abortHandler = () => { clearTimeout(timer); if (cleanup) cleanup(); settle(reject, new Error('Aborted')); };
+        if (signal) signal.addEventListener('abort', abortHandler);
+        browser.tabs.onUpdated.addListener(listener);
+        // Check if tab is already loaded
         browser.tabs.get(tabId).then(tab => {
-            if (signal?.aborted) return reject(new Error('Aborted'));
-            if (tab.status === 'complete') return resolve();
-            const timer = setTimeout(() => { browser.tabs.onUpdated.removeListener(listener); reject(new Error('Tab load timeout')); }, timeoutMs);
-            const listener = (tid, changeInfo) => { if (tid === tabId && changeInfo.status === 'complete') { browser.tabs.onUpdated.removeListener(listener); clearTimeout(timer); resolve(); } };
-            if (signal) signal.addEventListener('abort', () => { browser.tabs.onUpdated.removeListener(listener); clearTimeout(timer); reject(new Error('Aborted')); });
-            browser.tabs.onUpdated.addListener(listener);
-        }).catch(reject);
+            if (signal?.aborted) { clearTimeout(timer); if (cleanup) cleanup(); return settle(reject, new Error('Aborted')); }
+            if (tab.status === 'complete') { clearTimeout(timer); if (cleanup) cleanup(); settle(resolve); }
+        }).catch(e => { clearTimeout(timer); if (cleanup) cleanup(); settle(reject, e); });
     });
 }
 
 async function processChunkWithChatGPTWeb(message, options) {
+    // Check permission first
+    const hasPermission = await ensureWebPermission('chatgptWeb');
+    if (!hasPermission) {
+        return { error: 'Permission required: Please enable ChatGPT Web in settings to grant access.' };
+    }
+
     const fullContent = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
     const controller = new AbortController();
     const sessionId = message.sessionId;
     sessionControllers[sessionId] = controller;
     try {
-        const { tab } = await getOrCreateTab('https://chatgpt.com/', 'https://chatgpt.com/*', sessionId);
+        const { tab, reused } = await getOrCreateTab('https://chatgpt.com/', 'https://chatgpt.com/*', sessionId);
         await waitForTabLoad(tab.id, WebAutomationConfig.TAB_LOAD_TIMEOUT_MS, controller.signal);
         if (controller.signal.aborted) throw new Error('Aborted');
+
+        // Inject script if tab was created (not reused) or if we need to ensure it's injected
+        await injectWebAutomationScript(tab.id, 'chatgptWeb');
+
         await new Promise((resolve, reject) => { const t = setTimeout(resolve, WebAutomationConfig.DELAY_CHATGPT_MS); controller.signal.addEventListener('abort', () => { clearTimeout(t); reject(new Error('Aborted')); }, { once: true }); });
+        const execTimeout = (parseInt(options.webAutomationTimeout) || 30) * 1000;
         const result = await Promise.race([
             browser.tabs.sendMessage(tab.id, { action: 'paste_chunk_v2', text: fullContent }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), WebAutomationConfig.EXECUTION_TIMEOUT_MS)),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), execTimeout)),
             new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error('Aborted')), { once: true }))
         ]);
         if (!result?.success) throw new Error(result?.error || 'Unknown error');
@@ -511,6 +762,12 @@ async function processChunkWithChatGPTWeb(message, options) {
 }
 
 async function processChunkWithGeminiWeb(message, options) {
+    // Check permission first
+    const hasPermission = await ensureWebPermission('geminiWeb');
+    if (!hasPermission) {
+        return { error: 'Permission required: Please enable Gemini Web in settings to grant access.' };
+    }
+
     const fullContent = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
     const controller = new AbortController();
     const sessionId = message.sessionId;
@@ -519,10 +776,15 @@ async function processChunkWithGeminiWeb(message, options) {
         const { tab } = await getOrCreateTab('https://gemini.google.com/', 'https://gemini.google.com/*', sessionId);
         await waitForTabLoad(tab.id, WebAutomationConfig.TAB_LOAD_TIMEOUT_MS, controller.signal);
         if (controller.signal.aborted) throw new Error('Aborted');
+
+        // Inject script dynamically
+        await injectWebAutomationScript(tab.id, 'geminiWeb');
+
         await new Promise((resolve, reject) => { const t = setTimeout(resolve, WebAutomationConfig.DELAY_GEMINI_MS); controller.signal.addEventListener('abort', () => { clearTimeout(t); reject(new Error('Aborted')); }, { once: true }); });
+        const execTimeout = (parseInt(options.webAutomationTimeout) || 30) * 1000;
         const result = await Promise.race([
             browser.tabs.sendMessage(tab.id, { action: 'paste_chunk_gemini', text: fullContent }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), WebAutomationConfig.EXECUTION_TIMEOUT_MS)),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), execTimeout)),
             new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error('Aborted')), { once: true }))
         ]);
         if (!result?.success) throw new Error(result?.error || 'Unknown error');
