@@ -57,6 +57,21 @@ function splitParagraphText(lengthinput) {
     innerDivs.forEach(div => {
       combinedContent += extractContentWithImages(div);
     });
+  } else if (document.querySelector('.content.py-5')) {
+    // novel543.com scraper: extract direct <p> children only, skipping
+    // ad blocks, VIP promos, and warnings nested inside child <div>s
+    const h1 = document.querySelector('h1');
+    if (h1?.textContent?.trim()) {
+      combinedContent += h1.textContent.trim() + '\n\n';
+    }
+    const contentEl = document.querySelector('.content.py-5');
+    const directPs = contentEl.querySelectorAll(':scope > p');
+    directPs.forEach(p => {
+      const text = p.textContent?.trim();
+      if (text) {
+        combinedContent += text + '\n\n';
+      }
+    });
   } else {
     while (paragraphId <= MAX_PARAGRAPHS) {
       let paragraphElement = document.getElementById(`p${paragraphId}`);
