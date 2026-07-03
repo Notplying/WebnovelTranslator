@@ -383,8 +383,19 @@ async function processChunkWithGemini(message, options) {
     const sessionId = message.sessionId;
     sessionControllers[sessionId] = controller;
 
+    const chunkText = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
+    let exampleContents = [];
+    try {
+      if (options.fewShotEnabled) {
+        const budget = parseInt(options.geminiContextWindow) || 0;
+        const examples = await selectForShot({ maxBudgetChars: budget, chunkText });
+        exampleContents = buildExampleMessages(examples)
+          .map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
+      }
+    } catch (e) { console.error('[fewshot] Gemini example selection failed:', e); }
+
     const requestBody = {
-        contents: [{ parts: [{ text: `${message.prefix}\n${message.chunk}\n${message.suffix}` }] }],
+        contents: [...exampleContents, { role: 'user', parts: [{ text: chunkText }] }],
         generationConfig: {
             temperature: (v => Number.isFinite(v) ? v : 0.9)(parseFloat(options.temperature)),
             topK: (v => Number.isFinite(v) ? v : 40)(parseInt(options.topK)),
@@ -490,6 +501,10 @@ async function processChunkWithGemini(message, options) {
                 delete sessionControllers[sessionId];
             }
             updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk, isComplete: true });
+            if (options.fewShotEnabled && fullContent) {
+                try { await addExample({ raw: message.chunk, translation: fullContent, timestamp: Date.now() }); }
+                catch (e) { console.error('[fewshot] addExample failed:', e); }
+            }
             await new Promise(r => setTimeout(r, 100));
             return { result: fullContent, streaming: true, complete: true };
         }
