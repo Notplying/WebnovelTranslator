@@ -567,6 +567,10 @@ async function processChunkWithOpenAICompatible(message, options, apiUrl, header
             delete sessionControllers[sessionId];
         }
         updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, reasoning: streamResult.reasoning || '', rawContent: message.chunk, isComplete: true });
+        if (options.fewShotEnabled && fullContent) {
+            try { await addExample({ raw: message.chunk, translation: fullContent, timestamp: Date.now() }); }
+            catch (e) { console.error('[fewshot] addExample failed:', e); }
+        }
         await new Promise(r => setTimeout(r, 100));
         return { result: fullContent, streaming: true, complete: true };
     } catch (error) {
@@ -585,9 +589,18 @@ async function processChunkWithOpenAICompatible(message, options, apiUrl, header
 }
 
 async function processChunkWithOpenRouter(message, options) {
+    const chunkText = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
+    let exampleMessages = [];
+    try {
+        if (options.fewShotEnabled) {
+            const budget = parseInt(options.openRouterContextWindow) || 0;
+            const examples = await selectForShot({ maxBudgetChars: budget, chunkText });
+            exampleMessages = buildExampleMessages(examples);
+        }
+    } catch (e) { console.error('[fewshot] OpenRouter example selection failed:', e); }
     const requestBody = {
         model: options.openRouterModelId || 'openai/gpt-4',
-        messages: [{ role: 'user', content: `${message.prefix}\n${message.chunk}\n${message.suffix}` }],
+        messages: [...exampleMessages, { role: 'user', content: chunkText }],
         stream: true
     };
     if (options.openRouterMaxTokens?.trim()) { const t = parseInt(options.openRouterMaxTokens); if (!isNaN(t) && t > 0) requestBody.max_tokens = t; }
@@ -604,9 +617,18 @@ async function processChunkWithOpenRouter(message, options) {
 }
 
 async function processChunkWithOpenAI(message, options) {
+    const chunkText = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
+    let exampleMessages = [];
+    try {
+        if (options.fewShotEnabled) {
+            const budget = parseInt(options.openaiContextWindow) || 0;
+            const examples = await selectForShot({ maxBudgetChars: budget, chunkText });
+            exampleMessages = buildExampleMessages(examples);
+        }
+    } catch (e) { console.error('[fewshot] OpenAI example selection failed:', e); }
     const requestBody = {
         model: options.openaiModelId || 'gpt-4o-mini',
-        messages: [{ role: 'user', content: `${message.prefix}\n${message.chunk}\n${message.suffix}` }],
+        messages: [...exampleMessages, { role: 'user', content: chunkText }],
         stream: true
     };
     if (options.openaiMaxTokens?.trim()) { const t = parseInt(options.openaiMaxTokens); if (!isNaN(t) && t > 0) requestBody.max_tokens = t; }
