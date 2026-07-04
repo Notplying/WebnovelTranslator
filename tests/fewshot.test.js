@@ -180,3 +180,22 @@ test('selectForShot returns [] when fewShotCount is 0', async () => {
   const out = await selectForShot({ maxBudgetChars: 0, chunkText: '' });
   assert.equal(out.length, 0);
 });
+
+test('selectForShot keeps the newest custom examples when custom pool exceeds fewShotCount', async () => {
+  // fewShotCount=2 but 3 custom examples (insertion order oldest→newest).
+  // selectForShot must drop the OLDEST custom entry (c1) and keep c2, c3,
+  // then fill 0 auto slots, ordered oldest→newest (newest last).
+  store.fewShotCount = 2;
+  store.fewShotMaxExamples = 20;
+  store.fewShotCustomExamples = [
+    { id: 'c1', raw: 'cust-1', translation: 't1', timestamp: 10 },
+    { id: 'c2', raw: 'cust-2', translation: 't2', timestamp: 20 },
+    { id: 'c3', raw: 'cust-3', translation: 't3', timestamp: 30 },
+  ];
+  store.fewShotExamples = [
+    { id: 'a1', raw: 'auto-1', translation: 'a', timestamp: 999 },
+  ];
+  const out = await selectForShot({ maxBudgetChars: 0, chunkText: '' });  // bypass fit
+  assert.equal(out.length, 2);
+  assert.deepEqual(out.map(e => e.id), ['c2', 'c3']);  // newest 2 custom, oldest→newest
+});

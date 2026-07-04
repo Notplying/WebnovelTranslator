@@ -96,12 +96,19 @@ async function clearCustomExamples() {}   // clears custom only
 // Merge custom-first + auto-newest, dedupe by raw text, cap to fewShotCount,
 // then auto-fit to the provider's context budget. The single entry point
 // providers call. Returns the final example list to inject.
-async function selectForShot({ maxBudgetChars }) {
+//   maxBudgetChars: provider context window in chars (0 = bypass fitting)
+//   chunkText:      the user's chunk text (prefix+chunk+suffix), forwarded so
+//                   fitExamplesToContext can detect "chunk alone overflows budget"
+//                   and return [] in that case.
+async function selectForShot({ maxBudgetChars, chunkText }) {
     const { fewShotCount = 3 } = await browser.storage.local.get('fewShotCount');  // read-only config read
-    const custom = await getCustomExamples();
-    const auto = await getExamples();
-    const merged = [...custom, ...auto].dedupeByRaw().slice(0, fewShotCount);
-    return fitExamplesToContext({ examples: merged, budgetChars: maxBudgetChars });
+    const custom = await getCustomExamples();   // insertion order (oldest→newest)
+    const auto = await getExamples();            // newest-first
+    // Custom takes priority: fill custom first, remaining slots from auto.
+    const merged = dedupeByRaw([...custom, ...auto]).slice(0, fewShotCount);  // standalone helper; custom wins on raw collision
+    // Order oldest→newest (newest pair last, closest to the real user turn).
+    const ordered = [...merged].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    return fitExamplesToContext({ examples: ordered, chunkText, budgetChars: maxBudgetChars });
 }
 
 // For Gemini/OpenRouter/OpenAI: alternating turns, newest pair LAST

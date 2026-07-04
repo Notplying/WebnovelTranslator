@@ -14,17 +14,30 @@ function makeId(timestamp) {
 
 // ─── Auto pool (rolling recent translations) ──────────────────────────────────
 // fewShotExamples: array newest-first. Each pair: { id, raw, translation, timestamp }.
+// Serialize the read-modify-write: the SW is single-threaded, but `storage.local`
+// reads await, so two concurrent sessions completing a chunk can interleave a
+// get→set and drop an example. Chain each addExample onto the previous one so
+// only one write runs at a time (same shape as service_worker's updateSessionStorage).
+let _addExampleLock = Promise.resolve();
 async function addExample({ raw, translation, timestamp }) {
   if (!raw || !translation) return;
-  const { fewShotExamples = [] } = await browser.storage.local.get('fewShotExamples');
-  const { fewShotMaxExamples = 20 } = await browser.storage.local.get('fewShotMaxExamples');
-  // Dedupe by raw: drop any existing entry with the same raw text.
-  const filtered = fewShotExamples.filter(e => e.raw !== raw);
-  // Newest-first: prepend the new pair.
-  const updated = [{ id: makeId(timestamp), raw, translation, timestamp }, ...filtered];
-  // Cap to fewShotMaxExamples (drop oldest = tail).
-  const capped = updated.slice(0, Math.max(1, fewShotMaxExamples));
-  await browser.storage.local.set({ fewShotExamples: capped });
+  const prev = _addExampleLock;
+  let releaseLock;
+  _addExampleLock = new Promise(resolve => { releaseLock = resolve; });
+  await prev;
+  try {
+    const { fewShotExamples = [], fewShotMaxExamples = 20 } =
+      await browser.storage.local.get(['fewShotExamples', 'fewShotMaxExamples']);
+    // Dedupe by raw: drop any existing entry with the same raw text.
+    const filtered = fewShotExamples.filter(e => e.raw !== raw);
+    // Newest-first: prepend the new pair.
+    const updated = [{ id: makeId(timestamp), raw, translation, timestamp }, ...filtered];
+    // Cap to fewShotMaxExamples (drop oldest = tail).
+    const capped = updated.slice(0, Math.max(1, fewShotMaxExamples));
+    await browser.storage.local.set({ fewShotExamples: capped });
+  } finally {
+    releaseLock();
+  }
 }
 
 async function getExamples() {
@@ -128,9 +141,13 @@ async function selectForShot({ maxBudgetChars, chunkText }) {
   const custom = await getCustomExamples();        // insertion order (oldest→newest)
   const auto = await getExamples();                // newest-first
   // Custom takes priority: fill custom first, then remaining slots from auto (newest first).
-  const remaining = Math.max(0, fewShotCount - custom.length);
+  // When the custom pool exceeds fewShotCount, prefer the NEWEST custom examples
+  // (trim oldest) so recent additions aren't starved — mirrors the auto pool's
+  // newest-first policy.
+  const customTaken = custom.slice(Math.max(0, custom.length - fewShotCount));
+  const remaining = Math.max(0, fewShotCount - customTaken.length);
   const autoTaken = auto.slice(0, remaining);
-  const merged = [...custom, ...autoTaken];
+  const merged = [...customTaken, ...autoTaken];
   const deduped = dedupeByRaw(merged).slice(0, fewShotCount);
   // Order oldest→newest (newest last, closest to the real user turn).
   const ordered = [...deduped].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));

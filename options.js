@@ -224,7 +224,7 @@ async function renderFewShotCustomList() {
     return `<div class="example-row">
       <div class="example-cell"><strong>Raw:</strong> ${raw}</div>
       <div class="example-cell"><strong>Translation:</strong> ${tr}</div>
-      <button type="button" class="btn btn-danger fewshot-remove" data-id="${escapeHtml(ex.id)}">🗑</button>
+      <button type="button" class="btn btn-danger fewshot-remove" data-id="${escapeHtml(ex.id)}" aria-label="Remove custom example" title="Remove custom example">🗑</button>
     </div>`;
   }).join('');
   list.querySelectorAll('.fewshot-remove').forEach(btn => {

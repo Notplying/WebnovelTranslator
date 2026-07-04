@@ -378,6 +378,25 @@ async function processSSEStream(reader, sessionId, message, updateChunksPageFn, 
     return { content: fullContent, reasoning: fullReasoning, snapshot: null };
 }
 
+// ─── Few-shot example selection (shared by API providers) ─────────────────────
+// Builds the OpenAI-shaped [{role, content}] example messages for a provider,
+// guarding selection in try/catch so a few-shot failure never breaks a
+// translation. Gemini casts role→model/parts itself; OpenRouter/OpenAI spread
+// the array as-is. Returns { chunkText, exampleMessages } so all three providers
+// share identical selection behavior.
+async function buildFewShotExampleMessages(message, options, contextWindowKey, providerLabel) {
+    const chunkText = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
+    let exampleMessages = [];
+    try {
+        if (options.fewShotEnabled) {
+            const budget = parseInt(options[contextWindowKey]) || 0;
+            const examples = await selectForShot({ maxBudgetChars: budget, chunkText });
+            exampleMessages = buildExampleMessages(examples);
+        }
+    } catch (e) { console.error(`[fewshot] ${providerLabel} example selection failed:`, e); }
+    return { chunkText, exampleMessages };
+}
+
 // ─── Gemini API ───────────────────────────────────────────────────────────────
 async function processChunkWithGemini(message, options) {
     let tabCloseListener;
@@ -387,16 +406,9 @@ async function processChunkWithGemini(message, options) {
     const sessionId = message.sessionId;
     sessionControllers[sessionId] = controller;
 
-    const chunkText = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
-    let exampleContents = [];
-    try {
-      if (options.fewShotEnabled) {
-        const budget = parseInt(options.geminiContextWindow) || 0;
-        const examples = await selectForShot({ maxBudgetChars: budget, chunkText });
-        exampleContents = buildExampleMessages(examples)
-          .map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
-      }
-    } catch (e) { console.error('[fewshot] Gemini example selection failed:', e); }
+    const { chunkText, exampleMessages } = await buildFewShotExampleMessages(message, options, 'geminiContextWindow', 'Gemini');
+    const exampleContents = exampleMessages
+      .map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
 
     const requestBody = {
         contents: [...exampleContents, { role: 'user', parts: [{ text: chunkText }] }],
@@ -593,15 +605,7 @@ async function processChunkWithOpenAICompatible(message, options, apiUrl, header
 }
 
 async function processChunkWithOpenRouter(message, options) {
-    const chunkText = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
-    let exampleMessages = [];
-    try {
-        if (options.fewShotEnabled) {
-            const budget = parseInt(options.openRouterContextWindow) || 0;
-            const examples = await selectForShot({ maxBudgetChars: budget, chunkText });
-            exampleMessages = buildExampleMessages(examples);
-        }
-    } catch (e) { console.error('[fewshot] OpenRouter example selection failed:', e); }
+    const { chunkText, exampleMessages } = await buildFewShotExampleMessages(message, options, 'openRouterContextWindow', 'OpenRouter');
     const requestBody = {
         model: options.openRouterModelId || 'openai/gpt-4',
         messages: [...exampleMessages, { role: 'user', content: chunkText }],
@@ -621,15 +625,7 @@ async function processChunkWithOpenRouter(message, options) {
 }
 
 async function processChunkWithOpenAI(message, options) {
-    const chunkText = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
-    let exampleMessages = [];
-    try {
-        if (options.fewShotEnabled) {
-            const budget = parseInt(options.openaiContextWindow) || 0;
-            const examples = await selectForShot({ maxBudgetChars: budget, chunkText });
-            exampleMessages = buildExampleMessages(examples);
-        }
-    } catch (e) { console.error('[fewshot] OpenAI example selection failed:', e); }
+    const { chunkText, exampleMessages } = await buildFewShotExampleMessages(message, options, 'openaiContextWindow', 'OpenAI');
     const requestBody = {
         model: options.openaiModelId || 'gpt-4o-mini',
         messages: [...exampleMessages, { role: 'user', content: chunkText }],
