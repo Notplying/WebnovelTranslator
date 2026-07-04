@@ -520,6 +520,51 @@
         grid-template-columns: 1fr;
       }
     }
+
+    /* ── Few-Shot example list ───────────────────────────────── */
+    .example-list {
+      max-height: 320px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .example-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface2);
+    }
+
+    .example-cell {
+      flex: 1;
+      min-width: 0;
+      word-break: break-word;
+      font-size: 0.85rem;
+      line-height: 1.4;
+    }
+
+    .fewshot-remove {
+      padding: 4px 8px;
+      font-size: 0.8rem;
+      flex-shrink: 0;
+    }
+
+    .badge {
+      display: inline-block;
+      font-size: 0.7rem;
+      padding: 2px 10px;
+      border-radius: 20px;
+      background: var(--accent-glow);
+      color: var(--accent);
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
   </style>
 </head>
 
@@ -698,16 +743,16 @@
           <label for="fewShotCustomTranslation">Translation</label>
           <textarea id="fewShotCustomTranslation" rows="4" placeholder="Desired translation…"></textarea>
         </div>
-        <button type="button" id="fewShotAddCustom" class="primary">➕ Add example</button>
+        <button type="button" id="fewShotAddCustom" class="btn btn-primary">➕ Add example</button>
         <div id="fewShotCustomList" class="example-list"></div>
-        <button type="button" id="fewShotClearCustom">🗑 Clear all custom</button>
+        <button type="button" id="fewShotClearCustom" class="btn btn-danger">🗑 Clear all custom</button>
       </div>
 
       <div class="card">
         <div class="card-title">🕒 Recent Translations (auto pool)</div>
         <p>This pool fills automatically as you translate with API providers (Gemini, OpenRouter, OpenAI). Most recent translations are used first.</p>
         <p><strong id="fewShotAutoCount">0</strong> cached recent translations.</p>
-        <button type="button" id="fewShotClearAuto">🗑 Clear recent pool</button>
+        <button type="button" id="fewShotClearAuto" class="btn btn-danger">🗑 Clear recent pool</button>
       </div>
     </section>
 
