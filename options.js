@@ -215,7 +215,7 @@ async function renderFewShotCustomList() {
   if (!list) return;
   const items = await getCustomExamples();
   if (items.length === 0) {
-    list.innerHTML = '<p class="muted">No custom examples yet.</p>';
+    list.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem">No custom examples yet.</p>';
     return;
   }
   list.innerHTML = items.map(ex => {
