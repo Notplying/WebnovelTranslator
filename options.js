@@ -21,9 +21,13 @@ const DEFAULTS = {
 
   apiTimeout: 120,
   webAutomationTimeout: 30,
+
+  fewShotEnabled: false,
+  fewShotCount: 3,
+  fewShotMaxExamples: 20,
 };
 
-const KEYS_TO_EXCLUDE_FROM_EXPORT = ['processedChunks', 'translationSessions'];
+const KEYS_TO_EXCLUDE_FROM_EXPORT = ['processedChunks', 'translationSessions', 'fewShotExamples', 'fewShotCustomExamples'];
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 let toastTimer;
@@ -45,6 +49,10 @@ function setupNav() {
       btn.classList.add('active');
       const target = document.getElementById('section-' + btn.dataset.section);
       if (target) target.classList.add('active');
+      if (btn.dataset.section === 'fewshot') {
+        renderFewShotCustomList();
+        renderFewShotAutoCount();
+      }
     });
   });
 }
@@ -88,7 +96,9 @@ async function loadSettings() {
     'openRouterApiKey', 'openRouterModelId', 'openRouterMaxTokens', 'openRouterContextWindow', 'openRouterProviderOrder', 'openRouterAllowFallback',
     'openaiApiKey', 'openaiModelId', 'openaiMaxTokens', 'openaiContextWindow', 'openaiBaseUrl',
 
-    'apiTimeout', 'webAutomationTimeout'
+    'apiTimeout', 'webAutomationTimeout',
+
+    'fewShotEnabled', 'fewShotCount', 'fewShotMaxExamples'
   ].forEach(key => { setField(key, settings[key]); });
 
   updatePromptPreview();
@@ -111,6 +121,8 @@ function sanitizeNumericSettings(raw) {
     temperature: clamp(parseNum(raw.temperature, 0.3), 0, 2),
     topK: clamp(parseInt2(raw.topK, 30), 1, 1000),
     topP: clamp(parseNum(raw.topP, 0.95), 0.01, 1),
+    fewShotCount: clamp(parseInt2(raw.fewShotCount, DEFAULTS.fewShotCount), 0, 100),
+    fewShotMaxExamples: clamp(parseInt2(raw.fewShotMaxExamples, DEFAULTS.fewShotMaxExamples), 1, 100),
   };
 }
 
@@ -159,6 +171,10 @@ async function saveSettings() {
     apiTimeout: getField('apiTimeout'),
     webAutomationTimeout: getField('webAutomationTimeout'),
 
+    fewShotEnabled: getField('fewShotEnabled'),
+    fewShotCount: getField('fewShotCount'),
+    fewShotMaxExamples: getField('fewShotMaxExamples'),
+
   };
   try {
     await browser.storage.local.set(sanitizeNumericSettings(raw));
@@ -180,8 +196,80 @@ function updatePromptPreview() {
   if (!preview) return;
   const full = prefix + '\n' + sample + '\n' + suffix;
   const escaped = full.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const highlighted = escaped.replace(/\[Sample chunk text would appear here\.\.\.\]/g, '<em>[Sample chunk text would appear here...]</em>');
+  let highlighted = escaped.replace(/\[Sample chunk text would appear here\.\.\.\]/g, '<em>[Sample chunk text would appear here...]</em>');
+  const enabled = document.getElementById('fewShotEnabled')?.checked;
+  if (enabled) {
+    const count = parseInt(document.getElementById('fewShotCount')?.value, 10) || 0;
+    highlighted = `<div class="badge">${count} example(s) will be prepended</div>\n` + highlighted;
+  }
   preview.innerHTML = highlighted;
+}
+
+// ─── Few-Shot management ──────────────────────────────────────────────────────
+function escapeHtml(str) {
+  return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+async function renderFewShotCustomList() {
+  const list = document.getElementById('fewShotCustomList');
+  if (!list) return;
+  const items = await getCustomExamples();
+  if (items.length === 0) {
+    list.innerHTML = '<p class="muted">No custom examples yet.</p>';
+    return;
+  }
+  list.innerHTML = items.map(ex => {
+    const raw = escapeHtml(ex.raw.length > 120 ? ex.raw.slice(0, 120) + '…' : ex.raw);
+    const tr  = escapeHtml(ex.translation.length > 120 ? ex.translation.slice(0, 120) + '…' : ex.translation);
+    return `<div class="example-row">
+      <div class="example-cell"><strong>Raw:</strong> ${raw}</div>
+      <div class="example-cell"><strong>Translation:</strong> ${tr}</div>
+      <button type="button" class="danger fewshot-remove" data-id="${escapeHtml(ex.id)}">🗑</button>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.fewshot-remove').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await removeCustomExample(btn.dataset.id);
+      await renderFewShotCustomList();
+      updatePromptPreview();
+      showToast('🗑 Custom example removed', 'success');
+    });
+  });
+}
+
+async function renderFewShotAutoCount() {
+  const el = document.getElementById('fewShotAutoCount');
+  if (!el) return;
+  const items = await getExamples();
+  el.textContent = String(items.length);
+}
+
+async function addFewShotCustomFromForm() {
+  const raw = document.getElementById('fewShotCustomRaw')?.value?.trim();
+  const translation = document.getElementById('fewShotCustomTranslation')?.value?.trim();
+  if (!raw || !translation) { showToast('⚠️ Both raw text and translation are required.', 'error'); return; }
+  await addCustomExample({ raw, translation, timestamp: Date.now() });
+  document.getElementById('fewShotCustomRaw').value = '';
+  document.getElementById('fewShotCustomTranslation').value = '';
+  await renderFewShotCustomList();
+  updatePromptPreview();
+  showToast('➕ Custom example added', 'success');
+}
+
+async function clearFewShotAuto() {
+  if (!confirm('Clear ALL recent translations from the auto pool? Custom examples are kept.')) return;
+  await clearExamples();
+  await renderFewShotAutoCount();
+  updatePromptPreview();
+  showToast('🗑 Recent pool cleared', 'success');
+}
+
+async function clearFewShotCustom() {
+  if (!confirm('Clear ALL custom examples?')) return;
+  await clearCustomExamples();
+  await renderFewShotCustomList();
+  updatePromptPreview();
+  showToast('🗑 Custom examples cleared', 'success');
 }
 
 // ─── Export ───────────────────────────────────────────────────────────────────
@@ -344,6 +432,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     await browser.storage.local.remove(['processedChunks', 'translationSessions']);
     showToast('🗑️ All results cleared.', 'success');
   });
+
+  // Few-Shot management
+  document.getElementById('fewShotAddCustom')?.addEventListener('click', addFewShotCustomFromForm);
+  document.getElementById('fewShotClearCustom')?.addEventListener('click', clearFewShotCustom);
+  document.getElementById('fewShotClearAuto')?.addEventListener('click', clearFewShotAuto);
+  document.getElementById('fewShotCount')?.addEventListener('input', updatePromptPreview);
+  document.getElementById('fewShotEnabled')?.addEventListener('change', updatePromptPreview);
 
 
   // Web automation quick-select

@@ -93,6 +93,10 @@ browser.runtime.onInstalled.addListener(function (details) {
             openaiBaseUrl: 'https://api.openai.com/v1',
 
             maxSessions: 3
+            ,
+            fewShotEnabled: false,
+            fewShotCount: 3,
+            fewShotMaxExamples: 20
         });
     }
 });
