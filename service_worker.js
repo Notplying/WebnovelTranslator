@@ -770,7 +770,15 @@ async function processChunkWithChatGPTWeb(message, options) {
         return { error: 'Permission required: Please enable ChatGPT Web in settings to grant access.' };
     }
 
-    const fullContent = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
+    const chunkText = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
+    let exampleBlock = '';
+    try {
+        if (options.fewShotEnabled) {
+            const examples = await selectForShot({ maxBudgetChars: 0, chunkText: '' });
+            exampleBlock = buildExampleTextBlock(examples);
+        }
+    } catch (e) { console.error('[fewshot] ChatGPT Web example selection failed:', e); }
+    const fullContent = exampleBlock ? `${exampleBlock}\n\n${chunkText}` : chunkText;
     const controller = new AbortController();
     const sessionId = message.sessionId;
     sessionControllers[sessionId] = controller;
@@ -805,7 +813,15 @@ async function processChunkWithGeminiWeb(message, options) {
         return { error: 'Permission required: Please enable Gemini Web in settings to grant access.' };
     }
 
-    const fullContent = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
+    const chunkText = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
+    let exampleBlock = '';
+    try {
+        if (options.fewShotEnabled) {
+            const examples = await selectForShot({ maxBudgetChars: 0, chunkText: '' });
+            exampleBlock = buildExampleTextBlock(examples);
+        }
+    } catch (e) { console.error('[fewshot] Gemini Web example selection failed:', e); }
+    const fullContent = exampleBlock ? `${exampleBlock}\n\n${chunkText}` : chunkText;
     const controller = new AbortController();
     const sessionId = message.sessionId;
     sessionControllers[sessionId] = controller;
