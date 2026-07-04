@@ -27,7 +27,7 @@ const DEFAULTS = {
   fewShotMaxExamples: 20,
 };
 
-const KEYS_TO_EXCLUDE_FROM_EXPORT = ['processedChunks', 'translationSessions', 'fewShotExamples', 'fewShotCustomExamples'];
+const KEYS_TO_EXCLUDE_FROM_EXPORT = ['processedChunks', 'translationSessions', 'fewShotExamples'];
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 let toastTimer;
@@ -299,7 +299,9 @@ async function exportSettings() {
 // ─── Import ───────────────────────────────────────────────────────────────────
 // Only these keys may be written from an imported file (mirrors the DEFAULTS keys
 // and the set loaded by loadSettings). Any extra keys in the JSON are silently dropped.
-const ALLOWED_IMPORT_KEYS = Object.keys(DEFAULTS);
+// fewShotCustomExamples is user-authored data, not a DEFAULTS setting, so it must be
+// allow-listed separately for import (DEFAULTS-derived keys would otherwise drop it).
+const ALLOWED_IMPORT_KEYS = [...Object.keys(DEFAULTS), 'fewShotCustomExamples'];
 const VALID_API_TYPES = ['gemini', 'openRouter', 'openai', 'chatgptWeb', 'geminiWeb'];
 
 async function importFromJSON(json) {
