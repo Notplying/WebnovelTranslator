@@ -537,6 +537,9 @@
       <button class="nav-item" data-section="prompt" id="nav-prompt">
         <span class="icon">✍️</span> Prompt
       </button>
+      <button class="nav-item" data-section="fewshot" id="nav-fewshot">
+        <span class="icon">📚</span><span>Few-Shot Examples</span>
+      </button>
       <div class="nav-label">API Providers</div>
       <button class="nav-item" data-section="gemini" id="nav-gemini">
         <span class="icon">✨</span> Gemini
@@ -659,6 +662,52 @@
       <div class="card">
         <div class="card-title">👁️ Live Preview <span class="badge">Sample</span></div>
         <div class="prompt-preview" id="promptPreview"></div>
+      </div>
+    </section>
+
+    <!-- ── Few-Shot Examples ─────────────────────────────────────── -->
+    <section class="section" id="section-fewshot">
+      <div class="page-header">
+        <h1>Few-Shot Examples</h1>
+        <p>Save recent (raw → translation) pairs and inject them as few-shot examples to improve consistency. Custom examples take priority within the count.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-title">⚙️ Settings</div>
+        <div class="field">
+          <label><input type="checkbox" id="fewShotEnabled"> Enable few-shot examples</label>
+        </div>
+        <div class="field">
+          <label for="fewShotCount">Number of examples per request</label>
+          <input type="number" id="fewShotCount" min="0" max="100" step="1">
+          <small>Custom examples fill first; auto examples fill the remaining slots. 0 = examples disabled.</small>
+        </div>
+        <div class="field">
+          <label for="fewShotMaxExamples">Max recent translations to keep (auto pool size)</label>
+          <input type="number" id="fewShotMaxExamples" min="1" max="100" step="1">
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">📌 Custom Examples (persistent)</div>
+        <div class="field">
+          <label for="fewShotCustomRaw">Raw text</label>
+          <textarea id="fewShotCustomRaw" rows="4" placeholder="Original text excerpt…"></textarea>
+        </div>
+        <div class="field">
+          <label for="fewShotCustomTranslation">Translation</label>
+          <textarea id="fewShotCustomTranslation" rows="4" placeholder="Desired translation…"></textarea>
+        </div>
+        <button type="button" id="fewShotAddCustom" class="primary">➕ Add example</button>
+        <div id="fewShotCustomList" class="example-list"></div>
+        <button type="button" id="fewShotClearCustom">🗑 Clear all custom</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title">🕒 Recent Translations (auto pool)</div>
+        <p>This pool fills automatically as you translate with API providers (Gemini, OpenRouter, OpenAI). Most recent translations are used first.</p>
+        <p><strong id="fewShotAutoCount">0</strong> cached recent translations.</p>
+        <button type="button" id="fewShotClearAuto">🗑 Clear recent pool</button>
       </div>
     </section>
 
