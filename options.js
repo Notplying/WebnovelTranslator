@@ -214,16 +214,20 @@ async function renderFewShotCustomList() {
   const list = document.getElementById('fewShotCustomList');
   if (!list) return;
   const items = await getCustomExamples();
+  const countEl = document.getElementById('fewShotCustomCount');
+  if (countEl) countEl.textContent = `${items.length} saved`;
   if (items.length === 0) {
-    list.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem">No custom examples yet.</p>';
+    list.innerHTML = '<div class="fewshot-empty">No custom examples yet — add an original excerpt and its translation above.</div>';
     return;
   }
   list.innerHTML = items.map(ex => {
-    const raw = escapeHtml(ex.raw.length > 120 ? ex.raw.slice(0, 120) + '…' : ex.raw);
-    const tr  = escapeHtml(ex.translation.length > 120 ? ex.translation.slice(0, 120) + '…' : ex.translation);
+    const raw = escapeHtml(ex.raw.length > 160 ? ex.raw.slice(0, 160) + '…' : ex.raw);
+    const tr  = escapeHtml(ex.translation.length > 160 ? ex.translation.slice(0, 160) + '…' : ex.translation);
     return `<div class="example-row">
-      <div class="example-cell"><strong>Raw:</strong> ${raw}</div>
-      <div class="example-cell"><strong>Translation:</strong> ${tr}</div>
+      <div class="example-pair">
+        <div class="example-cell example-cell--raw"><span class="example-eyebrow">Raw</span><p class="example-text">${raw}</p></div>
+        <div class="example-cell example-cell--trans"><span class="example-eyebrow">Translation</span><p class="example-text">${tr}</p></div>
+      </div>
       <button type="button" class="btn btn-danger fewshot-remove" data-id="${escapeHtml(ex.id)}" aria-label="Remove custom example" title="Remove custom example">🗑</button>
     </div>`;
   }).join('');

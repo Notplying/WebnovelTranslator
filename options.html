@@ -523,36 +523,131 @@
 
     /* ── Few-Shot example list ───────────────────────────────── */
     .example-list {
-      max-height: 320px;
+      max-height: 380px;
       overflow-y: auto;
       display: flex;
       flex-direction: column;
       gap: 8px;
-      margin-top: 12px;
+      margin-top: 14px;
+    }
+
+    /* Empty state — invitation to act, not a blank card. */
+    .fewshot-empty {
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.82rem;
+      margin-top: 14px;
     }
 
     .example-row {
       display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      padding: 10px 12px;
+      align-items: stretch;
+      gap: 0;
       border: 1px solid var(--border);
       border-radius: 8px;
       background: var(--surface2);
+      overflow: hidden;
+    }
+
+    /* Parallel Raw | Translation pairing — content IS a bilingual pair,
+       so the hairline divider encodes the relationship. */
+    .example-pair {
+      flex: 1;
+      min-width: 0;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
     }
 
     .example-cell {
-      flex: 1;
       min-width: 0;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .example-cell--raw {
+      border-right: 1px solid var(--border);
+    }
+
+    .example-eyebrow {
+      font-size: 0.62rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .example-cell--trans .example-eyebrow {
+      color: var(--accent2);
+    }
+
+    .example-text {
+      margin: 0;
+      font-size: 0.82rem;
+      line-height: 1.45;
+      color: var(--text);
       word-break: break-word;
-      font-size: 0.85rem;
-      line-height: 1.4;
+      white-space: pre-wrap;
     }
 
     .fewshot-remove {
-      padding: 4px 8px;
-      font-size: 0.8rem;
+      align-self: stretch;
+      border-radius: 0;
+      border-left: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-muted);
+      padding: 0 14px;
+      font-size: 0.9rem;
       flex-shrink: 0;
+      transition: background var(--transition), color var(--transition);
+    }
+
+    .fewshot-remove:hover {
+      background: rgba(248, 113, 113, 0.12);
+      color: var(--danger);
+    }
+
+    /* ── Auto pool stat ──────────────────────────────────────── */
+    .fewshot-stat {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .fewshot-stat-num {
+      font-size: 1.6rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: var(--accent2);
+      line-height: 1;
+    }
+
+    .fewshot-stat-label {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+
+    .fewshot-help {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+      margin-bottom: 14px;
+    }
+
+    @media (max-width: 700px) {
+      .example-pair {
+        grid-template-columns: 1fr;
+      }
+
+      .example-cell--raw {
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+      }
     }
 
     .badge {
@@ -719,29 +814,31 @@
 
       <div class="card">
         <div class="card-title">⚙️ Settings</div>
-        <div class="field">
-          <label><input type="checkbox" id="fewShotEnabled"> Enable few-shot examples</label>
+        <div class="toggle-row">
+          <div class="toggle-row-info"><label id="fewShotEnabled-label" for="fewShotEnabled">Enable few-shot examples</label><small>Prepend recent raw → translation pairs to every prompt for consistency.</small></div>
+          <label class="switch"><input type="checkbox" id="fewShotEnabled" aria-labelledby="fewShotEnabled-label"><span class="slider"></span></label>
         </div>
-        <div class="field">
-          <label for="fewShotCount">Number of examples per request</label>
-          <input type="number" id="fewShotCount" min="0" max="100" step="1">
-          <small>Custom examples fill first; auto examples fill the remaining slots. 0 = examples disabled.</small>
+        <div class="toggle-row">
+          <div class="toggle-row-info"><label for="fewShotCount">Examples per request</label><small>Custom examples fill first; auto fills the rest. 0 = examples disabled.</small></div>
+          <input type="number" id="fewShotCount" min="0" max="100" step="1" style="width:90px">
         </div>
-        <div class="field">
-          <label for="fewShotMaxExamples">Max recent translations to keep (auto pool size)</label>
-          <input type="number" id="fewShotMaxExamples" min="1" max="100" step="1">
+        <div class="toggle-row">
+          <div class="toggle-row-info"><label for="fewShotMaxExamples">Keep recent translations (auto pool size)</label><small>Ceiling on how many recent pairs are stored.</small></div>
+          <input type="number" id="fewShotMaxExamples" min="1" max="100" step="1" style="width:90px">
         </div>
       </div>
 
       <div class="card">
-        <div class="card-title">📌 Custom Examples (persistent)</div>
-        <div class="field">
-          <label for="fewShotCustomRaw">Raw text</label>
-          <textarea id="fewShotCustomRaw" rows="4" placeholder="Original text excerpt…"></textarea>
-        </div>
-        <div class="field">
-          <label for="fewShotCustomTranslation">Translation</label>
-          <textarea id="fewShotCustomTranslation" rows="4" placeholder="Desired translation…"></textarea>
+        <div class="card-title">📌 Custom Examples (persistent) <span class="badge" id="fewShotCustomCount">0 saved</span></div>
+        <div class="form-grid" style="align-items:start">
+          <div class="field">
+            <label for="fewShotCustomRaw">Raw text</label>
+            <textarea id="fewShotCustomRaw" rows="4" placeholder="Original text excerpt…"></textarea>
+          </div>
+          <div class="field">
+            <label for="fewShotCustomTranslation">Translation</label>
+            <textarea id="fewShotCustomTranslation" rows="4" placeholder="Desired translation…"></textarea>
+          </div>
         </div>
         <button type="button" id="fewShotAddCustom" class="btn btn-primary">➕ Add example</button>
         <div id="fewShotCustomList" class="example-list"></div>
@@ -750,8 +847,11 @@
 
       <div class="card">
         <div class="card-title">🕒 Recent Translations (auto pool)</div>
-        <p>This pool fills automatically as you translate with API providers (Gemini, OpenRouter, OpenAI). Most recent translations are used first.</p>
-        <p><strong id="fewShotAutoCount">0</strong> cached recent translations.</p>
+        <div class="fewshot-stat">
+          <span class="fewshot-stat-num" id="fewShotAutoCount">0</span>
+          <span class="fewshot-stat-label">cached recent translations</span>
+        </div>
+        <p class="fewshot-help">Fills automatically as you translate with API providers (Gemini, OpenRouter, OpenAI). Most recent translations are used first.</p>
         <button type="button" id="fewShotClearAuto" class="btn btn-danger">🗑 Clear recent pool</button>
       </div>
     </section>
