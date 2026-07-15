@@ -640,10 +640,26 @@ async function copyChunk(index, type = 'processed') {
 async function copyChunkRaw(index) {
     const raw = processedResults[index]?.rawContent || allChunks[index] || '';
     const parts = [prefix, raw, suffix].filter(Boolean);
-    const text = parts.join('\n');
+    let text = parts.join('\n');
+    let hadExamples = false;
+    // Mirror the web-automation injection: prepend the few-shot example block so
+    // the copied prompt matches what the provider would actually receive.
+    try {
+        const { fewShotEnabled = false } = await browser.storage.local.get('fewShotEnabled');
+        if (fewShotEnabled) {
+            const examples = await selectForShot({ maxBudgetChars: 0, chunkText: text });
+            const exampleBlock = buildExampleTextBlock(examples);
+            if (exampleBlock) {
+                text = `${exampleBlock}\n\n${text}`;
+                hadExamples = true;
+            }
+        }
+    } catch (err) {
+        console.error('[fewshot] copyChunkRaw example lookup failed:', err);
+    }
     try {
         await navigator.clipboard.writeText(text);
-        showToast('📄 Copied raw (with prefix/suffix)!', 'success');
+        showToast(hadExamples ? '📄 Copied raw (with examples + prefix/suffix)!' : '📄 Copied raw (with prefix/suffix)!', 'success');
     } catch { showToast('❌ Copy failed', 'error'); }
 }
 

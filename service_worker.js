@@ -93,6 +93,10 @@ browser.runtime.onInstalled.addListener(function (details) {
             openaiBaseUrl: 'https://api.openai.com/v1',
 
             maxSessions: 3
+            ,
+            fewShotEnabled: false,
+            fewShotCount: 3,
+            fewShotMaxExamples: 20
         });
     }
 });
@@ -374,6 +378,25 @@ async function processSSEStream(reader, sessionId, message, updateChunksPageFn, 
     return { content: fullContent, reasoning: fullReasoning, snapshot: null };
 }
 
+// ─── Few-shot example selection (shared by API providers) ─────────────────────
+// Builds the OpenAI-shaped [{role, content}] example messages for a provider,
+// guarding selection in try/catch so a few-shot failure never breaks a
+// translation. Gemini casts role→model/parts itself; OpenRouter/OpenAI spread
+// the array as-is. Returns { chunkText, exampleMessages } so all three providers
+// share identical selection behavior.
+async function buildFewShotExampleMessages(message, options, contextWindowKey, providerLabel) {
+    const chunkText = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
+    let exampleMessages = [];
+    try {
+        if (options.fewShotEnabled) {
+            const budget = parseInt(options[contextWindowKey]) || 0;
+            const examples = await selectForShot({ maxBudgetChars: budget, chunkText });
+            exampleMessages = buildExampleMessages(examples);
+        }
+    } catch (e) { console.error(`[fewshot] ${providerLabel} example selection failed:`, e); }
+    return { chunkText, exampleMessages };
+}
+
 // ─── Gemini API ───────────────────────────────────────────────────────────────
 async function processChunkWithGemini(message, options) {
     let tabCloseListener;
@@ -383,8 +406,12 @@ async function processChunkWithGemini(message, options) {
     const sessionId = message.sessionId;
     sessionControllers[sessionId] = controller;
 
+    const { chunkText, exampleMessages } = await buildFewShotExampleMessages(message, options, 'geminiContextWindow', 'Gemini');
+    const exampleContents = exampleMessages
+      .map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
+
     const requestBody = {
-        contents: [{ parts: [{ text: `${message.prefix}\n${message.chunk}\n${message.suffix}` }] }],
+        contents: [...exampleContents, { role: 'user', parts: [{ text: chunkText }] }],
         generationConfig: {
             temperature: (v => Number.isFinite(v) ? v : 0.9)(parseFloat(options.temperature)),
             topK: (v => Number.isFinite(v) ? v : 40)(parseInt(options.topK)),
@@ -490,6 +517,10 @@ async function processChunkWithGemini(message, options) {
                 delete sessionControllers[sessionId];
             }
             updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk, isComplete: true });
+            if (options.fewShotEnabled && fullContent) {
+                try { await addExample({ raw: message.chunk, translation: fullContent, timestamp: Date.now() }); }
+                catch (e) { console.error('[fewshot] addExample failed:', e); }
+            }
             await new Promise(r => setTimeout(r, 100));
             return { result: fullContent, streaming: true, complete: true };
         }
@@ -552,6 +583,10 @@ async function processChunkWithOpenAICompatible(message, options, apiUrl, header
             delete sessionControllers[sessionId];
         }
         updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, reasoning: streamResult.reasoning || '', rawContent: message.chunk, isComplete: true });
+        if (options.fewShotEnabled && fullContent) {
+            try { await addExample({ raw: message.chunk, translation: fullContent, timestamp: Date.now() }); }
+            catch (e) { console.error('[fewshot] addExample failed:', e); }
+        }
         await new Promise(r => setTimeout(r, 100));
         return { result: fullContent, streaming: true, complete: true };
     } catch (error) {
@@ -570,9 +605,10 @@ async function processChunkWithOpenAICompatible(message, options, apiUrl, header
 }
 
 async function processChunkWithOpenRouter(message, options) {
+    const { chunkText, exampleMessages } = await buildFewShotExampleMessages(message, options, 'openRouterContextWindow', 'OpenRouter');
     const requestBody = {
         model: options.openRouterModelId || 'openai/gpt-4',
-        messages: [{ role: 'user', content: `${message.prefix}\n${message.chunk}\n${message.suffix}` }],
+        messages: [...exampleMessages, { role: 'user', content: chunkText }],
         stream: true
     };
     if (options.openRouterMaxTokens?.trim()) { const t = parseInt(options.openRouterMaxTokens); if (!isNaN(t) && t > 0) requestBody.max_tokens = t; }
@@ -589,9 +625,10 @@ async function processChunkWithOpenRouter(message, options) {
 }
 
 async function processChunkWithOpenAI(message, options) {
+    const { chunkText, exampleMessages } = await buildFewShotExampleMessages(message, options, 'openaiContextWindow', 'OpenAI');
     const requestBody = {
         model: options.openaiModelId || 'gpt-4o-mini',
-        messages: [{ role: 'user', content: `${message.prefix}\n${message.chunk}\n${message.suffix}` }],
+        messages: [...exampleMessages, { role: 'user', content: chunkText }],
         stream: true
     };
     if (options.openaiMaxTokens?.trim()) { const t = parseInt(options.openaiMaxTokens); if (!isNaN(t) && t > 0) requestBody.max_tokens = t; }
@@ -733,7 +770,15 @@ async function processChunkWithChatGPTWeb(message, options) {
         return { error: 'Permission required: Please enable ChatGPT Web in settings to grant access.' };
     }
 
-    const fullContent = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
+    const chunkText = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
+    let exampleBlock = '';
+    try {
+        if (options.fewShotEnabled) {
+            const examples = await selectForShot({ maxBudgetChars: 0, chunkText: '' });
+            exampleBlock = buildExampleTextBlock(examples);
+        }
+    } catch (e) { console.error('[fewshot] ChatGPT Web example selection failed:', e); }
+    const fullContent = exampleBlock ? `${exampleBlock}\n\n${chunkText}` : chunkText;
     const controller = new AbortController();
     const sessionId = message.sessionId;
     sessionControllers[sessionId] = controller;
@@ -768,7 +813,15 @@ async function processChunkWithGeminiWeb(message, options) {
         return { error: 'Permission required: Please enable Gemini Web in settings to grant access.' };
     }
 
-    const fullContent = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
+    const chunkText = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
+    let exampleBlock = '';
+    try {
+        if (options.fewShotEnabled) {
+            const examples = await selectForShot({ maxBudgetChars: 0, chunkText: '' });
+            exampleBlock = buildExampleTextBlock(examples);
+        }
+    } catch (e) { console.error('[fewshot] Gemini Web example selection failed:', e); }
+    const fullContent = exampleBlock ? `${exampleBlock}\n\n${chunkText}` : chunkText;
     const controller = new AbortController();
     const sessionId = message.sessionId;
     sessionControllers[sessionId] = controller;
