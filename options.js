@@ -25,9 +25,11 @@ const DEFAULTS = {
   fewShotEnabled: false,
   fewShotCount: 3,
   fewShotMaxExamples: 20,
+
+  collectionIncludeInBackup: false,
 };
 
-const KEYS_TO_EXCLUDE_FROM_EXPORT = ['processedChunks', 'translationSessions', 'fewShotExamples'];
+const KEYS_TO_EXCLUDE_FROM_EXPORT = ['processedChunks', 'translationSessions', 'fewShotExamples', 'collections', 'collectionDefaults'];
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 let toastTimer;
@@ -52,6 +54,9 @@ function setupNav() {
       if (btn.dataset.section === 'fewshot') {
         renderFewShotCustomList();
         renderFewShotAutoCount();
+      }
+      if (btn.dataset.section === 'collections') {
+        renderCollectionsSection();
       }
     });
   });
@@ -98,7 +103,9 @@ async function loadSettings() {
 
     'apiTimeout', 'webAutomationTimeout',
 
-    'fewShotEnabled', 'fewShotCount', 'fewShotMaxExamples'
+    'fewShotEnabled', 'fewShotCount', 'fewShotMaxExamples',
+
+    'collectionIncludeInBackup'
   ].forEach(key => { setField(key, settings[key]); });
 
   updatePromptPreview();
@@ -174,6 +181,8 @@ async function saveSettings() {
     fewShotEnabled: getField('fewShotEnabled'),
     fewShotCount: getField('fewShotCount'),
     fewShotMaxExamples: getField('fewShotMaxExamples'),
+
+    collectionIncludeInBackup: getField('collectionIncludeInBackup'),
 
   };
   try {
@@ -276,6 +285,350 @@ async function clearFewShotCustom() {
   showToast('🗑 Custom examples cleared', 'success');
 }
 
+// ─── Collections ─────────────────────────────────────────────────────────────
+let _selectedCollectionId = null;
+
+async function renderCollectionsSection() {
+  let collectionsMap = {};
+  let defaults = { global: null, perSession: {} };
+  let includeInBackup = false;
+  try {
+    const [colls, defs, stored] = await Promise.all([
+      browser.runtime.sendMessage({ action: 'getCollections' }),
+      browser.runtime.sendMessage({ action: 'getCollectionDefaults' }),
+      browser.storage.sync.get('collectionIncludeInBackup'),
+    ]);
+    collectionsMap = colls?.collections ?? {};
+    defaults = defs?.defaults ?? { global: null, perSession: {} };
+    includeInBackup = !!stored?.collectionIncludeInBackup;
+  } catch (err) {
+    console.error('[collections] load failed:', err);
+    showToast('❌ Failed to load collections.', 'error');
+  }
+
+  // Global default selector.
+  const globalSel = document.getElementById('collectionGlobalDefault');
+  if (globalSel) {
+    const cur = globalSel.value;
+    globalSel.innerHTML = '<option value="">None</option>' +
+      Object.values(collectionsMap).map(c =>
+        `<option value="${escapeHtml(c.id)}"${c.id === defaults.global ? ' selected' : ''}>${escapeHtml(c.name)}</option>`
+      ).join('');
+    if (cur && collectionsMap[cur]) globalSel.value = cur;
+    else if (defaults.global) globalSel.value = defaults.global;
+    globalSel.onchange = null;
+    globalSel.addEventListener('change', async (e) => {
+      defaults.global = e.target.value || null;
+      try {
+        await browser.runtime.sendMessage({ action: 'setCollectionDefaults', defaults });
+      } catch (err) { showToast('❌ Failed to save default.', 'error'); }
+    }, { once: false });
+  }
+
+  // Backup toggle.
+  const cb = document.getElementById('collectionIncludeInBackup');
+  if (cb) { cb.checked = includeInBackup; }
+
+  // Sidebar list.
+  const list = document.getElementById('collectionList');
+  if (list) {
+    const colls = Object.values(collectionsMap);
+    if (colls.length === 0) {
+      list.innerHTML = '<div class="collection-empty" style="padding:24px 12px">No collections yet. Add chunks from the translation page, or create one here.</div>';
+    } else {
+      list.innerHTML = colls.map(c => {
+        const count = (c.entries || []).length;
+        const updated = c.updatedAt ? new Date(c.updatedAt).toLocaleDateString() : '';
+        const active = c.id === _selectedCollectionId ? ' active' : '';
+        return `<div class="collection-item${active}" data-id="${escapeHtml(c.id)}">
+          <div class="collection-item-info">
+            <div class="collection-item-name">${escapeHtml(c.name)}</div>
+            <div class="collection-item-meta">${count} entr${count === 1 ? 'y' : 'ies'}${updated ? ' · ' + updated : ''}</div>
+          </div>
+          <div class="collection-item-actions">
+            <button class="collection-item-action-btn" data-action="rename" data-id="${escapeHtml(c.id)}" aria-label="Rename" title="Rename">✏️</button>
+            <button class="collection-item-action-btn delete" data-action="delete" data-id="${escapeHtml(c.id)}" aria-label="Delete" title="Delete">🗑</button>
+          </div>
+        </div>`;
+      }).join('');
+      // Click to select.
+      list.querySelectorAll('.collection-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+          if (e.target.closest('.collection-item-action-btn')) return;
+          _selectedCollectionId = item.dataset.id;
+          renderCollectionsSection();
+        });
+      });
+      // Action buttons.
+      list.querySelectorAll('.collection-item-action-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const id = btn.dataset.id;
+          if (btn.dataset.action === 'rename') {
+            const coll = collectionsMap[id];
+            const name = prompt('Collection name:', coll?.name);
+            if (!name || !name.trim()) return;
+            await browser.runtime.sendMessage({ action: 'updateCollection', collectionId: id, name: name.trim() });
+            showToast('✏️ Collection renamed.', 'success');
+          } else if (btn.dataset.action === 'delete') {
+            if (!confirm('Delete this collection? This cannot be undone.')) return;
+            await browser.runtime.sendMessage({ action: 'deleteCollection', collectionId: id });
+            if (_selectedCollectionId === id) _selectedCollectionId = null;
+            showToast('🗑 Collection deleted.', 'success');
+          }
+          renderCollectionsSection();
+        });
+      });
+    }
+  }
+
+  // Detail panel.
+  renderCollectionDetail(collectionsMap);
+}
+
+function renderCollectionDetail(collectionsMap) {
+  const detail = document.getElementById('collectionDetail');
+  if (!detail) return;
+  const coll = _selectedCollectionId ? collectionsMap[_selectedCollectionId] : null;
+  if (!coll) {
+    detail.innerHTML = '<div class="collection-empty">Select a collection or create a new one.</div>';
+    return;
+  }
+  const entries = coll.entries || [];
+  detail.innerHTML = `
+    <div class="collection-header-row">
+      <h2>${escapeHtml(coll.name)}</h2>
+      <div class="action-row">
+        <div class="add-to-dropdown" id="collectionExportDropdown">
+          <button class="btn btn-secondary btn-sm" id="collectionExportBtn">Export ▾</button>
+          <div class="dropdown-menu" style="min-width:160px">
+            <button class="dropdown-item" data-format="md">📄 Export .md</button>
+            <button class="dropdown-item" data-format="epub">📖 Export .epub</button>
+            <button class="dropdown-item" data-format="html">🖨 Export .html (→ PDF)</button>
+          </div>
+        </div>
+        <button class="btn btn-danger btn-sm" id="collectionDeleteBtn">🗑 Delete collection</button>
+      </div>
+    </div>
+    <p style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px">${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}</p>
+    <div class="action-row" style="margin-bottom:12px">
+      <button class="btn btn-secondary btn-sm" id="collectionRemoveAllBtn">🗑 Remove all</button>
+      <button class="btn btn-secondary btn-sm" id="collectionReprocessAllBtn">↩ Re-process all</button>
+    </div>
+    <div class="collection-entries" id="collectionEntries">${entries.length === 0 ? '<div class="collection-empty" style="padding:24px 12px">No entries yet.</div>' : ''}</div>`;
+
+  if (entries.length > 0) {
+    const entriesEl = document.getElementById('collectionEntries');
+    entriesEl.innerHTML = entries.map((e, idx) => {
+      const added = e.addedAt ? new Date(e.addedAt).toLocaleString() : '';
+      const source = `Session ${((e.sessionId || '').slice(0, 8))} · Chunk ${e.chunkIndex + 1}`;
+      return `<div class="collection-entry" data-index="${idx}">
+        <div style="display:flex;flex-direction:column;gap:2px;align-items:center;padding-top:2px">
+          <button class="collection-item-action-btn reorder-up" data-idx="${idx}" aria-label="Move up" title="Move up" ${idx === 0 ? 'disabled style="opacity:0.3;cursor:default"' : ''}>▲</button>
+          <button class="collection-item-action-btn reorder-down" data-idx="${idx}" aria-label="Move down" title="Move down" ${idx === entries.length - 1 ? 'disabled style="opacity:0.3;cursor:default"' : ''}>▼</button>
+        </div>
+        <div>
+          <div class="collection-entry-title" contenteditable="true" data-entry-id="${escapeHtml(e.id)}" title="Click to edit title">${escapeHtml(e.title || `Chunk ${e.chunkIndex + 1}`)}</div>
+          <div class="collection-entry-meta">${escapeHtml(source)} · Added ${escapeHtml(added)}</div>
+        </div>
+        <div class="collection-entry-actions">
+          <button class="btn btn-secondary btn-sm entry-reimport" data-entry-id="${escapeHtml(e.id)}" title="Re-import to session">↩ Re-import</button>
+          <button class="btn btn-secondary btn-sm entry-reprocess" data-entry-id="${escapeHtml(e.id)}" title="Re-translate from raw">↩ Re-process</button>
+          <button class="btn btn-danger btn-sm entry-remove" data-entry-id="${escapeHtml(e.id)}">🗑 Remove</button>
+        </div>
+      </div>`;
+    }).join('');
+
+    // Title edit (blur → save).
+    entriesEl.querySelectorAll('[contenteditable="true"]').forEach(el => {
+      el.addEventListener('blur', async () => {
+        const entryId = el.dataset.entryId;
+        const coll = collectionsMap[_selectedCollectionId];
+        const entry = coll?.entries?.find(e => e.id === entryId);
+        if (!entry) return;
+        entry.title = el.textContent.trim() || `Chunk ${entry.chunkIndex + 1}`;
+        el.textContent = entry.title;
+        try {
+          await browser.runtime.sendMessage({ action: 'updateCollection', collectionId: _selectedCollectionId, name: coll.name });
+          // updateCollection only updates name; we need to persist entries too.
+          // Use a dedicated path: write the whole collection back.
+          await browser.storage.local.get('collections').then(({ collections = {} }) => {
+            collections[_selectedCollectionId].entries = coll.entries;
+            collections[_selectedCollectionId].updatedAt = Date.now();
+            return browser.storage.local.set({ collections });
+          });
+        } catch (err) { showToast('❌ Failed to save title.', 'error'); }
+      });
+    });
+
+    // Reorder.
+    entriesEl.querySelectorAll('.reorder-up, .reorder-down').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const idx = parseInt(btn.dataset.idx);
+        const to = btn.classList.contains('reorder-up') ? idx - 1 : idx + 1;
+        try {
+          await browser.runtime.sendMessage({ action: 'reorderEntries', collectionId: _selectedCollectionId, fromIndex: idx, toIndex: to });
+          renderCollectionsSection();
+        } catch (err) { showToast('❌ Failed to reorder.', 'error'); }
+      });
+    });
+
+    // Remove entry.
+    entriesEl.querySelectorAll('.entry-remove').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        try {
+          await browser.runtime.sendMessage({ action: 'removeEntryFromCollection', collectionId: _selectedCollectionId, entryId: btn.dataset.entryId });
+          renderCollectionsSection();
+          showToast('🗑 Entry removed.', 'success');
+        } catch (err) { showToast('❌ Failed to remove entry.', 'error'); }
+      });
+    });
+
+    // Re-import to session.
+    entriesEl.querySelectorAll('.entry-reimport').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const entry = entries.find(e => e.id === btn.dataset.entryId);
+        if (!entry) return;
+        try {
+          const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
+          const sess = processedChunks[entry.sessionId] || [];
+          sess[entry.chunkIndex] = { content: { parts: [entry.content], text: entry.content }, rawContent: entry.rawContent };
+          processedChunks[entry.sessionId] = sess;
+          await browser.storage.local.set({ processedChunks });
+          showToast('✅ Re-imported to session.', 'success');
+        } catch (err) { showToast('❌ Re-import failed.', 'error'); }
+      });
+    });
+
+    // Re-process entry (re-translate from raw).
+    entriesEl.querySelectorAll('.entry-reprocess').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const entry = entries.find(e => e.id === btn.dataset.entryId);
+        if (!entry) return;
+        const btnEl = btn;
+        btnEl.disabled = true;
+        btnEl.textContent = '⏳ …';
+        try {
+          const { prefix, suffix, retryCount } = await browser.storage.local.get(['prefix', 'suffix', 'retryCount']);
+          const res = await browser.runtime.sendMessage({
+            action: 'reprocessEntry',
+            sessionId: entry.sessionId,
+            chunkIndex: entry.chunkIndex,
+            prefix: prefix || '',
+            suffix: suffix || '',
+            retryCount: retryCount || 3,
+            rawContent: entry.rawContent,
+          });
+          if (res?.error) throw new Error(res.error);
+          const result = res.result;
+          const parts = result.parts || [result.result];
+          // Update the entry's content in the collection.
+          const coll = collectionsMap[_selectedCollectionId];
+          const e2 = coll?.entries?.find(e => e.id === entry.id);
+          if (e2) {
+            e2.content = Array.isArray(parts) ? parts.join('') : (result.result || '');
+            await browser.storage.local.get('collections').then(({ collections = {} }) => {
+              collections[_selectedCollectionId].entries = coll.entries;
+              collections[_selectedCollectionId].updatedAt = Date.now();
+              return browser.storage.local.set({ collections });
+            });
+          }
+          showToast('✅ Re-processed.', 'success');
+        } catch (err) { showToast('❌ Re-process failed: ' + err.message, 'error'); }
+        btnEl.disabled = false;
+        btnEl.textContent = '↩ Re-process';
+        renderCollectionsSection();
+      });
+    });
+  }
+
+  // Export dropdown.
+  const exportBtn = document.getElementById('collectionExportBtn');
+  const exportDrop = document.getElementById('collectionExportDropdown');
+  if (exportBtn && exportDrop) {
+    exportBtn.addEventListener('click', (e) => { e.stopPropagation(); exportDrop.classList.toggle('open'); });
+    document.addEventListener('click', function closeExport(e) {
+      if (exportDrop && !exportDrop.contains(e.target)) { exportDrop.classList.remove('open'); document.removeEventListener('click', closeExport); }
+    });
+    exportDrop.querySelectorAll('.dropdown-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        exportDrop.classList.remove('open');
+        const fmt = item.dataset.format;
+        if (fmt === 'md') exportCollectionMD(coll);
+        else if (fmt === 'epub') exportCollectionEPUB(coll);
+        else if (fmt === 'html') exportCollectionHTML(coll);
+      });
+    });
+  }
+
+  // Delete collection.
+  document.getElementById('collectionDeleteBtn')?.addEventListener('click', async () => {
+    if (!confirm('Delete this collection? This cannot be undone.')) return;
+    try {
+      await browser.runtime.sendMessage({ action: 'deleteCollection', collectionId: _selectedCollectionId });
+      _selectedCollectionId = null;
+      renderCollectionsSection();
+      showToast('🗑 Collection deleted.', 'success');
+    } catch (err) { showToast('❌ Failed to delete collection.', 'error'); }
+  });
+
+  // Remove all.
+  document.getElementById('collectionRemoveAllBtn')?.addEventListener('click', async () => {
+    if (!confirm('Remove all entries from this collection?')) return;
+    try {
+      const { collections = {} } = await browser.storage.local.get('collections');
+      if (collections[_selectedCollectionId]) {
+        collections[_selectedCollectionId].entries = [];
+        collections[_selectedCollectionId].updatedAt = Date.now();
+        await browser.storage.local.set({ collections });
+        renderCollectionsSection();
+        showToast('🗑 All entries removed.', 'success');
+      }
+    } catch (err) { showToast('❌ Failed to remove entries.', 'error'); }
+  });
+
+  // Re-process all.
+  document.getElementById('collectionReprocessAllBtn')?.addEventListener('click', async () => {
+    if (!confirm('Re-translate all entries from raw content?')) return;
+    const { prefix, suffix, retryCount } = await browser.storage.local.get(['prefix', 'suffix', 'retryCount']);
+    const btnEl = document.getElementById('collectionReprocessAllBtn');
+    if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳ Processing…'; }
+    let ok = 0, fail = 0;
+    for (const entry of entries) {
+      try {
+        const res = await browser.runtime.sendMessage({
+          action: 'reprocessEntry',
+          sessionId: entry.sessionId,
+          chunkIndex: entry.chunkIndex,
+          prefix: prefix || '',
+          suffix: suffix || '',
+          retryCount: retryCount || 3,
+          rawContent: entry.rawContent,
+        });
+        if (res?.error) throw new Error(res.error);
+        const parts = res.result.parts || [res.result.result];
+        const coll = collectionsMap[_selectedCollectionId];
+        const e2 = coll?.entries?.find(e => e.id === entry.id);
+        if (e2) e2.content = Array.isArray(parts) ? parts.join('') : (res.result.result || '');
+        await browser.storage.local.get('collections').then(({ collections = {} }) => {
+          collections[_selectedCollectionId].entries = coll.entries;
+          collections[_selectedCollectionId].updatedAt = Date.now();
+          return browser.storage.local.set({ collections });
+        });
+        ok++;
+      } catch (err) { fail++; console.error(err); }
+    }
+    renderCollectionsSection();
+    showToast(`✅ Re-processed: ${ok} ok, ${fail} failed.`, fail ? 'error' : 'success');
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '↩ Re-process all'; }
+  });
+}
+
+function exportCollectionMD(collection) { showToast('📄 Export coming soon.', 'success'); }
+function exportCollectionEPUB(collection) { showToast('📖 Export coming soon.', 'success'); }
+function exportCollectionHTML(collection) { showToast('🖨 Export coming soon.', 'success'); }
+
 // ─── Export ───────────────────────────────────────────────────────────────────
 async function exportSettings() {
   let all;
@@ -288,6 +641,17 @@ async function exportSettings() {
   const filtered = Object.fromEntries(
     Object.entries(all).filter(([k]) => !KEYS_TO_EXCLUDE_FROM_EXPORT.includes(k))
   );
+
+  // Optionally merge collections into the backup.
+  try {
+    const include = getField('collectionIncludeInBackup');
+    if (include) {
+      const { collections, collectionDefaults } = await browser.storage.local.get(['collections', 'collectionDefaults']);
+      if (collections) filtered.collections = collections;
+      if (collectionDefaults) filtered.collectionDefaults = collectionDefaults;
+    }
+  } catch (_) { /* best-effort */ }
+
   const blob = new Blob([JSON.stringify(filtered, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -301,7 +665,7 @@ async function exportSettings() {
 // and the set loaded by loadSettings). Any extra keys in the JSON are silently dropped.
 // fewShotCustomExamples is user-authored data, not a DEFAULTS setting, so it must be
 // allow-listed separately for import (DEFAULTS-derived keys would otherwise drop it).
-const ALLOWED_IMPORT_KEYS = [...Object.keys(DEFAULTS), 'fewShotCustomExamples'];
+const ALLOWED_IMPORT_KEYS = [...Object.keys(DEFAULTS), 'fewShotCustomExamples', 'collections', 'collectionDefaults', 'collectionIncludeInBackup'];
 const VALID_API_TYPES = ['gemini', 'openRouter', 'openai', 'chatgptWeb', 'geminiWeb'];
 
 async function importFromJSON(json) {
@@ -321,6 +685,15 @@ async function importFromJSON(json) {
       throw new TypeError(`Invalid apiType "${whitelisted.apiType}". Must be one of: ${VALID_API_TYPES.join(', ')}`);
     }
     await browser.storage.local.set(sanitizeNumericSettings(whitelisted));
+
+    // Restore collections if present in the import.
+    const collKeys = ['collections', 'collectionDefaults', 'collectionIncludeInBackup'];
+    const collData = {};
+    for (const k of collKeys) {
+      if (Object.prototype.hasOwnProperty.call(data, k)) collData[k] = data[k];
+    }
+    if (Object.keys(collData).length) await browser.storage.local.set(collData);
+
     await loadSettings();
     showToast('✅ Settings imported!', 'success');
   } catch (e) {
@@ -445,6 +818,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('fewShotClearAuto')?.addEventListener('click', clearFewShotAuto);
   document.getElementById('fewShotCount')?.addEventListener('input', updatePromptPreview);
   document.getElementById('fewShotEnabled')?.addEventListener('change', updatePromptPreview);
+
+  // Collections — new collection button.
+  document.getElementById('collectionNewBtn')?.addEventListener('click', async () => {
+    const name = prompt('Collection name:');
+    if (!name || !name.trim()) return;
+    try {
+      const { collection } = await browser.runtime.sendMessage({ action: 'createCollection', name: name.trim() });
+      if (!collection) throw new Error('Failed to create collection.');
+      showToast('✅ Collection created.', 'success');
+      renderCollectionsSection();
+    } catch (err) { showToast('❌ Failed to create collection.', 'error'); }
+  });
 
 
   // Web automation quick-select
