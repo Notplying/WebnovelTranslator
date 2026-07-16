@@ -96,7 +96,7 @@ Collection: [None ▾]   [☐ Auto-add every finished chunk]
 
 ### 4c. Auto-Add Hook
 
-In the translation loop, after a chunk succeeds (`processedResults[i] = { content, rawContent }`), if auto-add is on, dispatch `addEntryToCollection` to the service worker with the resolved collection. Non-blocking (fire-and-forget, errors to toast).
+In the translation loop, after a chunk succeeds (`processedResults[i] = { content, rawContent }`), if auto-add is on, dispatch `addEntryToCollection` to the service worker with the resolved collection. Awaiting the result so failures surface as a toast ("❌ Failed to add to collection") without interrupting the translation flow.
 
 ---
 
@@ -122,7 +122,7 @@ A new **Collections** section (`<section id="section-collections">`, nav item wi
 
 ### 5c. Export (per collection)
 - **📄 Export .md** — single markdown file: `# {title}` per entry, content below, `---` separator.
-- **📖 Export .epub** — proper `.epub` (ZIP: `mimetype`, `META-INF/container.xml`, `content.opf`, `toc.ncx`, one `chapter-N.xhtml` per entry). Each entry a chapter; auto-generated TOC.
+- **📖 Export .epub** — proper `.epub` (ZIP: `mimetype` as the first uncompressed entry, `META-INF/container.xml`, `content.opf`, `toc.ncx`, one `chapter-N.xhtml` per entry). STORE compression only (no DEFLATE — valid for text EPUBs and avoids a compression library). Each entry a chapter; auto-generated TOC.
 - **🖨 Export .html (→ PDF)** — styled HTML with print-friendly CSS (page breaks between entries, readable typography). User opens and uses browser "Print → Save as PDF".
 
 ### 5d. Global Default & Backup Toggle
@@ -159,14 +159,14 @@ New `runtime.onMessage` handlers (all operate on `storage.local`):
 - Sidebar rendered from `getCollections`; detail panel from selected collection.
 - All CRUD buttons route through service-worker message handlers.
 - Export functions (`exportCollectionMD`, `exportCollectionEPUB`, `exportCollectionHTML`) run in the options page context — read from in-memory state, no service-worker round-trip needed.
-- `collectionIncludeInBackup` honoured in `exportSettings()` / `importSettings()`.
+- `collectionIncludeInBackup` honoured in `exportSettings()` / `importSettings()`: when the toggle is on at export time, `collections` and `collectionDefaults` are merged into the backup JSON; on import, if those keys are present in the backup they are restored alongside settings.
 
 **Chunks page (`chunks.js`):**
 - On session init: fetch `collectionDefaults` + collections list; resolve default; render header selector.
 - `buildChunkCards` gains the "⊕ Add to ▾" dropdown per card, populated from the fetched collections list.
 - Helper `resolveDefaultCollection(sessionId)` — per-session override → global → none.
 
-**EPUB assembly** runs in the options page: build the ZIP (mimetype, `META-INF/container.xml`, `content.opf`, `toc.ncx`, per-entry XHTML) using `TextEncoder` + manual DEFLATE/STORE, then download via blob URL. No external library.
+**EPUB assembly** runs in the options page: build the ZIP (mimetype first and uncompressed, `META-INF/container.xml`, `content.opf`, `toc.ncx`, per-entry XHTML) using `TextEncoder` and STORE compression (no DEFLATE), then download via blob URL. No external library.
 
 ---
 
