@@ -146,6 +146,100 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             .catch(error => sendResponse({ success: false, error: error.message }));
         return true;
     }
+    // ─── Collections ────────────────────────────────────────────────────────
+    if (message.action === 'getCollections') {
+        browser.storage.local.get('collections').then(({ collections = {} }) =>
+            sendResponse({ collections })).catch(err => sendResponse({ error: err.message }));
+        return true;
+    }
+    if (message.action === 'createCollection') {
+        const name = (message.name || '').trim();
+        if (!name) { sendResponse({ error: 'Collection name is required.' }); return true; }
+        const now = Date.now();
+        const collection = { id: crypto.randomUUID(), name, createdAt: now, updatedAt: now, entries: [] };
+        browser.storage.local.get('collections').then(({ collections = {} }) => {
+            collections[collection.id] = collection;
+            return browser.storage.local.set({ collections });
+        }).then(() => sendResponse({ collection })).catch(err => sendResponse({ error: err.message }));
+        return true;
+    }
+    if (message.action === 'updateCollection') {
+        const { collectionId, name } = message;
+        if (!collectionId || !(name || '').trim()) { sendResponse({ error: 'Invalid input.' }); return true; }
+        browser.storage.local.get('collections').then(({ collections = {} }) => {
+            const c = collections[collectionId]; if (!c) throw new Error('Collection not found.');
+            c.name = name.trim(); c.updatedAt = Date.now();
+            return browser.storage.local.set({ collections });
+        }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
+        return true;
+    }
+    if (message.action === 'deleteCollection') {
+        const { collectionId } = message;
+        browser.storage.local.get('collections').then(({ collections = {} }) => {
+            delete collections[collectionId];
+            return browser.storage.local.set({ collections });
+        }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
+        return true;
+    }
+    if (message.action === 'addEntryToCollection') {
+        const { collectionId, entry } = message;
+        if (!collectionId || !entry) { sendResponse({ error: 'Invalid input.' }); return true; }
+        browser.storage.local.get('collections').then(({ collections = {} }) => {
+            const c = collections[collectionId]; if (!c) throw new Error('Collection not found.');
+            // Prevent duplicate entries from the same chunk.
+            const exists = c.entries.some(e => e.sessionId === entry.sessionId && e.chunkIndex === entry.chunkIndex);
+            if (exists) return sendResponse({ success: true, alreadyPresent: true });
+            c.entries.push({ ...entry, id: crypto.randomUUID(), addedAt: Date.now() });
+            c.updatedAt = Date.now();
+            return browser.storage.local.set({ collections }).then(() => sendResponse({ success: true }));
+        }).catch(err => sendResponse({ error: err.message }));
+        return true;
+    }
+    if (message.action === 'removeEntryFromCollection') {
+        const { collectionId, entryId } = message;
+        browser.storage.local.get('collections').then(({ collections = {} }) => {
+            const c = collections[collectionId]; if (!c) throw new Error('Collection not found.');
+            c.entries = c.entries.filter(e => e.id !== entryId);
+            c.updatedAt = Date.now();
+            return browser.storage.local.set({ collections });
+        }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
+        return true;
+    }
+    if (message.action === 'reorderEntries') {
+        const { collectionId, fromIndex, toIndex } = message;
+        browser.storage.local.get('collections').then(({ collections = {} }) => {
+            const c = collections[collectionId]; if (!c) throw new Error('Collection not found.');
+            const [moved] = c.entries.splice(fromIndex, 1);
+            c.entries.splice(toIndex, 0, moved);
+            c.updatedAt = Date.now();
+            return browser.storage.local.set({ collections });
+        }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
+        return true;
+    }
+    if (message.action === 'getCollectionDefaults') {
+        browser.storage.local.get('collectionDefaults').then(({ collectionDefaults }) =>
+            sendResponse({ defaults: collectionDefaults ?? { global: null, perSession: {} } }))
+            .catch(err => sendResponse({ error: err.message }));
+        return true;
+    }
+    if (message.action === 'setCollectionDefaults') {
+        const defaults = message.defaults ?? { global: null, perSession: {} };
+        browser.storage.local.set({ collectionDefaults: defaults })
+            .then(() => sendResponse({ success: true }))
+            .catch(err => sendResponse({ error: err.message }));
+        return true;
+    }
+    if (message.action === 'reprocessEntry') {
+        // Re-translate an entry from its rawContent using current settings.
+        const { sessionId, chunkIndex, prefix, suffix, retryCount } = message;
+        if (!sessionId || chunkIndex == null || !prefix) {
+            sendResponse({ error: 'Invalid input.' }); return true;
+        }
+        processChunk({ chunk: message.rawContent, prefix, suffix, sessionId, retryCount: retryCount || 3 })
+            .then(result => sendResponse({ success: true, result }))
+            .catch(err => sendResponse({ error: err.message }));
+        return true;
+    }
 });
 
 // ─── Session helpers ──────────────────────────────────────────────────────────
