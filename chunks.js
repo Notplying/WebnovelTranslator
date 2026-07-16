@@ -121,6 +121,113 @@ let streamingIndex = -1;
 let reprocessingState = { isActive: false, targetIndex: -1 };
 let _terminated = false;
 
+// ─── Collections state ──────────────────────────────────────────────────────
+let collectionsList = {};     // collections map from storage
+let collectionDefaults = { global: null, perSession: {} };
+let autoAddEnabled = false;
+
+function resolveDefaultCollection(sessionId) {
+    const per = collectionDefaults.perSession;
+    if (Object.prototype.hasOwnProperty.call(per, sessionId)) return per[sessionId];
+    return collectionDefaults.global ?? null;
+}
+
+async function renderCollectionSelector() {
+    const sel = document.getElementById('collectionDefaultSelect');
+    const cb = document.getElementById('collectionAutoAdd');
+    if (!sel || !cb) return;
+    const resolved = resolveDefaultCollection(sessionId);
+    // Preserve user selection while rebuilding options.
+    const existingValue = sel.value;
+    sel.innerHTML = '<option value="">None</option>' +
+        Object.values(collectionsList).map(c =>
+            `<option value="${escapeHtml(c.id)}"${c.id === resolved ? ' selected' : ''}>${escapeHtml(c.name)}</option>`
+        ).join('');
+    // If nothing was explicitly set for this session and a global default exists, reflect it.
+    if (existingValue) sel.value = existingValue;
+    else if (resolved) sel.value = resolved;
+    cb.checked = autoAddEnabled && !!resolved;
+}
+
+document.getElementById('collectionDefaultSelect')?.addEventListener('change', async (e) => {
+    const val = e.target.value || null;
+    collectionDefaults.perSession[sessionId] = val;
+    try {
+        await browser.runtime.sendMessage({ action: 'setCollectionDefaults', defaults: collectionDefaults });
+    } catch (err) { console.error('[collections] setDefaults failed:', err); }
+});
+
+document.getElementById('collectionAutoAdd')?.addEventListener('change', (e) => {
+    autoAddEnabled = e.target.checked;
+});
+
+function populateAddToMenu(index, menuEl) {
+    if (!menuEl) return;
+    const colls = Object.values(collectionsList);
+    if (colls.length === 0) {
+        menuEl.innerHTML = `<button class="dropdown-item" data-action="new">✨ New collection…</button>`;
+    } else {
+        menuEl.innerHTML = colls.map(c => {
+            const added = (c.entries || []).some(e => e.sessionId === sessionId && e.chunkIndex === index);
+            return `<button class="dropdown-item${added ? ' added' : ''}" data-action="add" data-id="${escapeHtml(c.id)}" ${added ? 'disabled' : ''}>${added ? '✓ ' : ''}${escapeHtml(c.name)}</button>`;
+        }).join('') +
+            `<div class="dropdown-sep"></div><button class="dropdown-item" data-action="new">✨ New collection…</button>`;
+    }
+    menuEl.querySelectorAll('.dropdown-item[data-action="add"]').forEach(btn => {
+        btn.addEventListener('click', (e) => { e.stopPropagation(); addChunkToCollection(index, btn.dataset.id); });
+    });
+    menuEl.querySelector('.dropdown-item[data-action="new"]')?.addEventListener('click', (e) => {
+        e.stopPropagation(); newCollectionAndAdd(index);
+    });
+}
+
+async function addChunkToCollection(index, collectionId) {
+    const r = processedResults[index];
+    const content = r?.content?.text || '';
+    const rawContent = r?.rawContent || allChunks[index] || '';
+    if (!content && !rawContent) { showToast('Nothing to add — chunk is empty.', 'error'); return; }
+    const coll = collectionsList[collectionId];
+    if (!coll) { showToast('❌ Collection not found.', 'error'); return; }
+    try {
+        const res = await browser.runtime.sendMessage({
+            action: 'addEntryToCollection',
+            collectionId,
+            entry: {
+                sessionId: sessionId,
+                chunkIndex: index,
+                title: `Chunk ${index + 1}`,
+                content,
+                rawContent,
+            },
+        });
+        if (res?.error) throw new Error(res.error);
+        if (res?.alreadyPresent) { showToast('ℹ️ Already in this collection.', 'success'); }
+        else { showToast(`✅ Added to ${escapeHtml(coll.name)}!`, 'success'); }
+        // Refresh dropdowns.
+        populateAddToMenu(index, document.getElementById(`chunk-addto-menu-${index}`));
+    } catch (err) {
+        showToast(`❌ Failed to add to collection: ${err.message}`, 'error');
+    }
+}
+
+async function newCollectionAndAdd(index) {
+    const name = prompt('Collection name:');
+    if (!name || !name.trim()) return;
+    try {
+        const { collection } = await browser.runtime.sendMessage({
+            action: 'createCollection', name: name.trim(),
+        });
+        if (!collection) throw new Error('Failed to create collection.');
+        collectionsList[collection.id] = collection;
+        renderCollectionSelector();
+        // Refresh all dropdowns.
+        document.querySelectorAll('[id^="chunk-addto-menu-"]').forEach(m => populateAddToMenu(index, m));
+        await addChunkToCollection(index, collection.id);
+    } catch (err) {
+        showToast(`❌ Failed to create collection: ${err.message}`, 'error');
+    }
+}
+
 // ─── Image Blob Cache cleanup ─────────────────────────────────────────────────
 function cleanupImageBlobCache() {
     for (const blobUrl of imageBlobCache.values()) {
@@ -202,6 +309,10 @@ function buildChunkCards(chunks) {
           <button class="btn btn-secondary btn-sm" id="chunk-copy-${i}">📋 Copy</button>
           <button class="btn btn-secondary btn-sm" id="chunk-copy-raw-${i}">📄 Copy Raw</button>
           <button class="btn btn-secondary btn-sm" id="chunk-reprocess-${i}">↩ Reprocess</button>
+          <div class="add-to-dropdown" id="chunk-addto-${i}">
+            <button class="btn btn-secondary btn-sm" id="chunk-addto-btn-${i}">⊕ Add to ▾</button>
+            <div class="dropdown-menu" id="chunk-addto-menu-${i}"></div>
+          </div>
         </div>
       </div>`;
         container.appendChild(card);
@@ -215,6 +326,29 @@ function buildChunkCards(chunks) {
         document.getElementById(`chunk-copy-${i}`).addEventListener('click', (e) => { e.stopPropagation(); copyChunk(i, 'processed'); });
         document.getElementById(`chunk-copy-raw-${i}`).addEventListener('click', (e) => { e.stopPropagation(); copyChunkRaw(i); });
         document.getElementById(`chunk-reprocess-${i}`).addEventListener('click', (e) => { e.stopPropagation(); reprocessOne(i); });
+
+        // ── "Add to collection" dropdown ─────────────────────────────────────
+        const addEl = document.getElementById(`chunk-addto-${i}`);
+        const addBtn = document.getElementById(`chunk-addto-btn-${i}`);
+        const addMenu = document.getElementById(`chunk-addto-menu-${i}`);
+        if (addEl && addBtn && addMenu) {
+            addBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // Close all other dropdowns.
+                document.querySelectorAll('.add-to-dropdown.open').forEach(d => {
+                    if (d !== addEl) d.classList.remove('open');
+                });
+                addEl.classList.toggle('open');
+                populateAddToMenu(i, addMenu);
+            });
+            // Close when clicking outside the card.
+            document.addEventListener('click', function closeAddTo(e) {
+                if (!addEl.contains(e.target)) {
+                    addEl.classList.remove('open');
+                    document.removeEventListener('click', closeAddTo);
+                }
+            });
+        }
     });
 }
 
@@ -498,6 +632,29 @@ async function processAllChunks(resume = false) {
                         processedResults[i] = { content: { parts: [result.result], text: result.result }, rawContent: allChunks[i] };
                         renderChunk(i, result.result, false);
                         await saveChunk(i, processedResults[i].content, allChunks[i]);
+                        // Auto-add to the resolved default collection.
+                        if (autoAddEnabled) {
+                            const collId = resolveDefaultCollection(sessId);
+                            if (collId) {
+                                const r = processedResults[i] || {};
+                                try {
+                                    const res = await browser.runtime.sendMessage({
+                                        action: 'addEntryToCollection',
+                                        collectionId: collId,
+                                        entry: {
+                                            sessionId: sessId,
+                                            chunkIndex: i,
+                                            title: `Chunk ${i + 1}`,
+                                            content: r.content?.text || '',
+                                            rawContent: r.rawContent || allChunks[i] || '',
+                                        },
+                                    });
+                                    if (res?.error) throw new Error(res.error);
+                                } catch (err) {
+                                    showToast(`❌ Failed to add chunk ${i + 1} to collection: ${err.message}`, 'error');
+                                }
+                            }
+                        }
                         success = true; break;
                     }
                     if (timedOut) { throw new Error('Streaming timed out after 5 minutes'); }
@@ -511,6 +668,29 @@ async function processAllChunks(resume = false) {
 
                 processedResults[i] = { content: { parts, text: result.result }, rawContent: allChunks[i] };
                 await saveChunk(i, processedResults[i].content, allChunks[i]);
+                // Auto-add to the resolved default collection.
+                if (autoAddEnabled) {
+                    const collId = resolveDefaultCollection(sessId);
+                    if (collId) {
+                        const r = processedResults[i] || {};
+                        try {
+                            const res = await browser.runtime.sendMessage({
+                                action: 'addEntryToCollection',
+                                collectionId: collId,
+                                entry: {
+                                    sessionId: sessId,
+                                    chunkIndex: i,
+                                    title: `Chunk ${i + 1}`,
+                                    content: r.content?.text || '',
+                                    rawContent: r.rawContent || allChunks[i] || '',
+                                },
+                            });
+                            if (res?.error) throw new Error(res.error);
+                        } catch (err) {
+                            showToast(`❌ Failed to add chunk ${i + 1} to collection: ${err.message}`, 'error');
+                        }
+                    }
+                }
                 success = true; break;
             } catch (err) {
                 if (_terminated) break;
@@ -800,6 +980,19 @@ async function initPage() {
     suffix = session?.suffix || storedData.suffix || '';
     retryCount = session?.retryCount || storedData.retryCount || 3;
     totalChunks = allChunks.length;
+
+    // ── Load collection defaults + collections list ─────────────────────────
+    try {
+        const [colls, defs] = await Promise.all([
+            browser.runtime.sendMessage({ action: 'getCollections' }),
+            browser.runtime.sendMessage({ action: 'getCollectionDefaults' }),
+        ]);
+        collectionsList = colls?.collections ?? {};
+        collectionDefaults = defs?.defaults ?? { global: null, perSession: {} };
+    } catch (err) {
+        console.warn('[collections] failed to load defaults:', err);
+    }
+    renderCollectionSelector();
 
     if (!totalChunks) { showBanner('No chunks to process.', 'error'); return; }
 

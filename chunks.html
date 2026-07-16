@@ -91,6 +91,73 @@
             flex-wrap: wrap;
         }
 
+        /* ── Collection selector ─────────────────────────────────── */
+        .collection-selector {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+        }
+        .collection-selector select {
+            background: var(--surface2);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 0.78rem;
+            font-family: inherit;
+            cursor: pointer;
+        }
+        .collection-selector label {
+            font-size: 0.78rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        /* Add-to dropdown */
+        .add-to-dropdown {
+            position: relative;
+            display: inline-flex;
+        }
+        .add-to-dropdown .dropdown-menu {
+            display: none;
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 4px;
+            min-width: 180px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+            z-index: 100;
+            padding: 4px;
+        }
+        .add-to-dropdown.open .dropdown-menu { display: block; }
+        .add-to-dropdown .dropdown-item {
+            display: block;
+            width: 100%;
+            text-align: left;
+            background: none;
+            border: none;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 0.78rem;
+            font-family: inherit;
+            color: var(--text);
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .add-to-dropdown .dropdown-item:hover { background: var(--surface2); }
+        .add-to-dropdown .dropdown-item.added { color: var(--success); cursor: default; }
+        .add-to-dropdown .dropdown-sep {
+            height: 1px;
+            background: var(--border);
+            margin: 4px 2px;
+        }
+
         /* ── Status Banner ───────────────────────────────────────────── */
         #statusBanner {
             background: rgba(251, 191, 36, 0.12);
@@ -822,6 +889,13 @@
             <button class="btn btn-secondary btn-sm" id="reprocessAllBtn">↩ Reprocess All</button>
             <button class="btn btn-secondary btn-sm" id="copyAllBtn">📋 Copy All</button>
             <button class="btn btn-secondary btn-sm" id="downloadAllBtn">⬇ Download .txt</button>
+            <div class="collection-selector">
+                <label for="collectionDefaultSelect">Collection:</label>
+                <select id="collectionDefaultSelect" aria-label="Default collection for this session">
+                    <option value="">None</option>
+                </select>
+                <label><input type="checkbox" id="collectionAutoAdd"> Auto-add</label>
+            </div>
             <button class="btn btn-danger btn-sm" id="terminateBtn" style="display:none">⏹ Terminate</button>
         </div>
     </header>
