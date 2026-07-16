@@ -660,6 +660,149 @@
       font-weight: 600;
       margin-bottom: 8px;
     }
+
+    /* ── Collections layout ─────────────────────────────────── */
+    .collections-layout {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+    .collections-sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .collection-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 420px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 4px;
+      background: var(--bg);
+    }
+    .collection-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background var(--transition);
+      border: none;
+      background: none;
+      width: 100%;
+      text-align: left;
+      font-family: inherit;
+      color: var(--text);
+      font-size: 0.82rem;
+    }
+    .collection-item:hover { background: var(--surface2); }
+    .collection-item.active { background: var(--accent-glow); color: var(--accent); }
+    .collection-item-info { flex: 1; min-width: 0; }
+    .collection-item-name {
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .collection-item-meta {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .collection-item.active .collection-item-meta { color: var(--accent); opacity: 0.7; }
+    .collection-item-actions {
+      display: flex;
+      gap: 2px;
+      opacity: 0;
+      transition: opacity var(--transition);
+    }
+    .collection-item:hover .collection-item-actions { opacity: 1; }
+    .collection-item-action-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 3px 5px;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      transition: background var(--transition), color var(--transition);
+    }
+    .collection-item-action-btn:hover { background: var(--surface); color: var(--text); }
+    .collection-item-action-btn.delete:hover { color: var(--danger); background: rgba(248,113,113,0.15); }
+
+    .collections-detail {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      background: var(--surface);
+      min-height: 300px;
+    }
+    .collection-empty {
+      text-align: center;
+      color: var(--text-muted);
+      padding: 48px 16px;
+      font-size: 0.85rem;
+    }
+    .collection-header-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .collection-header-row h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin: 0;
+    }
+    .collection-entries {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 420px;
+      overflow-y: auto;
+    }
+    .collection-entry {
+      display: grid;
+      grid-template-columns: 28px 1fr auto;
+      gap: 8px;
+      align-items: start;
+      padding: 10px 12px;
+      border-radius: 6px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+    }
+    .collection-entry-title {
+      font-weight: 600;
+      font-size: 0.82rem;
+      cursor: text;
+    }
+    .collection-entry-title[contenteditable="true"]:focus {
+      outline: 2px solid var(--accent);
+      border-radius: 4px;
+      padding: 0 4px;
+      margin: 0 -4px;
+    }
+    .collection-entry-meta {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .collection-entry-actions {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+    @media (max-width: 700px) {
+      .collections-layout { grid-template-columns: 1fr; }
+      .collection-list { max-height: 200px; }
+    }
   </style>
 </head>
 
@@ -679,6 +822,9 @@
       </button>
       <button class="nav-item" data-section="fewshot" id="nav-fewshot">
         <span class="icon">📚</span><span>Few-Shot Examples</span>
+      </button>
+      <button class="nav-item" data-section="collections" id="nav-collections">
+        <span class="icon">📚</span><span>Collections</span>
       </button>
       <div class="nav-label">API Providers</div>
       <button class="nav-item" data-section="gemini" id="nav-gemini">
@@ -853,6 +999,47 @@
         </div>
         <p class="fewshot-help">Fills automatically as you translate with API providers (Gemini, OpenRouter, OpenAI). Most recent translations are used first.</p>
         <button type="button" id="fewShotClearAuto" class="btn btn-danger">🗑 Clear recent pool</button>
+      </div>
+    </section>
+
+    <!-- ── Collections ─────────────────────────────────-------- -->
+    <section class="section" id="section-collections">
+      <div class="page-header">
+        <h1>Collections</h1>
+        <p>Curate translation results into named collections and export them as markdown, EPUB, or print-to-PDF HTML.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-title">⚙️ Defaults</div>
+        <div class="field">
+          <label for="collectionGlobalDefault">Default collection</label>
+          <select id="collectionGlobalDefault">
+            <option value="">None</option>
+          </select>
+          <small>Applied to every session unless overridden on the chunks page.</small>
+        </div>
+        <div class="toggle-row">
+          <div class="toggle-row-info">
+            <label for="collectionIncludeInBackup">Include collections in Settings backup/export</label>
+            <small>Collections will be merged into the settings backup when enabled.</small>
+          </div>
+          <label class="switch"><input type="checkbox" id="collectionIncludeInBackup" aria-labelledby="collectionIncludeInBackup-label"><span class="slider"></span></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">📚 Collections</div>
+        <div class="collections-layout">
+          <div class="collections-sidebar">
+            <button class="btn btn-primary btn-sm" id="collectionNewBtn">➕ New collection</button>
+            <div id="collectionList" class="collection-list">
+              <div class="collection-empty" style="padding:24px 12px">No collections yet. Add chunks from the translation page, or create one here.</div>
+            </div>
+          </div>
+          <div class="collections-detail" id="collectionDetail">
+            <div class="collection-empty">Select a collection or create a new one.</div>
+          </div>
+        </div>
       </div>
     </section>
 
