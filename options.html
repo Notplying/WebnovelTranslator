@@ -742,6 +742,7 @@
       font-size: 0.82rem;
     }
     .collection-item:hover { background: var(--surface2); }
+    .collection-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
     .collection-item.active { background: var(--accent-glow); color: var(--accent); }
     .collection-item-info { flex: 1; min-width: 0; }
     .collection-item-name {
@@ -762,7 +763,8 @@
       opacity: 0;
       transition: opacity var(--transition);
     }
-    .collection-item:hover .collection-item-actions { opacity: 1; }
+    .collection-item:hover .collection-item-actions,
+    .collection-item:focus-within .collection-item-actions { opacity: 1; }
     .collection-item-action-btn {
       background: none;
       border: none;

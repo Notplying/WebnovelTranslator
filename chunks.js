@@ -151,10 +151,12 @@ async function renderCollectionSelector() {
 
 document.getElementById('collectionDefaultSelect')?.addEventListener('change', async (e) => {
     const val = e.target.value || null;
+    // Keep local state in sync for UI consistency, then persist only the changed override.
     collectionDefaults.perSession[sessionId] = val;
     try {
-        await browser.runtime.sendMessage({ action: 'setCollectionDefaults', defaults: collectionDefaults });
-    } catch (err) { console.error('[collections] setDefaults failed:', err); }
+        const res = await browser.runtime.sendMessage({ action: 'setCollectionSessionDefault', sessionId, value: val });
+        if (res?.error) throw new Error(res.error);
+    } catch (err) { showToast(`❌ Failed to save session default: ${err.message}`, 'error'); }
 });
 
 document.getElementById('collectionAutoAdd')?.addEventListener('change', (e) => {
@@ -248,6 +250,36 @@ async function newCollectionAndAdd(index) {
         await addChunkToCollection(index, collection.id);
     } catch (err) {
         showToast(`❌ Failed to create collection: ${err.message}`, 'error');
+    }
+}
+
+// Shared helper: auto-add a processed chunk to the resolved default collection.
+// Extracted so both the normal streaming success path and the timeout-fallback path
+// add the chunk with identical resolution, entry construction, and error handling.
+async function autoAddProcessedChunk(index, sessId) {
+    if (!autoAddEnabled) return;
+    const collId = resolveDefaultCollection(sessId);
+    if (!collId) return;
+    const r = processedResults[index] || {};
+    const content = r.content?.text || '';
+    const rawContent = r.rawContent || allChunks[index] || '';
+    if (!content && !rawContent) return;
+    const coll = collectionsList[collId];
+    try {
+        const res = await browser.runtime.sendMessage({
+            action: 'addEntryToCollection',
+            collectionId: collId,
+            entry: {
+                sessionId: sessId,
+                chunkIndex: index,
+                title: `Chunk ${index + 1}`,
+                content,
+                rawContent,
+            },
+        });
+        if (res?.error) throw new Error(res.error);
+    } catch (err) {
+        showToast(`❌ Failed to add chunk ${index + 1} to collection: ${err.message}`, 'error');
     }
 }
 
@@ -648,32 +680,12 @@ async function processAllChunks(resume = false) {
                         processedResults[i] = { content: { parts: [result.result], text: result.result }, rawContent: allChunks[i] };
                         renderChunk(i, result.result, false);
                         await saveChunk(i, processedResults[i].content, allChunks[i]);
-                        // Auto-add to the resolved default collection.
-                        if (autoAddEnabled) {
-                            const collId = resolveDefaultCollection(sessId);
-                            if (collId) {
-                                const r = processedResults[i] || {};
-                                try {
-                                    const res = await browser.runtime.sendMessage({
-                                        action: 'addEntryToCollection',
-                                        collectionId: collId,
-                                        entry: {
-                                            sessionId: sessId,
-                                            chunkIndex: i,
-                                            title: `Chunk ${i + 1}`,
-                                            content: r.content?.text || '',
-                                            rawContent: r.rawContent || allChunks[i] || '',
-                                        },
-                                    });
-                                    if (res?.error) throw new Error(res.error);
-                                } catch (err) {
-                                    showToast(`❌ Failed to add chunk ${i + 1} to collection: ${err.message}`, 'error');
-                                }
-                            }
-                        }
+                        await autoAddProcessedChunk(i, sessId);
                         success = true; break;
                     }
                     if (timedOut) { throw new Error('Streaming timed out after 5 minutes'); }
+                    // Normal streaming completion — auto-add so every successfully processed stream adds its chunk.
+                    await autoAddProcessedChunk(i, sessId);
                     success = true; break;
                 }
 
@@ -684,29 +696,7 @@ async function processAllChunks(resume = false) {
 
                 processedResults[i] = { content: { parts, text: result.result }, rawContent: allChunks[i] };
                 await saveChunk(i, processedResults[i].content, allChunks[i]);
-                // Auto-add to the resolved default collection.
-                if (autoAddEnabled) {
-                    const collId = resolveDefaultCollection(sessId);
-                    if (collId) {
-                        const r = processedResults[i] || {};
-                        try {
-                            const res = await browser.runtime.sendMessage({
-                                action: 'addEntryToCollection',
-                                collectionId: collId,
-                                entry: {
-                                    sessionId: sessId,
-                                    chunkIndex: i,
-                                    title: `Chunk ${i + 1}`,
-                                    content: r.content?.text || '',
-                                    rawContent: r.rawContent || allChunks[i] || '',
-                                },
-                            });
-                            if (res?.error) throw new Error(res.error);
-                        } catch (err) {
-                            showToast(`❌ Failed to add chunk ${i + 1} to collection: ${err.message}`, 'error');
-                        }
-                    }
-                }
+                await autoAddProcessedChunk(i, sessId);
                 success = true; break;
             } catch (err) {
                 if (_terminated) break;

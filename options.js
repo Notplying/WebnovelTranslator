@@ -103,10 +103,17 @@ async function loadSettings() {
 
     'apiTimeout', 'webAutomationTimeout',
 
-    'fewShotEnabled', 'fewShotCount', 'fewShotMaxExamples',
-
-    'collectionIncludeInBackup'
+    'fewShotEnabled', 'fewShotCount', 'fewShotMaxExamples'
   ].forEach(key => { setField(key, settings[key]); });
+
+  // collectionIncludeInBackup lives in browser.storage.sync — the single source of truth.
+  // Read it from sync here so the general load path reflects the persisted toggle, not local.
+  try {
+    const { collectionIncludeInBackup } = await browser.storage.sync.get('collectionIncludeInBackup');
+    setField('collectionIncludeInBackup', collectionIncludeInBackup !== undefined ? collectionIncludeInBackup : settings.collectionIncludeInBackup);
+  } catch (err) {
+    setField('collectionIncludeInBackup', settings.collectionIncludeInBackup);
+  }
 
   updatePromptPreview();
 }
@@ -181,12 +188,11 @@ async function saveSettings() {
     fewShotEnabled: getField('fewShotEnabled'),
     fewShotCount: getField('fewShotCount'),
     fewShotMaxExamples: getField('fewShotMaxExamples'),
-
-    collectionIncludeInBackup: getField('collectionIncludeInBackup'),
-
   };
   try {
     await browser.storage.local.set(sanitizeNumericSettings(raw));
+    // collectionIncludeInBackup is the only setting stored in sync — keep it there as source of truth.
+    await browser.storage.sync.set({ collectionIncludeInBackup: getField('collectionIncludeInBackup') });
   } catch (err) {
     showToast('❌ Failed to save settings: ' + err.message, 'error');
     return false;
@@ -318,9 +324,12 @@ async function renderCollectionsSection() {
     else if (defaults.global) globalSel.value = defaults.global;
     globalSel.onchange = null;
     globalSel.addEventListener('change', async (e) => {
-      defaults.global = e.target.value || null;
+      const value = e.target.value || null;
+      // Keep local state in sync for UI consistency, then persist only the changed global default.
+      defaults.global = value;
       try {
-        await browser.runtime.sendMessage({ action: 'setCollectionDefaults', defaults });
+        const res = await browser.runtime.sendMessage({ action: 'setCollectionGlobalDefault', value });
+        if (res?.error) throw new Error(res.error);
       } catch (err) { showToast('❌ Failed to save default.', 'error'); }
     }, { once: false });
   }
@@ -347,8 +356,10 @@ async function renderCollectionsSection() {
       list.innerHTML = colls.map(c => {
         const count = (c.entries || []).length;
         const updated = c.updatedAt ? new Date(c.updatedAt).toLocaleDateString() : '';
-        const active = c.id === _selectedCollectionId ? ' active' : '';
-        return `<div class="collection-item${active}" data-id="${escapeHtml(c.id)}">
+        const selected = c.id === _selectedCollectionId;
+        return `<div class="collection-item${selected ? ' active' : ''}" data-id="${escapeHtml(c.id)}"
+          role="option" aria-selected="${selected}" tabindex="0"
+          aria-label="${escapeHtml(c.name)}">
           <div class="collection-item-info">
             <div class="collection-item-name">${escapeHtml(c.name)}</div>
             <div class="collection-item-meta">${count} entr${count === 1 ? 'y' : 'ies'}${updated ? ' · ' + updated : ''}</div>
@@ -359,12 +370,19 @@ async function renderCollectionsSection() {
           </div>
         </div>`;
       }).join('');
-      // Click to select.
+      // Click or keyboard (Enter/Space) to select. Action buttons are excluded.
       list.querySelectorAll('.collection-item').forEach(item => {
-        item.addEventListener('click', (e) => {
-          if (e.target.closest('.collection-item-action-btn')) return;
+        const select = () => {
           _selectedCollectionId = item.dataset.id;
           renderCollectionsSection();
+        };
+        item.addEventListener('click', (e) => {
+          if (e.target.closest('.collection-item-action-btn')) return;
+          select();
+        });
+        item.addEventListener('keydown', (e) => {
+          if (e.target.closest('.collection-item-action-btn')) return;
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(); }
         });
       });
       // Action buttons.
@@ -376,11 +394,13 @@ async function renderCollectionsSection() {
             const coll = collectionsMap[id];
             const name = prompt('Collection name:', coll?.name);
             if (!name || !name.trim()) return;
-            await browser.runtime.sendMessage({ action: 'updateCollection', collectionId: id, name: name.trim() });
+            const res = await browser.runtime.sendMessage({ action: 'updateCollection', collectionId: id, name: name.trim() });
+            if (res?.error) { showToast(`❌ Rename failed: ${res.error}`, 'error'); return; }
             showToast('✏️ Collection renamed.', 'success');
           } else if (btn.dataset.action === 'delete') {
             if (!confirm('Delete this collection? This cannot be undone.')) return;
-            await browser.runtime.sendMessage({ action: 'deleteCollection', collectionId: id });
+            const res = await browser.runtime.sendMessage({ action: 'deleteCollection', collectionId: id });
+            if (res?.error) { showToast(`❌ Delete failed: ${res.error}`, 'error'); renderCollectionsSection(); return; }
             if (_selectedCollectionId === id) _selectedCollectionId = null;
             showToast('🗑 Collection deleted.', 'success');
           }
@@ -454,18 +474,16 @@ function renderCollectionDetail(collectionsMap) {
         const coll = collectionsMap[_selectedCollectionId];
         const entry = coll?.entries?.find(e => e.id === entryId);
         if (!entry) return;
-        entry.title = el.textContent.trim() || `Chunk ${entry.chunkIndex + 1}`;
-        el.textContent = entry.title;
+        const title = el.textContent.trim() || `Chunk ${entry.chunkIndex + 1}`;
+        el.textContent = title;
         try {
-          await browser.runtime.sendMessage({ action: 'updateCollection', collectionId: _selectedCollectionId, name: coll.name });
-          // updateCollection only updates name; we need to persist entries too.
-          // Use a dedicated path: write the whole collection back.
-          await browser.storage.local.get('collections').then(({ collections = {} }) => {
-            collections[_selectedCollectionId].entries = coll.entries;
-            collections[_selectedCollectionId].updatedAt = Date.now();
-            return browser.storage.local.set({ collections });
-          });
-        } catch (err) { showToast('❌ Failed to save title.', 'error'); }
+          // Route through the serialized worker mutation instead of writing collections directly.
+          const res = await browser.runtime.sendMessage({ action: 'updateEntryTitle', collectionId: _selectedCollectionId, entryId, title });
+          if (res?.error) throw new Error(res.error);
+        } catch (err) {
+          showToast('❌ Failed to save title.', 'error');
+          el.textContent = entry.title || title;
+        }
       });
     });
 
@@ -475,7 +493,8 @@ function renderCollectionDetail(collectionsMap) {
         const idx = parseInt(btn.dataset.idx);
         const to = btn.classList.contains('reorder-up') ? idx - 1 : idx + 1;
         try {
-          await browser.runtime.sendMessage({ action: 'reorderEntries', collectionId: _selectedCollectionId, fromIndex: idx, toIndex: to });
+          const res = await browser.runtime.sendMessage({ action: 'reorderEntries', collectionId: _selectedCollectionId, fromIndex: idx, toIndex: to });
+          if (res?.error) throw new Error(res.error);
           renderCollectionsSection();
         } catch (err) { showToast('❌ Failed to reorder.', 'error'); }
       });
@@ -485,7 +504,8 @@ function renderCollectionDetail(collectionsMap) {
     entriesEl.querySelectorAll('.entry-remove').forEach(btn => {
       btn.addEventListener('click', async () => {
         try {
-          await browser.runtime.sendMessage({ action: 'removeEntryFromCollection', collectionId: _selectedCollectionId, entryId: btn.dataset.entryId });
+          const res = await browser.runtime.sendMessage({ action: 'removeEntryFromCollection', collectionId: _selectedCollectionId, entryId: btn.dataset.entryId });
+          if (res?.error) throw new Error(res.error);
           renderCollectionsSection();
           showToast('🗑 Entry removed.', 'success');
         } catch (err) { showToast('❌ Failed to remove entry.', 'error'); }
@@ -529,18 +549,10 @@ function renderCollectionDetail(collectionsMap) {
           });
           if (res?.error) throw new Error(res.error);
           const result = res.result;
-          const parts = result.parts || [result.result];
-          // Update the entry's content in the collection.
-          const coll = collectionsMap[_selectedCollectionId];
-          const e2 = coll?.entries?.find(e => e.id === entry.id);
-          if (e2) {
-            e2.content = Array.isArray(parts) ? parts.join('') : (result.result || '');
-            await browser.storage.local.get('collections').then(({ collections = {} }) => {
-              collections[_selectedCollectionId].entries = coll.entries;
-              collections[_selectedCollectionId].updatedAt = Date.now();
-              return browser.storage.local.set({ collections });
-            });
-          }
+          const content = Array.isArray(result.parts) ? result.parts.join('') : (result.result || '');
+          // Persist the updated content through the serialized worker mutation.
+          const upRes = await browser.runtime.sendMessage({ action: 'updateEntryContent', collectionId: _selectedCollectionId, entryId: entry.id, content });
+          if (upRes?.error) throw new Error(upRes.error);
           showToast('✅ Re-processed.', 'success');
         } catch (err) { showToast('❌ Re-process failed: ' + err.message, 'error'); }
         btnEl.disabled = false;
@@ -574,7 +586,8 @@ function renderCollectionDetail(collectionsMap) {
   document.getElementById('collectionDeleteBtn')?.addEventListener('click', async () => {
     if (!confirm('Delete this collection? This cannot be undone.')) return;
     try {
-      await browser.runtime.sendMessage({ action: 'deleteCollection', collectionId: _selectedCollectionId });
+      const res = await browser.runtime.sendMessage({ action: 'deleteCollection', collectionId: _selectedCollectionId });
+      if (res?.error) throw new Error(res.error);
       _selectedCollectionId = null;
       renderCollectionsSection();
       showToast('🗑 Collection deleted.', 'success');
@@ -585,14 +598,10 @@ function renderCollectionDetail(collectionsMap) {
   document.getElementById('collectionRemoveAllBtn')?.addEventListener('click', async () => {
     if (!confirm('Remove all entries from this collection?')) return;
     try {
-      const { collections = {} } = await browser.storage.local.get('collections');
-      if (collections[_selectedCollectionId]) {
-        collections[_selectedCollectionId].entries = [];
-        collections[_selectedCollectionId].updatedAt = Date.now();
-        await browser.storage.local.set({ collections });
-        renderCollectionsSection();
-        showToast('🗑 All entries removed.', 'success');
-      }
+      const res = await browser.runtime.sendMessage({ action: 'clearCollectionEntries', collectionId: _selectedCollectionId });
+      if (res?.error) throw new Error(res.error);
+      renderCollectionsSection();
+      showToast('🗑 All entries removed.', 'success');
     } catch (err) { showToast('❌ Failed to remove entries.', 'error'); }
   });
 
@@ -615,15 +624,10 @@ function renderCollectionDetail(collectionsMap) {
           rawContent: entry.rawContent,
         });
         if (res?.error) throw new Error(res.error);
-        const parts = res.result.parts || [res.result.result];
-        const coll = collectionsMap[_selectedCollectionId];
-        const e2 = coll?.entries?.find(e => e.id === entry.id);
-        if (e2) e2.content = Array.isArray(parts) ? parts.join('') : (res.result.result || '');
-        await browser.storage.local.get('collections').then(({ collections = {} }) => {
-          collections[_selectedCollectionId].entries = coll.entries;
-          collections[_selectedCollectionId].updatedAt = Date.now();
-          return browser.storage.local.set({ collections });
-        });
+        const content = Array.isArray(res.result.parts) ? res.result.parts.join('') : (res.result.result || '');
+        // Persist the updated content through the serialized worker mutation, not a full-collection write.
+        const upRes = await browser.runtime.sendMessage({ action: 'updateEntryContent', collectionId: _selectedCollectionId, entryId: entry.id, content });
+        if (upRes?.error) throw new Error(upRes.error);
         ok++;
       } catch (err) { fail++; console.error(err); }
     }
@@ -924,15 +928,22 @@ async function importFromJSON(json) {
     if (whitelisted.apiType && !VALID_API_TYPES.includes(whitelisted.apiType)) {
       throw new TypeError(`Invalid apiType "${whitelisted.apiType}". Must be one of: ${VALID_API_TYPES.join(', ')}`);
     }
+    // collectionIncludeInBackup lives in sync — drop it from the local import so sync is the single source of truth.
+    delete whitelisted.collectionIncludeInBackup;
     await browser.storage.local.set(sanitizeNumericSettings(whitelisted));
 
-    // Restore collections if present in the import.
-    const collKeys = ['collections', 'collectionDefaults', 'collectionIncludeInBackup'];
+    // Restore collection data (collections + defaults) to local storage only.
+    const collKeys = ['collections', 'collectionDefaults'];
     const collData = {};
     for (const k of collKeys) {
       if (Object.prototype.hasOwnProperty.call(data, k)) collData[k] = data[k];
     }
     if (Object.keys(collData).length) await browser.storage.local.set(collData);
+
+    // Restore only the backup toggle to sync — its single source of truth.
+    if (Object.prototype.hasOwnProperty.call(data, 'collectionIncludeInBackup')) {
+      await browser.storage.sync.set({ collectionIncludeInBackup: data.collectionIncludeInBackup });
+    }
 
     await loadSettings();
     showToast('✅ Settings imported!', 'success');
