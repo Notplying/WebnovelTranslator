@@ -188,7 +188,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const c = collections[collectionId]; if (!c) throw new Error('Collection not found.');
             // Prevent duplicate entries from the same chunk.
             const exists = c.entries.some(e => e.sessionId === entry.sessionId && e.chunkIndex === entry.chunkIndex);
-            if (exists) return sendResponse({ success: true, alreadyPresent: true });
+            if (exists) { sendResponse({ success: true, alreadyPresent: true }); return; }
             c.entries.push({ ...entry, id: crypto.randomUUID(), addedAt: Date.now() });
             c.updatedAt = Date.now();
             return browser.storage.local.set({ collections }).then(() => sendResponse({ success: true }));
@@ -197,6 +197,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message.action === 'removeEntryFromCollection') {
         const { collectionId, entryId } = message;
+        if (!collectionId || !entryId) { sendResponse({ error: 'Invalid input.' }); return true; }
         browser.storage.local.get('collections').then(({ collections = {} }) => {
             const c = collections[collectionId]; if (!c) throw new Error('Collection not found.');
             c.entries = c.entries.filter(e => e.id !== entryId);
@@ -207,6 +208,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message.action === 'reorderEntries') {
         const { collectionId, fromIndex, toIndex } = message;
+        if (!collectionId || fromIndex == null || toIndex == null) { sendResponse({ error: 'Invalid input.' }); return true; }
         browser.storage.local.get('collections').then(({ collections = {} }) => {
             const c = collections[collectionId]; if (!c) throw new Error('Collection not found.');
             const [moved] = c.entries.splice(fromIndex, 1);
