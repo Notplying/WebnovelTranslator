@@ -161,6 +161,13 @@ document.getElementById('collectionAutoAdd')?.addEventListener('change', (e) => 
     autoAddEnabled = e.target.checked;
 });
 
+// Single delegated handler: close any open "Add to" dropdown when clicking outside it.
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.add-to-dropdown')) {
+        document.querySelectorAll('.add-to-dropdown.open').forEach(d => d.classList.remove('open'));
+    }
+});
+
 function populateAddToMenu(index, menuEl) {
     if (!menuEl) return;
     const colls = Object.values(collectionsList);
@@ -203,6 +210,19 @@ async function addChunkToCollection(index, collectionId) {
         if (res?.error) throw new Error(res.error);
         if (res?.alreadyPresent) { showToast('ℹ️ Already in this collection.', 'success'); }
         else { showToast(`✅ Added to ${escapeHtml(coll.name)}!`, 'success'); }
+        // Update the in-memory cache so the checkmark reflects the new state.
+        if (!res?.alreadyPresent && coll) {
+            const existing = coll.entries.some(e => e.sessionId === sessionId && e.chunkIndex === index);
+            if (!existing) {
+                coll.entries.push({
+                    id: crypto.randomUUID(),
+                    sessionId, chunkIndex: index,
+                    title: `Chunk ${index + 1}`,
+                    content, rawContent,
+                    addedAt: Date.now(),
+                });
+            }
+        }
         // Refresh dropdowns.
         populateAddToMenu(index, document.getElementById(`chunk-addto-menu-${index}`));
     } catch (err) {
@@ -221,7 +241,10 @@ async function newCollectionAndAdd(index) {
         collectionsList[collection.id] = collection;
         renderCollectionSelector();
         // Refresh all dropdowns.
-        document.querySelectorAll('[id^="chunk-addto-menu-"]').forEach(m => populateAddToMenu(index, m));
+        document.querySelectorAll('[id^="chunk-addto-menu-"]').forEach(m => {
+            const menuIndex = parseInt(m.id.replace('chunk-addto-menu-', ''), 10);
+            if (!isNaN(menuIndex)) populateAddToMenu(menuIndex, m);
+        });
         await addChunkToCollection(index, collection.id);
     } catch (err) {
         showToast(`❌ Failed to create collection: ${err.message}`, 'error');
@@ -340,13 +363,6 @@ function buildChunkCards(chunks) {
                 });
                 addEl.classList.toggle('open');
                 populateAddToMenu(i, addMenu);
-            });
-            // Close when clicking outside the card.
-            document.addEventListener('click', function closeAddTo(e) {
-                if (!addEl.contains(e.target)) {
-                    addEl.classList.remove('open');
-                    document.removeEventListener('click', closeAddTo);
-                }
             });
         }
     });

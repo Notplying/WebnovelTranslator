@@ -327,7 +327,15 @@ async function renderCollectionsSection() {
 
   // Backup toggle.
   const cb = document.getElementById('collectionIncludeInBackup');
-  if (cb) { cb.checked = includeInBackup; }
+  if (cb) {
+    cb.checked = includeInBackup;
+    cb.onchange = null;
+    cb.addEventListener('change', async (e) => {
+      try {
+        await browser.storage.sync.set({ collectionIncludeInBackup: e.target.checked });
+      } catch (err) { console.error('[collections] sync toggle failed:', err); }
+    });
+  }
 
   // Sidebar list.
   const list = document.getElementById('collectionList');
@@ -806,7 +814,6 @@ function exportCollectionEPUB(collection) {
     `    <item id="chapter${i + 1}" href="${fn}" media-type="application/xhtml+xml"/>\n`).join('');
   const spineItems = chapterNames.map((_, i) =>
     `    <itemref idref="chapter${i + 1}"/>\n`).join('');
-  const navItem = `    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>\n`;
   const opf = `<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
