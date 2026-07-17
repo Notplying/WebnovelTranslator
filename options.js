@@ -336,12 +336,17 @@ async function renderCollectionsSection() {
     // Assigned handler (not addEventListener) so re-rendering replaces rather than accumulates.
     globalSel.onchange = async (e) => {
       const value = e.target.value || null;
-      // Keep local state in sync for UI consistency, then persist only the changed global default.
+      // Retain the prior value so we can roll back both local state and the UI on failure.
+      const prior = defaults.global;
       defaults.global = value;
       try {
         const res = await browser.runtime.sendMessage({ action: 'setCollectionGlobalDefault', value });
         if (res?.error) throw new Error(res.error);
-      } catch (err) { showToast('❌ Failed to save default.', 'error'); }
+      } catch (err) {
+        defaults.global = prior;
+        globalSel.value = prior || '';
+        showToast('❌ Failed to save default.', 'error');
+      }
     };
   }
 
