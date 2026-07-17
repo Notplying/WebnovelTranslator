@@ -19,8 +19,8 @@ const DEFAULTS = {
   chunkFontSize: 1.05,
   chunkMaxWidth: 850,
 
-  hideHeaderOnScroll: false,
-  hideChunkFooterOnScroll: false,
+  hideHeaderOnScroll: true,
+  hideChunkFooterOnScroll: true,
 
   apiTimeout: 120,
   webAutomationTimeout: 30,

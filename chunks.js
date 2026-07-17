@@ -1075,7 +1075,7 @@ async function initPage() {
     updateOverallProgress(0, totalChunks);
 
     // Apply chunk text size and max width from settings
-    const { chunkFontSize = 1, chunkMaxWidth = 0, hideHeaderOnScroll = false, hideChunkFooterOnScroll = false } = await browser.storage.local.get(['chunkFontSize', 'chunkMaxWidth', 'hideHeaderOnScroll', 'hideChunkFooterOnScroll']);
+    const { chunkFontSize = 1, chunkMaxWidth = 0, hideHeaderOnScroll = true, hideChunkFooterOnScroll = true } = await browser.storage.local.get(['chunkFontSize', 'chunkMaxWidth', 'hideHeaderOnScroll', 'hideChunkFooterOnScroll']);
     document.documentElement.style.setProperty('--chunk-font-size', `${chunkFontSize}rem`);
     document.documentElement.style.setProperty('--chunk-max-width', chunkMaxWidth > 0 ? `${chunkMaxWidth}px` : 'none');
     initScrollHide(hideHeaderOnScroll, hideChunkFooterOnScroll);
