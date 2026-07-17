@@ -225,6 +225,38 @@ function escapeHtml(str) {
   return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Default entry title: stored title, or the first non-empty line of the entry content,
+// or a legacy "Chunk N" label for entries added before this convention existed.
+function entryTitle(e) {
+  if (e.title) return e.title;
+  const source = e.content || e.rawContent || '';
+  const firstLine = String(source).split(/\r?\n/).find(line => line.trim()) || '';
+  const trimmed = firstLine.trim();
+  if (trimmed) return trimmed.length > 120 ? trimmed.slice(0, 120) + '…' : trimmed;
+  return `Chunk ${e.chunkIndex + 1}`;
+}
+
+// Render markdown text to sanitized HTML, mirroring the chunks page renderer.
+function renderMarkdown(text) {
+  if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined') {
+    return '<p>' + escapeHtml(text || '') + '</p>';
+  }
+  const NUL = String.fromCharCode(0);
+  const imgTags = [];
+  let processed = String(text || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+  // Extract <img> tags before escaping so they survive sanitization.
+  processed = processed.replace(/<img[^>]*>/gi, match => {
+    imgTags.push(match);
+    return NUL + 'IMG' + (imgTags.length - 1) + NUL;
+  });
+  processed = escapeHtml(processed);
+  imgTags.forEach((tag, i) => { processed = processed.replace(NUL + 'IMG' + i + NUL, tag); });
+  // Strip reasoning/thinking blocks so only the translation renders.
+  try { processed = processed.replace(new RegExp('<think[\\s\\S]*?<\\/think>', 'gi'), ''); } catch (_) {}
+  const html = marked.parse(processed);
+  return DOMPurify.sanitize(html, { ADD_ATTR: ['target', 'data-original-src', 'style'], FORBID_TAGS: ['style', 'script'] });
+}
+
 async function renderFewShotCustomList() {
   const list = document.getElementById('fewShotCustomList');
   if (!list) return;
@@ -302,6 +334,45 @@ function closeExportDropdown(e) {
     exportDrop.classList.remove('open');
     document.removeEventListener('click', closeExportDropdown);
   }
+}
+
+// Open a synthetic chunks-page session containing the given items, then open
+// chunks.html in a new tab pointed at it. Each item becomes one chunk: its
+// `raw` is the source text and its `content` is the translated result shown as
+// an already-processed chunk (no auto-processing runs). `viewSessionId` is a
+// stable id so re-opening overwrites the same synthetic session.
+async function openCollectionViewAsChunks(viewSessionId, sessionName, items) {
+  // items: [{ raw, content, title }]
+  if (!items || !items.length) { showToast('Nothing to view.', 'error'); return; }
+  const chunks = items.map(it => it.raw || it.content || '');
+  const titles = items.map(it => it.title || '');
+  const contents = items.map(it => it.content || '');
+  const processed = chunks.map((raw, i) => ({
+    content: { parts: [contents[i]], text: contents[i] },
+    rawContent: raw,
+  }));
+  const { translationSessions = [] } = await browser.storage.local.get('translationSessions');
+  const prior = translationSessions.findIndex(s => s.id === viewSessionId);
+  const session = {
+    id: viewSessionId,
+    name: sessionName,
+    chunks, titles,
+    prefix: '', suffix: '', retryCount: 3,
+    createdAt: Date.now(),
+  };
+  if (prior >= 0) translationSessions[prior] = session;
+  else translationSessions.push(session);
+  await browser.storage.local.set({ translationSessions });
+  // Persist the processed results so every chunk renders as already done.
+  const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
+  processedChunks[viewSessionId] = processed;
+  await browser.storage.local.set({ processedChunks });
+  // Open the chunks page in a new tab (user-triggered, so popup blockers allow it).
+  const url = browser.runtime.getURL('chunks.html') + '?session=' + encodeURIComponent(viewSessionId);
+  const a = document.createElement('a');
+  a.href = url; a.target = '_blank'; a.rel = 'noopener';
+  document.body.appendChild(a); a.click(); a.remove();
+  showToast(`✅ Opened ${items.length} chunk${items.length === 1 ? '' : 's'} in a new tab.`, 'success');
 }
 
 async function renderCollectionsSection() {
@@ -462,6 +533,7 @@ function renderCollectionDetail(collectionsMap) {
     <div class="action-row" style="margin-bottom:12px">
       <button class="btn btn-secondary btn-sm" id="collectionRemoveAllBtn">🗑 Remove all</button>
       <button class="btn btn-secondary btn-sm" id="collectionReprocessAllBtn">↩ Re-process all</button>
+      <button class="btn btn-secondary btn-sm" id="collectionViewAllBtn">👁 View collection</button>
     </div>
     <div class="collection-entries" id="collectionEntries">${entries.length === 0 ? '<div class="collection-empty" style="padding:24px 12px">No entries yet.</div>' : ''}</div>`;
 
@@ -476,10 +548,11 @@ function renderCollectionDetail(collectionsMap) {
           <button class="collection-item-action-btn reorder-down" data-idx="${idx}" aria-label="Move down" title="Move down" ${idx === entries.length - 1 ? 'disabled style="opacity:0.3;cursor:default"' : ''}>▼</button>
         </div>
         <div>
-          <div class="collection-entry-title" contenteditable="true" data-entry-id="${escapeHtml(e.id)}" title="Click to edit title">${escapeHtml(e.title || `Chunk ${e.chunkIndex + 1}`)}</div>
+          <div class="collection-entry-title" contenteditable="true" data-entry-id="${escapeHtml(e.id)}" title="Click to edit title">${escapeHtml(entryTitle(e))}</div>
           <div class="collection-entry-meta">${escapeHtml(source)} · Added ${escapeHtml(added)}</div>
         </div>
         <div class="collection-entry-actions">
+          <button class="btn btn-secondary btn-sm entry-view" data-entry-id="${escapeHtml(e.id)}" title="View in chunks page">👁 View</button>
           <button class="btn btn-secondary btn-sm entry-reimport" data-entry-id="${escapeHtml(e.id)}" title="Re-import to session">↩ Re-import</button>
           <button class="btn btn-secondary btn-sm entry-reprocess" data-entry-id="${escapeHtml(e.id)}" title="Re-translate from raw">↩ Re-process</button>
           <button class="btn btn-danger btn-sm entry-remove" data-entry-id="${escapeHtml(e.id)}">🗑 Remove</button>
@@ -494,7 +567,7 @@ function renderCollectionDetail(collectionsMap) {
         const coll = collectionsMap[_selectedCollectionId];
         const entry = coll?.entries?.find(e => e.id === entryId);
         if (!entry) return;
-        const title = el.textContent.trim() || `Chunk ${entry.chunkIndex + 1}`;
+        const title = el.textContent.trim() || entryTitle(entry);
         el.textContent = title;
         try {
           // Route through the serialized worker mutation instead of writing collections directly.
@@ -517,6 +590,21 @@ function renderCollectionDetail(collectionsMap) {
           if (res?.error) throw new Error(res.error);
           renderCollectionsSection();
         } catch (err) { showToast('❌ Failed to reorder.', 'error'); }
+      });
+    });
+
+    // View entry — open a new chunks page containing just this single entry.
+    entriesEl.querySelectorAll('.entry-view').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const entry = entries.find(e => e.id === btn.dataset.entryId);
+        if (!entry) return;
+        try {
+          await openCollectionViewAsChunks(
+            _selectedCollectionId + '_entry_' + entry.id,
+            coll.name + ' · ' + entryTitle(entry),
+            [{ raw: entry.rawContent, content: entry.content, title: entryTitle(entry) }]
+          );
+        } catch (err) { showToast('❌ Failed to open: ' + err.message, 'error'); }
       });
     });
 
@@ -616,6 +704,19 @@ function renderCollectionDetail(collectionsMap) {
       renderCollectionsSection();
       showToast('🗑 Collection deleted.', 'success');
     } catch (err) { showToast('❌ Failed to delete collection.', 'error'); }
+  });
+
+  // View collection — open a new chunks page populated with every entry in the
+  // collection, rendered as already-translated chunks with their entry titles.
+  document.getElementById('collectionViewAllBtn')?.addEventListener('click', async () => {
+    if (!entries.length) { showToast('Nothing to view — collection is empty.', 'error'); return; }
+    try {
+      await openCollectionViewAsChunks(
+        'collection_' + _selectedCollectionId,
+        'Collection: ' + coll.name,
+        entries.map(e => ({ raw: e.rawContent, content: e.content, title: entryTitle(e) }))
+      );
+    } catch (err) { showToast('❌ Failed to open collection: ' + err.message, 'error'); }
   });
 
   // Remove all.

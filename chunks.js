@@ -132,6 +132,16 @@ function resolveDefaultCollection(sessionId) {
     return collectionDefaults.global ?? null;
 }
 
+// Derive a default entry title from the first non-empty line of the translated
+// chunk content. Falls back to the raw source, then to the legacy "Chunk N" label.
+function defaultEntryTitle(content, rawContent, index) {
+    const source = content || rawContent || '';
+    const firstLine = String(source).split(/\r?\n/).find(line => line.trim()) || '';
+    const trimmed = firstLine.trim();
+    // Cap the title length so a single long line doesn't break the UI.
+    return trimmed ? (trimmed.length > 120 ? trimmed.slice(0, 120) + '…' : trimmed) : `Chunk ${index + 1}`;
+}
+
 async function renderCollectionSelector() {
     const sel = document.getElementById('collectionDefaultSelect');
     const cb = document.getElementById('collectionAutoAdd');
@@ -165,8 +175,14 @@ document.getElementById('collectionDefaultSelect')?.addEventListener('change', a
     }
 });
 
-document.getElementById('collectionAutoAdd')?.addEventListener('change', (e) => {
+document.getElementById('collectionAutoAdd')?.addEventListener('change', async (e) => {
     autoAddEnabled = e.target.checked;
+    // Persist so the preference survives page reloads.
+    try {
+        await browser.storage.local.set({ collectionAutoAdd: autoAddEnabled });
+    } catch (err) {
+        console.warn('[collections] auto-add persist failed:', err);
+    }
 });
 
 // Single delegated handler: close any open "Add to" dropdown when clicking outside it.
@@ -210,7 +226,7 @@ async function addChunkToCollection(index, collectionId) {
             entry: {
                 sessionId: sessionId,
                 chunkIndex: index,
-                title: `Chunk ${index + 1}`,
+                title: defaultEntryTitle(content, rawContent, index),
                 content,
                 rawContent,
             },
@@ -225,7 +241,7 @@ async function addChunkToCollection(index, collectionId) {
                 coll.entries.push({
                     id: crypto.randomUUID(),
                     sessionId, chunkIndex: index,
-                    title: `Chunk ${index + 1}`,
+                    title: defaultEntryTitle(content, rawContent, index),
                     content, rawContent,
                     addedAt: Date.now(),
                 });
@@ -278,7 +294,7 @@ async function autoAddProcessedChunk(index, sessId) {
             entry: {
                 sessionId: sessId,
                 chunkIndex: index,
-                title: `Chunk ${index + 1}`,
+                title: defaultEntryTitle(content, rawContent, index),
                 content,
                 rawContent,
             },
@@ -341,18 +357,20 @@ function updateAttemptProgress(attempt, max) {
 }
 
 // ─── Build chunk cards ────────────────────────────────────────────────────────
-function buildChunkCards(chunks) {
+function buildChunkCards(chunks, titles) {
     const container = document.getElementById('chunksContainer');
     container.innerHTML = '';
+    titles = titles || [];
     chunks.forEach((raw, i) => {
         const card = document.createElement('div');
         card.className = 'chunk-card';
         card.id = `chunk-${i}`;
+        const title = titles[i] || `Chunk ${i + 1}`;
         card.innerHTML = `
       <div class="chunk-header" id="chunk-header-${i}">
         <div class="chunk-num">${i + 1}</div>
         <div class="chunk-header-info">
-          <div class="chunk-header-title">Chunk ${i + 1}</div>
+          <div class="chunk-header-title">${escapeHtml(title)}</div>
           <div class="chunk-header-preview" id="chunk-preview-${i}">${escapeHtml(raw.replace(/<[^>]*>/g, '').slice(0, 80))}…</div>
         </div>
         <span class="chunk-status-badge status-pending" id="chunk-badge-${i}">Pending</span>
@@ -991,6 +1009,8 @@ async function initPage() {
     prefix = session?.prefix || storedData.prefix || '';
     suffix = session?.suffix || storedData.suffix || '';
     retryCount = session?.retryCount || storedData.retryCount || 3;
+    // Optional per-chunk titles (used by collection-view sessions to show entry titles).
+    const chunkTitles = Array.isArray(session?.titles) ? session.titles : [];
     totalChunks = allChunks.length;
 
     // ── Load collection defaults + collections list ─────────────────────────
@@ -1001,6 +1021,9 @@ async function initPage() {
         ]);
         collectionsList = colls?.collections ?? {};
         collectionDefaults = defs?.defaults ?? { global: null, perSession: {} };
+        // Restore the auto-add preference so it survives page reloads.
+        const { collectionAutoAdd } = await browser.storage.local.get('collectionAutoAdd');
+        autoAddEnabled = !!collectionAutoAdd;
     } catch (err) {
         console.warn('[collections] failed to load defaults:', err);
     }
@@ -1008,7 +1031,7 @@ async function initPage() {
 
     if (!totalChunks) { showBanner('No chunks to process.', 'error'); return; }
 
-    buildChunkCards(allChunks);
+    buildChunkCards(allChunks, chunkTitles);
     updateOverallProgress(0, totalChunks);
 
     // Apply chunk text size and max width from settings
