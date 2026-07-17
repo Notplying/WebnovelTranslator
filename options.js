@@ -294,6 +294,16 @@ async function clearFewShotCustom() {
 // ─── Collections ─────────────────────────────────────────────────────────────
 let _selectedCollectionId = null;
 
+// Outside-click handler for the collection export dropdown — installed only while
+// the dropdown is open and removed on close or re-render to avoid accumulation.
+function closeExportDropdown(e) {
+  const exportDrop = document.getElementById('collectionExportDropdown');
+  if (exportDrop && !exportDrop.contains(e.target)) {
+    exportDrop.classList.remove('open');
+    document.removeEventListener('click', closeExportDropdown);
+  }
+}
+
 async function renderCollectionsSection() {
   let collectionsMap = {};
   let defaults = { global: null, perSession: {} };
@@ -304,6 +314,7 @@ async function renderCollectionsSection() {
       browser.runtime.sendMessage({ action: 'getCollectionDefaults' }),
       browser.storage.sync.get('collectionIncludeInBackup'),
     ]);
+    if (colls?.error || defs?.error) throw new Error(colls?.error || defs?.error);
     collectionsMap = colls?.collections ?? {};
     defaults = defs?.defaults ?? { global: null, perSession: {} };
     includeInBackup = !!stored?.collectionIncludeInBackup;
@@ -322,8 +333,8 @@ async function renderCollectionsSection() {
       ).join('');
     if (cur && collectionsMap[cur]) globalSel.value = cur;
     else if (defaults.global) globalSel.value = defaults.global;
-    globalSel.onchange = null;
-    globalSel.addEventListener('change', async (e) => {
+    // Assigned handler (not addEventListener) so re-rendering replaces rather than accumulates.
+    globalSel.onchange = async (e) => {
       const value = e.target.value || null;
       // Keep local state in sync for UI consistency, then persist only the changed global default.
       defaults.global = value;
@@ -331,19 +342,19 @@ async function renderCollectionsSection() {
         const res = await browser.runtime.sendMessage({ action: 'setCollectionGlobalDefault', value });
         if (res?.error) throw new Error(res.error);
       } catch (err) { showToast('❌ Failed to save default.', 'error'); }
-    }, { once: false });
+    };
   }
 
   // Backup toggle.
   const cb = document.getElementById('collectionIncludeInBackup');
   if (cb) {
     cb.checked = includeInBackup;
-    cb.onchange = null;
-    cb.addEventListener('change', async (e) => {
+    // Assigned handler so re-rendering replaces rather than accumulates listeners.
+    cb.onchange = async (e) => {
       try {
         await browser.storage.sync.set({ collectionIncludeInBackup: e.target.checked });
       } catch (err) { console.error('[collections] sync toggle failed:', err); }
-    });
+    };
   }
 
   // Sidebar list.
@@ -390,19 +401,23 @@ async function renderCollectionsSection() {
         btn.addEventListener('click', async (e) => {
           e.stopPropagation();
           const id = btn.dataset.id;
-          if (btn.dataset.action === 'rename') {
-            const coll = collectionsMap[id];
-            const name = prompt('Collection name:', coll?.name);
-            if (!name || !name.trim()) return;
-            const res = await browser.runtime.sendMessage({ action: 'updateCollection', collectionId: id, name: name.trim() });
-            if (res?.error) { showToast(`❌ Rename failed: ${res.error}`, 'error'); return; }
-            showToast('✏️ Collection renamed.', 'success');
-          } else if (btn.dataset.action === 'delete') {
-            if (!confirm('Delete this collection? This cannot be undone.')) return;
-            const res = await browser.runtime.sendMessage({ action: 'deleteCollection', collectionId: id });
-            if (res?.error) { showToast(`❌ Delete failed: ${res.error}`, 'error'); renderCollectionsSection(); return; }
-            if (_selectedCollectionId === id) _selectedCollectionId = null;
-            showToast('🗑 Collection deleted.', 'success');
+          try {
+            if (btn.dataset.action === 'rename') {
+              const coll = collectionsMap[id];
+              const name = prompt('Collection name:', coll?.name);
+              if (!name || !name.trim()) return;
+              const res = await browser.runtime.sendMessage({ action: 'updateCollection', collectionId: id, name: name.trim() });
+              if (res?.error) throw new Error(res.error);
+              showToast('✏️ Collection renamed.', 'success');
+            } else if (btn.dataset.action === 'delete') {
+              if (!confirm('Delete this collection? This cannot be undone.')) return;
+              const res = await browser.runtime.sendMessage({ action: 'deleteCollection', collectionId: id });
+              if (res?.error) throw new Error(res.error);
+              if (_selectedCollectionId === id) _selectedCollectionId = null;
+              showToast('🗑 Collection deleted.', 'success');
+            }
+          } catch (err) {
+            showToast(`❌ ${btn.dataset.action === 'rename' ? 'Rename' : 'Delete'} failed: ${err.message}`, 'error');
           }
           renderCollectionsSection();
         });
@@ -566,9 +581,13 @@ function renderCollectionDetail(collectionsMap) {
   const exportBtn = document.getElementById('collectionExportBtn');
   const exportDrop = document.getElementById('collectionExportDropdown');
   if (exportBtn && exportDrop) {
-    exportBtn.addEventListener('click', (e) => { e.stopPropagation(); exportDrop.classList.toggle('open'); });
-    document.addEventListener('click', function closeExport(e) {
-      if (exportDrop && !exportDrop.contains(e.target)) { exportDrop.classList.remove('open'); document.removeEventListener('click', closeExport); }
+    exportBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = exportDrop.classList.toggle('open');
+      // Install the outside-click close handler only while the dropdown is open,
+      // removing any prior instance first so re-renders don't accumulate listeners.
+      document.removeEventListener('click', closeExportDropdown);
+      if (open) requestAnimationFrame(() => document.addEventListener('click', closeExportDropdown));
     });
     exportDrop.querySelectorAll('.dropdown-item').forEach(item => {
       item.addEventListener('click', (e) => {
@@ -932,16 +951,44 @@ async function importFromJSON(json) {
     delete whitelisted.collectionIncludeInBackup;
     await browser.storage.local.set(sanitizeNumericSettings(whitelisted));
 
-    // Restore collection data (collections + defaults) to local storage only.
-    const collKeys = ['collections', 'collectionDefaults'];
-    const collData = {};
-    for (const k of collKeys) {
-      if (Object.prototype.hasOwnProperty.call(data, k)) collData[k] = data[k];
+    // Validate imported collections, defaults, and backup toggle before persisting.
+    // Only validated values are written; invalid collection data and the toggle are
+    // omitted rather than writing untrusted JSON verbatim.
+    const validCollections = {};
+    if (data.collections && typeof data.collections === 'object' && !Array.isArray(data.collections)) {
+      for (const [id, c] of Object.entries(data.collections)) {
+        if (!c || typeof c !== 'object' || Array.isArray(c)) continue;
+        if (typeof c.name !== 'string' || !Array.isArray(c.entries)) continue;
+        const entries = c.entries.filter(e =>
+          e && typeof e === 'object' && !Array.isArray(e) &&
+          typeof e.id === 'string' && typeof e.sessionId === 'string' &&
+          Number.isInteger(e.chunkIndex) && e.chunkIndex >= 0
+        );
+        validCollections[id] = { ...c, entries };
+      }
     }
+
+    let validDefaults = null;
+    if (data.collectionDefaults && typeof data.collectionDefaults === 'object' && !Array.isArray(data.collectionDefaults)) {
+      const d = data.collectionDefaults;
+      const global = (d.global === null || d.global === undefined || d.global === '') ? null : (typeof d.global === 'string' ? d.global : null);
+      const perSession = {};
+      if (d.perSession && typeof d.perSession === 'object' && !Array.isArray(d.perSession)) {
+        for (const [sid, val] of Object.entries(d.perSession)) {
+          if (typeof val === 'string' && val !== '') perSession[sid] = val;
+        }
+      }
+      validDefaults = { global, perSession };
+    }
+
+    // Restore collection data (collections + defaults) to local storage only, omitting invalid entries.
+    const collData = {};
+    if (Object.keys(validCollections).length) collData.collections = validCollections;
+    if (validDefaults) collData.collectionDefaults = validDefaults;
     if (Object.keys(collData).length) await browser.storage.local.set(collData);
 
-    // Restore only the backup toggle to sync — its single source of truth.
-    if (Object.prototype.hasOwnProperty.call(data, 'collectionIncludeInBackup')) {
+    // Restore only the backup toggle to sync — its single source of truth. Must be boolean.
+    if (typeof data.collectionIncludeInBackup === 'boolean') {
       await browser.storage.sync.set({ collectionIncludeInBackup: data.collectionIncludeInBackup });
     }
 

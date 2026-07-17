@@ -102,19 +102,38 @@ browser.runtime.onInstalled.addListener(function (details) {
 });
 
 // ─── Message Router ───────────────────────────────────────────────────────────
-// Serializes every collection mutation through a single read→modify→write path
-// so concurrent updates (options page + chunks page) don't clobber each other.
+// Serializes every collection/collectionDefaults read-modify-write through a
+// single module-level promise queue so concurrent updates (options page +
+// chunks page) don't clobber each other or resurrect deleted collections.
 // Each call reads the latest persisted state, applies the mutator, and writes back.
+let collectionQueue = Promise.resolve();
+
+// Enqueue a mutation task so it runs only after every previously enqueued task
+// has completed its own get→mutate→set sequence. Errors are propagated to the
+// returned promise; the queue itself never stalls so subsequent tasks still run.
+function enqueueCollectionMutation(task) {
+    const prev = collectionQueue;
+    let settle;
+    const wrapped = new Promise((resolve, reject) => { settle = { resolve, reject }; });
+    collectionQueue = prev.then(() => task()).then(
+        result => { settle.resolve(result); return result; },
+        err => { settle.reject(err); throw err; }
+    ).catch(() => {}); // absorb so the chain never stalls
+    return wrapped;
+}
+
 async function mutateCollection(collectionId, mutator) {
-    const { collections = {} } = await browser.storage.local.get('collections');
-    const c = collections[collectionId];
-    if (!c) throw new Error('Collection not found.');
-    const result = mutator(c);
-    // If the mutator signals to skip (returns true/truthy to abort), don't persist.
-    if (result) return result;
-    c.updatedAt = Date.now();
-    await browser.storage.local.set({ collections });
-    return result;
+    return enqueueCollectionMutation(async () => {
+        const { collections = {} } = await browser.storage.local.get('collections');
+        const c = collections[collectionId];
+        if (!c) throw new Error('Collection not found.');
+        const result = mutator(c);
+        // If the mutator signals to skip (returns true/truthy to abort), don't persist.
+        if (result) return result;
+        c.updatedAt = Date.now();
+        await browser.storage.local.set({ collections });
+        return result;
+    });
 }
 
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -190,12 +209,14 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message.action === 'deleteCollection') {
         const { collectionId } = message;
-        browser.storage.local.get(['collections', 'collectionDefaults']).then(({ collections = {}, collectionDefaults = { global: null, perSession: {} } }) => {
+        enqueueCollectionMutation(async () => {
+            const { collections = {}, collectionDefaults = { global: null, perSession: {} } } = await browser.storage.local.get(['collections', 'collectionDefaults']);
             delete collections[collectionId];
             // Clear any default that referenced the deleted collection so we don't point at nothing.
             if (collectionDefaults.global === collectionId) collectionDefaults.global = null;
-            if (Object.prototype.hasOwnProperty.call(collectionDefaults.perSession, collectionId)) {
-                delete collectionDefaults.perSession[collectionId];
+            // perSession is keyed by sessionId; remove every session whose value equals the deleted collection.
+            for (const sid of Object.keys(collectionDefaults.perSession)) {
+                if (collectionDefaults.perSession[sid] === collectionId) delete collectionDefaults.perSession[sid];
             }
             return browser.storage.local.set({ collections, collectionDefaults });
         }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
@@ -204,6 +225,10 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'addEntryToCollection') {
         const { collectionId, entry } = message;
         if (!collectionId || !entry) { sendResponse({ error: 'Invalid input.' }); return true; }
+        // Validate the entry before persisting: require a non-empty sessionId and a non-negative integer chunkIndex.
+        if (!entry.sessionId || !Number.isInteger(entry.chunkIndex) || entry.chunkIndex < 0) {
+            sendResponse({ error: 'Invalid input.' }); return true;
+        }
         mutateCollection(collectionId, c => {
             // Prevent duplicate entries from the same chunk.
             const exists = c.entries.some(e => e.sessionId === entry.sessionId && e.chunkIndex === entry.chunkIndex);
@@ -218,7 +243,9 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const { collectionId, entryId } = message;
         if (!collectionId || !entryId) { sendResponse({ error: 'Invalid input.' }); return true; }
         mutateCollection(collectionId, c => {
-            c.entries = c.entries.filter(e => e.id !== entryId);
+            const idx = c.entries.findIndex(e => e.id === entryId);
+            if (idx === -1) throw new Error('Entry not found.');
+            c.entries.splice(idx, 1);
         }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
         return true;
     }
@@ -228,7 +255,8 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!collectionId || !entryId || title == null) { sendResponse({ error: 'Invalid input.' }); return true; }
         mutateCollection(collectionId, c => {
             const entry = c.entries.find(e => e.id === entryId);
-            if (entry) entry.title = title;
+            if (!entry) throw new Error('Entry not found.');
+            entry.title = title;
         }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
         return true;
     }
@@ -238,7 +266,8 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!collectionId || !entryId || content == null) { sendResponse({ error: 'Invalid input.' }); return true; }
         mutateCollection(collectionId, c => {
             const entry = c.entries.find(e => e.id === entryId);
-            if (entry) entry.content = content;
+            if (!entry) throw new Error('Entry not found.');
+            entry.content = content;
         }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
         return true;
     }
@@ -255,14 +284,12 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const { collectionId, fromIndex, toIndex } = message;
         if (!collectionId || fromIndex == null || toIndex == null) { sendResponse({ error: 'Invalid input.' }); return true; }
         mutateCollection(collectionId, c => {
-            // Validate indices are integers within bounds before mutating.
-            const from = parseInt(fromIndex, 10);
-            const to = parseInt(toIndex, 10);
-            if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || from >= c.entries.length || to < 0 || to >= c.entries.length) {
+            // Validate the original indices are already integers within bounds before mutating.
+            if (!Number.isInteger(fromIndex) || !Number.isInteger(toIndex) || fromIndex < 0 || fromIndex >= c.entries.length || toIndex < 0 || toIndex >= c.entries.length) {
                 throw new Error('Invalid fromIndex or toIndex.');
             }
-            const [moved] = c.entries.splice(from, 1);
-            c.entries.splice(to, 0, moved);
+            const [moved] = c.entries.splice(fromIndex, 1);
+            c.entries.splice(toIndex, 0, moved);
         }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
         return true;
     }
@@ -275,7 +302,8 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Merge-based: updates only the global default, preserving per-session overrides.
     if (message.action === 'setCollectionGlobalDefault') {
         const value = message.value ?? null;
-        browser.storage.local.get('collectionDefaults').then(({ collectionDefaults = { global: null, perSession: {} } }) => {
+        enqueueCollectionMutation(async () => {
+            const { collectionDefaults = { global: null, perSession: {} } } = await browser.storage.local.get('collectionDefaults');
             collectionDefaults.global = value;
             return browser.storage.local.set({ collectionDefaults });
         }).then(() => sendResponse({ success: true }))
@@ -286,7 +314,8 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'setCollectionSessionDefault') {
         const { sessionId, value } = message;
         if (!sessionId) { sendResponse({ error: 'sessionId is required.' }); return true; }
-        browser.storage.local.get('collectionDefaults').then(({ collectionDefaults = { global: null, perSession: {} } }) => {
+        enqueueCollectionMutation(async () => {
+            const { collectionDefaults = { global: null, perSession: {} } } = await browser.storage.local.get('collectionDefaults');
             if (value === null || value === undefined || value === '') delete collectionDefaults.perSession[sessionId];
             else collectionDefaults.perSession[sessionId] = value;
             return browser.storage.local.set({ collectionDefaults });
@@ -297,8 +326,8 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'reprocessEntry') {
         // Re-translate an entry from its rawContent using current settings.
         const { sessionId, chunkIndex, prefix, suffix, retryCount } = message;
-        // An empty prefix is valid (rawContent-only reprocess); reject only missing sessionId/chunkIndex/rawContent.
-        if (!sessionId || chunkIndex == null || !message.rawContent) {
+        // An empty prefix is valid (rawContent-only reprocess); reject only missing sessionId/chunkIndex or a non-string rawContent.
+        if (!sessionId || chunkIndex == null || typeof message.rawContent !== 'string') {
             sendResponse({ error: 'Invalid input.' }); return true;
         }
         processChunk({ chunk: message.rawContent, prefix, suffix, sessionId, retryCount: retryCount || 3 })

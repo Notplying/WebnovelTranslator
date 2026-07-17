@@ -151,12 +151,18 @@ async function renderCollectionSelector() {
 
 document.getElementById('collectionDefaultSelect')?.addEventListener('change', async (e) => {
     const val = e.target.value || null;
-    // Keep local state in sync for UI consistency, then persist only the changed override.
+    // Capture the prior value before mutating local state so we can roll back on failure.
+    const prior = collectionDefaults.perSession[sessionId] ?? null;
     collectionDefaults.perSession[sessionId] = val;
     try {
         const res = await browser.runtime.sendMessage({ action: 'setCollectionSessionDefault', sessionId, value: val });
         if (res?.error) throw new Error(res.error);
-    } catch (err) { showToast(`❌ Failed to save session default: ${err.message}`, 'error'); }
+    } catch (err) {
+        // Restore the previous value and re-render the selector to reflect it.
+        collectionDefaults.perSession[sessionId] = prior;
+        renderCollectionSelector();
+        showToast(`❌ Failed to save session default: ${err.message}`, 'error');
+    }
 });
 
 document.getElementById('collectionAutoAdd')?.addEventListener('change', (e) => {
