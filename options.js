@@ -229,8 +229,11 @@ function escapeHtml(str) {
 // or a legacy "Chunk N" label for entries added before this convention existed.
 function entryTitle(e) {
   if (e.title) return e.title;
-  const source = e.content || e.rawContent || '';
-  const firstLine = String(source).split(/\r?\n/).find(line => line.trim()) || '';
+  // Prefer translated lines first; only fall back to the raw source when the
+  // translation has no non-empty line (not merely when it's absent).
+  const firstLine = String(e.content || '').split(/\r?\n/).find(line => line.trim())
+      || String(e.rawContent || '').split(/\r?\n/).find(line => line.trim())
+      || '';
   const trimmed = firstLine.trim();
   if (trimmed) return trimmed.length > 120 ? trimmed.slice(0, 120) + '…' : trimmed;
   return `Chunk ${e.chunkIndex + 1}`;
@@ -244,6 +247,9 @@ function renderMarkdown(text) {
   const NUL = String.fromCharCode(0);
   const imgTags = [];
   let processed = String(text || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+  // Strip reasoning/thinking blocks before escaping so the tags are still
+  // recognizable and only the translation content renders.
+  try { processed = processed.replace(new RegExp('<think[\\s\\S]*?<\\/think>', 'gi'), ''); } catch (_) {}
   // Extract <img> tags before escaping so they survive sanitization.
   processed = processed.replace(/<img[^>]*>/gi, match => {
     imgTags.push(match);
@@ -251,8 +257,6 @@ function renderMarkdown(text) {
   });
   processed = escapeHtml(processed);
   imgTags.forEach((tag, i) => { processed = processed.replace(NUL + 'IMG' + i + NUL, tag); });
-  // Strip reasoning/thinking blocks so only the translation renders.
-  try { processed = processed.replace(new RegExp('<think[\\s\\S]*?<\\/think>', 'gi'), ''); } catch (_) {}
   const html = marked.parse(processed);
   return DOMPurify.sanitize(html, { ADD_ATTR: ['target', 'data-original-src', 'style'], FORBID_TAGS: ['style', 'script'] });
 }

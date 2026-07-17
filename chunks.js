@@ -135,8 +135,11 @@ function resolveDefaultCollection(sessionId) {
 // Derive a default entry title from the first non-empty line of the translated
 // chunk content. Falls back to the raw source, then to the legacy "Chunk N" label.
 function defaultEntryTitle(content, rawContent, index) {
-    const source = content || rawContent || '';
-    const firstLine = String(source).split(/\r?\n/).find(line => line.trim()) || '';
+    // Prefer translated lines first; only fall back to the raw source when the
+    // translation has no non-empty line (not merely when it's absent).
+    const firstLine = String(content || '').split(/\r?\n/).find(line => line.trim())
+        || String(rawContent || '').split(/\r?\n/).find(line => line.trim())
+        || '';
     const trimmed = firstLine.trim();
     // Cap the title length so a single long line doesn't break the UI.
     return trimmed ? (trimmed.length > 120 ? trimmed.slice(0, 120) + '…' : trimmed) : `Chunk ${index + 1}`;
@@ -293,6 +296,22 @@ async function autoAddProcessedChunk(index, sessId) {
             },
         });
         if (res?.error) throw new Error(res.error);
+        // Update the in-memory cache so the per-chunk dropdown sees the newly
+        // added entry immediately without reloading collections.
+        const coll = collectionsList[collId];
+        if (!res?.alreadyPresent && coll) {
+            const existing = coll.entries.some(e => e.sessionId === sessId && e.chunkIndex === index);
+            if (!existing) {
+                coll.entries.push({
+                    id: crypto.randomUUID(),
+                    sessionId: sessId, chunkIndex: index,
+                    title: defaultEntryTitle(content, rawContent, index),
+                    content, rawContent,
+                    addedAt: Date.now(),
+                });
+            }
+        }
+        populateAddToMenu(index, document.getElementById(`chunk-addto-menu-${index}`));
     } catch (err) {
         showToast(`❌ Failed to add chunk ${index + 1} to collection: ${err.message}`, 'error');
     }
