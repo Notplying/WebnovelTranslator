@@ -191,7 +191,10 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!name) { sendResponse({ error: 'Collection name is required.' }); return true; }
         const now = Date.now();
         const collection = { id: crypto.randomUUID(), name, createdAt: now, updatedAt: now, entries: [] };
-        browser.storage.local.get('collections').then(({ collections = {} }) => {
+        // Route through the serialized mutation queue so a concurrent addEntryToCollection
+        // or deleteCollection can't read a stale snapshot and clobber this write.
+        enqueueCollectionMutation(async () => {
+            const { collections = {} } = await browser.storage.local.get('collections');
             collections[collection.id] = collection;
             return browser.storage.local.set({ collections });
         }).then(() => sendResponse({ collection })).catch(err => sendResponse({ error: err.message }));
@@ -200,7 +203,10 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'updateCollection') {
         const { collectionId, name } = message;
         if (!collectionId || !(name || '').trim()) { sendResponse({ error: 'Invalid input.' }); return true; }
-        browser.storage.local.get('collections').then(({ collections = {} }) => {
+        // Route through the serialized mutation queue so a concurrent queued mutation
+        // can't read a stale snapshot and clobber this rename (or vice versa).
+        enqueueCollectionMutation(async () => {
+            const { collections = {} } = await browser.storage.local.get('collections');
             const c = collections[collectionId]; if (!c) throw new Error('Collection not found.');
             c.name = name.trim(); c.updatedAt = Date.now();
             return browser.storage.local.set({ collections });
@@ -330,7 +336,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!sessionId || chunkIndex == null || typeof message.rawContent !== 'string') {
             sendResponse({ error: 'Invalid input.' }); return true;
         }
-        processChunk({ chunk: message.rawContent, prefix, suffix, sessionId, retryCount: retryCount || 3 })
+        processChunk({ chunk: message.rawContent, prefix, suffix, sessionId, retryCount: retryCount ?? 3 })
             .then(result => sendResponse({ success: true, result }))
             .catch(err => sendResponse({ error: err.message }));
         return true;

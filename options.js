@@ -652,7 +652,7 @@ function renderCollectionDetail(collectionsMap) {
             chunkIndex: entry.chunkIndex,
             prefix: prefix || '',
             suffix: suffix || '',
-            retryCount: retryCount || 3,
+            retryCount: retryCount ?? 3,
             rawContent: entry.rawContent,
           });
           if (res?.error) throw new Error(res.error);
@@ -745,7 +745,7 @@ function renderCollectionDetail(collectionsMap) {
           chunkIndex: entry.chunkIndex,
           prefix: prefix || '',
           suffix: suffix || '',
-          retryCount: retryCount || 3,
+          retryCount: retryCount ?? 3,
           rawContent: entry.rawContent,
         });
         if (res?.error) throw new Error(res.error);
@@ -783,10 +783,10 @@ function exportCollectionMD(collection) {
 
 function exportCollectionHTML(collection) {
   if (!collection || !(collection.entries || []).length) { showToast('Nothing to export.', 'error'); return; }
-  const safeName = (collection.name || 'collection').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const safeName = escapeHtml(collection.name || 'collection');
   const entriesHtml = collection.entries.map(e => {
-    const title = (e.title || `Chunk ${e.chunkIndex + 1}`).replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const body = (e.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const title = escapeHtml(e.title || `Chunk ${e.chunkIndex + 1}`);
+    const body = escapeHtml(e.content || '');
     return `<article class="entry">
   <h1 class="entry-title">${title}</h1>
   <div class="entry-body">${body.replace(/\n/g, '<br>\n')}</div>

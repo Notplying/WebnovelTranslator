@@ -110,6 +110,7 @@ function removeThinking(text) {
 // ─── State ────────────────────────────────────────────────────────────────────
 let sessionId = null;
 let allChunks = [];
+let chunkTitles = [];       // per-chunk titles (used by collection-view sessions)
 let prefix = '', suffix = '';
 let retryCount = 3;
 let isProcessing = false;
@@ -124,7 +125,6 @@ let _terminated = false;
 // ─── Collections state ──────────────────────────────────────────────────────
 let collectionsList = {};     // collections map from storage
 let collectionDefaults = { global: null, perSession: {} };
-let autoAddEnabled = false;
 
 function resolveDefaultCollection(sessionId) {
     const per = collectionDefaults.perSession;
@@ -144,8 +144,7 @@ function defaultEntryTitle(content, rawContent, index) {
 
 async function renderCollectionSelector() {
     const sel = document.getElementById('collectionDefaultSelect');
-    const cb = document.getElementById('collectionAutoAdd');
-    if (!sel || !cb) return;
+    if (!sel) return;
     const resolved = resolveDefaultCollection(sessionId);
     // Preserve user selection while rebuilding options.
     const existingValue = sel.value;
@@ -156,7 +155,6 @@ async function renderCollectionSelector() {
     // If nothing was explicitly set for this session and a global default exists, reflect it.
     if (existingValue) sel.value = existingValue;
     else if (resolved) sel.value = resolved;
-    cb.checked = autoAddEnabled && !!resolved;
 }
 
 document.getElementById('collectionDefaultSelect')?.addEventListener('change', async (e) => {
@@ -168,20 +166,13 @@ document.getElementById('collectionDefaultSelect')?.addEventListener('change', a
         const res = await browser.runtime.sendMessage({ action: 'setCollectionSessionDefault', sessionId, value: val });
         if (res?.error) throw new Error(res.error);
     } catch (err) {
-        // Restore the previous value and re-render the selector to reflect it.
+        // Restore the previous value. Set the DOM directly rather than calling
+        // renderCollectionSelector() — that function reads sel.value from the DOM,
+        // which still holds the failed selection and would re-apply it.
         collectionDefaults.perSession[sessionId] = prior;
-        renderCollectionSelector();
+        const sel = document.getElementById('collectionDefaultSelect');
+        if (sel) sel.value = prior || '';
         showToast(`❌ Failed to save session default: ${err.message}`, 'error');
-    }
-});
-
-document.getElementById('collectionAutoAdd')?.addEventListener('change', async (e) => {
-    autoAddEnabled = e.target.checked;
-    // Persist so the preference survives page reloads.
-    try {
-        await browser.storage.local.set({ collectionAutoAdd: autoAddEnabled });
-    } catch (err) {
-        console.warn('[collections] auto-add persist failed:', err);
     }
 });
 
@@ -279,14 +270,16 @@ async function newCollectionAndAdd(index) {
 // Extracted so both the normal streaming success path and the timeout-fallback path
 // add the chunk with identical resolution, entry construction, and error handling.
 async function autoAddProcessedChunk(index, sessId) {
-    if (!autoAddEnabled) return;
     const collId = resolveDefaultCollection(sessId);
     if (!collId) return;
     const r = processedResults[index] || {};
     const content = r.content?.text || '';
     const rawContent = r.rawContent || allChunks[index] || '';
     if (!content && !rawContent) return;
-    const coll = collectionsList[collId];
+    // Skip if the resolved collection has been deleted from the in-memory cache
+    // (e.g. removed in the options page while this session is still open) —
+    // avoids a pointless worker round-trip and a misleading error toast.
+    if (!collectionsList[collId]) return;
     try {
         const res = await browser.runtime.sendMessage({
             action: 'addEntryToCollection',
@@ -981,7 +974,7 @@ async function reprocessAll() {
     completedChunks = 0;
     _terminated = false;
     _streamCompleteFlags = {};
-    buildChunkCards(allChunks);
+    buildChunkCards(allChunks, chunkTitles);
     updateOverallProgress(0, totalChunks);
     await processAllChunks(false);
 }
@@ -1010,7 +1003,7 @@ async function initPage() {
     suffix = session?.suffix || storedData.suffix || '';
     retryCount = session?.retryCount || storedData.retryCount || 3;
     // Optional per-chunk titles (used by collection-view sessions to show entry titles).
-    const chunkTitles = Array.isArray(session?.titles) ? session.titles : [];
+    chunkTitles = Array.isArray(session?.titles) ? session.titles : [];
     totalChunks = allChunks.length;
 
     // ── Load collection defaults + collections list ─────────────────────────
@@ -1021,9 +1014,6 @@ async function initPage() {
         ]);
         collectionsList = colls?.collections ?? {};
         collectionDefaults = defs?.defaults ?? { global: null, perSession: {} };
-        // Restore the auto-add preference so it survives page reloads.
-        const { collectionAutoAdd } = await browser.storage.local.get('collectionAutoAdd');
-        autoAddEnabled = !!collectionAutoAdd;
     } catch (err) {
         console.warn('[collections] failed to load defaults:', err);
     }
