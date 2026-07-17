@@ -108,6 +108,13 @@
             font-size: 0.78rem;
             font-family: inherit;
             cursor: pointer;
+            /* A long collection name must not force the header (and page) wider
+               than the viewport. The selected label is elided; the dropdown popup
+               still shows the full name. */
+            max-width: 220px;
+            width: auto;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .collection-selector label {
             font-size: 0.78rem;
@@ -125,9 +132,10 @@
             display: none;
             position: absolute;
             top: 100%;
-            right: 0;
+            left: 0;
             margin-top: 4px;
             min-width: 180px;
+            max-width: 260px;
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: 8px;
@@ -870,6 +878,50 @@
             #chunksContainer {
                 padding: 12px 14px;
                 max-width: 100% !important;
+            }
+
+            /* Long collection names must never force horizontal scroll. */
+            .collection-selector select {
+                max-width: 160px;
+            }
+
+            /* Stack header actions so buttons keep a comfortable tap target
+               without shrinking or wrapping mid-row. */
+            .header-actions {
+                flex-basis: 100%;
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .header-actions .btn-sm {
+                justify-content: center;
+            }
+            .collection-selector {
+                justify-content: flex-end;
+            }
+
+            /* Make the per-chunk action bar easier to navigate on touch:
+               larger tap targets, and the "Add to" menu constrained to the
+               card width so it can't overflow the viewport edge. */
+            .btn-sm {
+                padding: 8px 12px;
+                font-size: 0.8rem;
+            }
+            .chunk-actions {
+                gap: 6px;
+                padding: 10px 14px;
+                margin: 10px -14px -14px -14px;
+            }
+            .add-to-dropdown .dropdown-menu {
+                left: 0;
+                right: auto;
+                min-width: unset;
+                width: max-content;
+                max-width: calc(100vw - 44px);
+            }
+            .add-to-dropdown .dropdown-item {
+                padding: 8px 12px;
+                font-size: 0.82rem;
+                white-space: normal;
             }
         }
     </style>
