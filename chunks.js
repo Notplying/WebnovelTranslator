@@ -457,6 +457,37 @@ function setMicroBar(index, mode) {
     else { track.classList.remove('pulse'); bar.style.width = '0%'; }
 }
 
+// ── Hide-on-scroll: hide header when scrolling down, reveal on scroll up ─────
+function initScrollHide(hideHeader, hideFooter) {
+    if (!hideHeader && !hideFooter) return;
+
+    let lastY = window.scrollY;
+    let ticking = false;
+
+    window.addEventListener('scroll', () => {
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(() => {
+            const y = window.scrollY;
+            // Only act once the user has scrolled past the header height, so the
+            // initial page load never triggers an immediate hide.
+            if (y > 80) {
+                if (y > lastY) {
+                    // Scrolling down — hide.
+                    if (hideHeader) document.body.classList.add('hide-header-scroll');
+                    if (hideFooter) document.body.classList.add('hide-footer-scroll');
+                } else {
+                    // Scrolling up — reveal.
+                    if (hideHeader) document.body.classList.remove('hide-header-scroll');
+                    if (hideFooter) document.body.classList.remove('hide-footer-scroll');
+                }
+            }
+            lastY = y;
+            ticking = false;
+        });
+    }, { passive: true });
+}
+
 // ─── Render content into a chunk ──────────────────────────────────────────────
 const imageBlobCache = new Map();
 const imageAbortControllers = new Map(); // src → AbortController
@@ -1044,9 +1075,10 @@ async function initPage() {
     updateOverallProgress(0, totalChunks);
 
     // Apply chunk text size and max width from settings
-    const { chunkFontSize = 1, chunkMaxWidth = 0 } = await browser.storage.local.get(['chunkFontSize', 'chunkMaxWidth']);
+    const { chunkFontSize = 1, chunkMaxWidth = 0, hideHeaderOnScroll = false, hideChunkFooterOnScroll = false } = await browser.storage.local.get(['chunkFontSize', 'chunkMaxWidth', 'hideHeaderOnScroll', 'hideChunkFooterOnScroll']);
     document.documentElement.style.setProperty('--chunk-font-size', `${chunkFontSize}rem`);
     document.documentElement.style.setProperty('--chunk-max-width', chunkMaxWidth > 0 ? `${chunkMaxWidth}px` : 'none');
+    initScrollHide(hideHeaderOnScroll, hideChunkFooterOnScroll);
 
     // Load saved chunks
     const { processedChunks = {} } = await browser.storage.local.get('processedChunks');

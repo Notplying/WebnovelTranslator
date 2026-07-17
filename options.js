@@ -19,6 +19,9 @@ const DEFAULTS = {
   chunkFontSize: 1.05,
   chunkMaxWidth: 850,
 
+  hideHeaderOnScroll: false,
+  hideChunkFooterOnScroll: false,
+
   apiTimeout: 120,
   webAutomationTimeout: 30,
 
@@ -96,6 +99,7 @@ async function loadSettings() {
   const settings = { ...DEFAULTS, ...stored };
 
   ['apiType', 'maxLength', 'prefix', 'suffix', 'retryCount', 'temperature', 'topK', 'topP', 'maxSessions', 'chunkFontSize', 'chunkMaxWidth',
+    'hideHeaderOnScroll', 'hideChunkFooterOnScroll',
     'geminiApiKey', 'geminiModelId', 'geminiMaxTokens', 'geminiContextWindow',
 
     'openRouterApiKey', 'openRouterModelId', 'openRouterMaxTokens', 'openRouterContextWindow', 'openRouterProviderOrder', 'openRouterAllowFallback',
@@ -161,6 +165,9 @@ async function saveSettings() {
     maxSessions: getField('maxSessions'),
     chunkFontSize: getField('chunkFontSize'),
     chunkMaxWidth: getField('chunkMaxWidth'),
+
+    hideHeaderOnScroll: getField('hideHeaderOnScroll'),
+    hideChunkFooterOnScroll: getField('hideChunkFooterOnScroll'),
 
     geminiApiKey: getField('geminiApiKey'),
     geminiModelId: getField('geminiModelId'),

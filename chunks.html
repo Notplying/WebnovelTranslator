@@ -57,6 +57,12 @@
             align-items: center;
             gap: 12px;
             flex-wrap: wrap;
+            /* Transition only applied when hide-on-scroll is enabled, so the
+               normal sticky behaviour stays instant otherwise. */
+            transition: transform 0.25s ease;
+        }
+        body.hide-header-scroll .header {
+            transform: translateY(-100%);
         }
 
         .header-title {
@@ -816,6 +822,10 @@
             border-radius: 0 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px);
             z-index: 10;
             box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.2);
+            transition: transform 0.25s ease;
+        }
+        body.hide-footer-scroll .chunk-actions {
+            transform: translateY(100%);
         }
 
         /* ── Toast ───────────────────────────────────────────────────── */
@@ -883,20 +893,6 @@
             /* Long collection names must never force horizontal scroll. */
             .collection-selector select {
                 max-width: 160px;
-            }
-
-            /* Stack header actions so buttons keep a comfortable tap target
-               without shrinking or wrapping mid-row. */
-            .header-actions {
-                flex-basis: 100%;
-                flex-direction: column;
-                align-items: stretch;
-            }
-            .header-actions .btn-sm {
-                justify-content: center;
-            }
-            .collection-selector {
-                justify-content: flex-end;
             }
 
             /* Make the per-chunk action bar easier to navigate on touch:
