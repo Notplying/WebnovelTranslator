@@ -461,28 +461,34 @@ function setMicroBar(index, mode) {
 function initScrollHide(hideHeader, hideFooter) {
     if (!hideHeader && !hideFooter) return;
 
-    let lastY = window.scrollY;
+    // Anchor scroll position for the current hide/show decision. Only when the
+    // cumulative scroll from this anchor exceeds the threshold do we flip state
+    // and re-anchor — preventing flicker on small scroll movements.
+    let anchorY = window.scrollY;
     let ticking = false;
+    const SCROLL_THRESHOLD = 120;
 
     window.addEventListener('scroll', () => {
         if (ticking) return;
         ticking = true;
         requestAnimationFrame(() => {
             const y = window.scrollY;
+            const delta = y - anchorY;
             // Only act once the user has scrolled past the header height, so the
             // initial page load never triggers an immediate hide.
             if (y > 80) {
-                if (y > lastY) {
-                    // Scrolling down — hide.
+                if (delta > SCROLL_THRESHOLD) {
+                    // Scrolled down enough — hide.
                     if (hideHeader) document.body.classList.add('hide-header-scroll');
                     if (hideFooter) document.body.classList.add('hide-footer-scroll');
-                } else {
-                    // Scrolling up — reveal.
+                    anchorY = y;
+                } else if (delta < -SCROLL_THRESHOLD) {
+                    // Scrolled up enough — reveal.
                     if (hideHeader) document.body.classList.remove('hide-header-scroll');
                     if (hideFooter) document.body.classList.remove('hide-footer-scroll');
+                    anchorY = y;
                 }
             }
-            lastY = y;
             ticking = false;
         });
     }, { passive: true });
