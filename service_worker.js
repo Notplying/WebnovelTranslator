@@ -309,7 +309,11 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'setCollectionGlobalDefault') {
         const value = message.value ?? null;
         enqueueCollectionMutation(async () => {
-            const { collectionDefaults = { global: null, perSession: {} } } = await browser.storage.local.get('collectionDefaults');
+            const { collections = {}, collectionDefaults = { global: null, perSession: {} } } = await browser.storage.local.get(['collections', 'collectionDefaults']);
+            // Null/empty clears the default; any referenced collection must actually exist.
+            if (value !== null && value !== undefined && value !== '' && !collections[value]) {
+                throw new Error('Invalid collection reference.');
+            }
             collectionDefaults.global = value;
             return browser.storage.local.set({ collectionDefaults });
         }).then(() => sendResponse({ success: true }))
@@ -321,7 +325,11 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const { sessionId, value } = message;
         if (!sessionId) { sendResponse({ error: 'sessionId is required.' }); return true; }
         enqueueCollectionMutation(async () => {
-            const { collectionDefaults = { global: null, perSession: {} } } = await browser.storage.local.get('collectionDefaults');
+            const { collections = {}, collectionDefaults = { global: null, perSession: {} } } = await browser.storage.local.get(['collections', 'collectionDefaults']);
+            // Null/empty clears the override; any referenced collection must actually exist.
+            if (value !== null && value !== undefined && value !== '' && !collections[value]) {
+                throw new Error('Invalid collection reference.');
+            }
             if (value === null || value === undefined || value === '') delete collectionDefaults.perSession[sessionId];
             else collectionDefaults.perSession[sessionId] = value;
             return browser.storage.local.set({ collectionDefaults });

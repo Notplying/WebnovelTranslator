@@ -571,6 +571,7 @@ function renderCollectionDetail(collectionsMap) {
         const coll = collectionsMap[_selectedCollectionId];
         const entry = coll?.entries?.find(e => e.id === entryId);
         if (!entry) return;
+        const previousTitle = entryTitle(entry);
         const title = el.textContent.trim() || entryTitle(entry);
         el.textContent = title;
         try {
@@ -579,7 +580,7 @@ function renderCollectionDetail(collectionsMap) {
           if (res?.error) throw new Error(res.error);
         } catch (err) {
           showToast('❌ Failed to save title.', 'error');
-          el.textContent = entry.title || title;
+          el.textContent = previousTitle;
         }
       });
     });
