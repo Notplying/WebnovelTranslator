@@ -1,0 +1,3 @@
+/* ui-theme.css — Modern Liquid Glass layer.
+   Every rule in this file MUST be scoped under [data-ui="modern"].
+   The existing inline <style> in each page is the untouched Classic theme. */
