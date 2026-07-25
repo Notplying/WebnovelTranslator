@@ -1,3 +1,60 @@
 /* ui-theme.css — Modern Liquid Glass layer.
    Every rule in this file MUST be scoped under [data-ui="modern"].
    The existing inline <style> in each page is the untouched Classic theme. */
+
+:root[data-ui="modern"] {
+  --bg: #0a0c14;
+  --surface: rgba(22, 26, 38, 0.72);
+  --surface2: rgba(30, 35, 52, 0.60);
+  --border: rgba(255, 255, 255, 0.08);
+  --accent: #8b7dff;
+  --accent2: #5eead4;
+  --accent-glow: rgba(139, 125, 255, 0.28);
+  --text: #e6e9f2;
+  --text-muted: #8b93a7;
+  --radius: 16px;
+
+  /* Liquid-glass primitives (referenced by component rules below). */
+  --g-glass: rgba(22, 26, 38, 0.72);
+  --g-glass-2: rgba(30, 35, 52, 0.60);
+  --g-border: rgba(255, 255, 255, 0.08);
+  --g-specular: rgba(255, 255, 255, 0.14);
+  --g-accent: #8b7dff;
+  --g-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  --g-blur: blur(24px) saturate(160%);
+}
+
+/* Aurora backdrop — two low-opacity cool orbs behind everything.
+   Halts under reduced motion. */
+[data-ui="modern"] body {
+  position: relative;
+  background:
+    radial-gradient(60rem 40rem at 12% -10%, rgba(124, 106, 247, 0.18), transparent 60%),
+    radial-gradient(50rem 38rem at 100% 8%, rgba(94, 234, 212, 0.10), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+/* Slow drift for the chunks reading page hero. The Settings page keeps the
+   orbs static (calmer for a dense form UI). The .has-chunks-aurora class is
+   added to <body> on the chunks page in Task 6. */
+[data-ui="modern"] body.has-chunks-aurora::before {
+  content: "";
+  position: fixed;
+  inset: -10%;
+  background:
+    radial-gradient(40rem 30rem at 20% 10%, rgba(124, 106, 247, 0.16), transparent 60%),
+    radial-gradient(36rem 28rem at 85% 20%, rgba(94, 234, 212, 0.10), transparent 55%);
+  z-index: -1;
+  animation: g-aurora 24s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes g-aurora {
+  from { transform: translate3d(-2%, -1%, 0) scale(1); }
+  to   { transform: translate3d(2%, 1%, 0) scale(1.05); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-ui="modern"] body.has-chunks-aurora::before { animation: none; }
+}
