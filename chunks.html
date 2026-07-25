@@ -57,6 +57,12 @@
             align-items: center;
             gap: 12px;
             flex-wrap: wrap;
+            /* Transition only applied when hide-on-scroll is enabled, so the
+               normal sticky behaviour stays instant otherwise. */
+            transition: transform 0.25s ease;
+        }
+        body.hide-header-scroll .header {
+            transform: translateY(-100%);
         }
 
         .header-title {
@@ -89,6 +95,81 @@
             display: flex;
             gap: 8px;
             flex-wrap: wrap;
+        }
+
+        /* ── Collection selector ─────────────────────────────────── */
+        .collection-selector {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+        }
+        .collection-selector select {
+            background: var(--surface2);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 0.78rem;
+            font-family: inherit;
+            cursor: pointer;
+            /* A long collection name must not force the header (and page) wider
+               than the viewport. The selected label is elided; the dropdown popup
+               still shows the full name. */
+            max-width: 220px;
+            width: auto;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .collection-selector label {
+            font-size: 0.78rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        /* Add-to dropdown */
+        .add-to-dropdown {
+            position: relative;
+            display: inline-flex;
+        }
+        .add-to-dropdown .dropdown-menu {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            margin-top: 4px;
+            min-width: 180px;
+            max-width: 260px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+            z-index: 100;
+            padding: 4px;
+        }
+        .add-to-dropdown.open .dropdown-menu { display: block; }
+        .add-to-dropdown .dropdown-item {
+            display: block;
+            width: 100%;
+            text-align: left;
+            background: none;
+            border: none;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 0.78rem;
+            font-family: inherit;
+            color: var(--text);
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .add-to-dropdown .dropdown-item:hover { background: var(--surface2); }
+        .add-to-dropdown .dropdown-item.added { color: var(--success); cursor: default; }
+        .add-to-dropdown .dropdown-sep {
+            height: 1px;
+            background: var(--border);
+            margin: 4px 2px;
         }
 
         /* ── Status Banner ───────────────────────────────────────────── */
@@ -199,7 +280,7 @@
         }
 
         .btn-sm {
-            padding: 5px 10px;
+            padding: 3px 10px;
             font-size: 0.75rem;
         }
 
@@ -741,6 +822,10 @@
             border-radius: 0 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px);
             z-index: 10;
             box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.2);
+            transition: transform 0.25s ease;
+        }
+        body.hide-footer-scroll .chunk-actions {
+            transform: translateY(100%);
         }
 
         /* ── Toast ───────────────────────────────────────────────────── */
@@ -804,6 +889,36 @@
                 padding: 12px 14px;
                 max-width: 100% !important;
             }
+
+            /* Long collection names must never force horizontal scroll. */
+            .collection-selector select {
+                max-width: 160px;
+            }
+
+            /* Make the per-chunk action bar easier to navigate on touch:
+               larger tap targets, and the "Add to" menu constrained to the
+               card width so it can't overflow the viewport edge. */
+            .btn-sm {
+                padding: 4px 10px;
+                font-size: 0.75rem;
+            }
+            .chunk-actions {
+                gap: 6px;
+                padding: 10px 14px;
+                margin: 10px -14px -14px -14px;
+            }
+            .add-to-dropdown .dropdown-menu {
+                left: 0;
+                right: auto;
+                min-width: unset;
+                width: max-content;
+                max-width: calc(100vw - 44px);
+            }
+            .add-to-dropdown .dropdown-item {
+                padding: 8px 12px;
+                font-size: 0.82rem;
+                white-space: normal;
+            }
         }
     </style>
 </head>
@@ -822,6 +937,12 @@
             <button class="btn btn-secondary btn-sm" id="reprocessAllBtn">↩ Reprocess All</button>
             <button class="btn btn-secondary btn-sm" id="copyAllBtn">📋 Copy All</button>
             <button class="btn btn-secondary btn-sm" id="downloadAllBtn">⬇ Download .txt</button>
+            <div class="collection-selector">
+                <label for="collectionDefaultSelect">Collection:</label>
+                <select id="collectionDefaultSelect" aria-label="Default collection for this session">
+                    <option value="">None</option>
+                </select>
+            </div>
             <button class="btn btn-danger btn-sm" id="terminateBtn" style="display:none">⏹ Terminate</button>
         </div>
     </header>

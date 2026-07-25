@@ -110,6 +110,7 @@ function removeThinking(text) {
 // ─── State ────────────────────────────────────────────────────────────────────
 let sessionId = null;
 let allChunks = [];
+let chunkTitles = [];       // per-chunk titles (used by collection-view sessions)
 let prefix = '', suffix = '';
 let retryCount = 3;
 let isProcessing = false;
@@ -120,6 +121,201 @@ let processedThinking = [];  // thinking content per index (extracted from <thin
 let streamingIndex = -1;
 let reprocessingState = { isActive: false, targetIndex: -1 };
 let _terminated = false;
+
+// ─── Collections state ──────────────────────────────────────────────────────
+let collectionsList = {};     // collections map from storage
+let collectionDefaults = { global: null, perSession: {} };
+
+function resolveDefaultCollection(sessionId) {
+    const per = collectionDefaults.perSession;
+    if (Object.prototype.hasOwnProperty.call(per, sessionId)) return per[sessionId];
+    return collectionDefaults.global ?? null;
+}
+
+// Derive a default entry title from the first non-empty line of the translated
+// chunk content. Falls back to the raw source, then to the legacy "Chunk N" label.
+function defaultEntryTitle(content, rawContent, index) {
+    // Prefer translated lines first; only fall back to the raw source when the
+    // translation has no non-empty line (not merely when it's absent).
+    const firstLine = String(content || '').split(/\r?\n/).find(line => line.trim())
+        || String(rawContent || '').split(/\r?\n/).find(line => line.trim())
+        || '';
+    const trimmed = firstLine.trim();
+    // Cap the title length so a single long line doesn't break the UI.
+    return trimmed ? (trimmed.length > 120 ? trimmed.slice(0, 120) + '…' : trimmed) : `Chunk ${index + 1}`;
+}
+
+async function renderCollectionSelector() {
+    const sel = document.getElementById('collectionDefaultSelect');
+    if (!sel) return;
+    const resolved = resolveDefaultCollection(sessionId);
+    // Preserve user selection while rebuilding options.
+    const existingValue = sel.value;
+    sel.innerHTML = '<option value="">None</option>' +
+        Object.values(collectionsList).map(c =>
+            `<option value="${escapeHtml(c.id)}"${c.id === resolved ? ' selected' : ''}>${escapeHtml(c.name)}</option>`
+        ).join('');
+    // If nothing was explicitly set for this session and a global default exists, reflect it.
+    if (existingValue) sel.value = existingValue;
+    else if (resolved) sel.value = resolved;
+}
+
+document.getElementById('collectionDefaultSelect')?.addEventListener('change', async (e) => {
+    const val = e.target.value || null;
+    // Capture the prior value before mutating local state so we can roll back on failure.
+    const prior = collectionDefaults.perSession[sessionId] ?? null;
+    collectionDefaults.perSession[sessionId] = val;
+    try {
+        const res = await browser.runtime.sendMessage({ action: 'setCollectionSessionDefault', sessionId, value: val });
+        if (res?.error) throw new Error(res.error);
+    } catch (err) {
+        // Restore the previous value. Set the DOM directly rather than calling
+        // renderCollectionSelector() — that function reads sel.value from the DOM,
+        // which still holds the failed selection and would re-apply it.
+        collectionDefaults.perSession[sessionId] = prior;
+        const sel = document.getElementById('collectionDefaultSelect');
+        if (sel) sel.value = prior || '';
+        showToast(`❌ Failed to save session default: ${err.message}`, 'error');
+    }
+});
+
+// Single delegated handler: close any open "Add to" dropdown when clicking outside it.
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.add-to-dropdown')) {
+        document.querySelectorAll('.add-to-dropdown.open').forEach(d => d.classList.remove('open'));
+    }
+});
+
+function populateAddToMenu(index, menuEl) {
+    if (!menuEl) return;
+    const colls = Object.values(collectionsList);
+    if (colls.length === 0) {
+        menuEl.innerHTML = `<button class="dropdown-item" data-action="new">✨ New collection…</button>`;
+    } else {
+        menuEl.innerHTML = colls.map(c => {
+            const added = (c.entries || []).some(e => e.sessionId === sessionId && e.chunkIndex === index);
+            return `<button class="dropdown-item${added ? ' added' : ''}" data-action="add" data-id="${escapeHtml(c.id)}" ${added ? 'disabled' : ''}>${added ? '✓ ' : ''}${escapeHtml(c.name)}</button>`;
+        }).join('') +
+            `<div class="dropdown-sep"></div><button class="dropdown-item" data-action="new">✨ New collection…</button>`;
+    }
+    menuEl.querySelectorAll('.dropdown-item[data-action="add"]').forEach(btn => {
+        btn.addEventListener('click', (e) => { e.stopPropagation(); addChunkToCollection(index, btn.dataset.id); });
+    });
+    menuEl.querySelector('.dropdown-item[data-action="new"]')?.addEventListener('click', (e) => {
+        e.stopPropagation(); newCollectionAndAdd(index);
+    });
+}
+
+async function addChunkToCollection(index, collectionId) {
+    const r = processedResults[index];
+    const content = r?.content?.text || '';
+    const rawContent = r?.rawContent || allChunks[index] || '';
+    if (!content && !rawContent) { showToast('Nothing to add — chunk is empty.', 'error'); return; }
+    const coll = collectionsList[collectionId];
+    if (!coll) { showToast('❌ Collection not found.', 'error'); return; }
+    try {
+        const res = await browser.runtime.sendMessage({
+            action: 'addEntryToCollection',
+            collectionId,
+            entry: {
+                sessionId: sessionId,
+                chunkIndex: index,
+                title: defaultEntryTitle(content, rawContent, index),
+                content,
+                rawContent,
+            },
+        });
+        if (res?.error) throw new Error(res.error);
+        if (res?.alreadyPresent) { showToast('ℹ️ Already in this collection.', 'success'); }
+        else { showToast(`✅ Added to ${escapeHtml(coll.name)}!`, 'success'); }
+        // Update the in-memory cache so the checkmark reflects the new state.
+        if (!res?.alreadyPresent && coll) {
+            const existing = coll.entries.some(e => e.sessionId === sessionId && e.chunkIndex === index);
+            if (!existing) {
+                coll.entries.push({
+                    id: crypto.randomUUID(),
+                    sessionId, chunkIndex: index,
+                    title: defaultEntryTitle(content, rawContent, index),
+                    content, rawContent,
+                    addedAt: Date.now(),
+                });
+            }
+        }
+        // Refresh dropdowns.
+        populateAddToMenu(index, document.getElementById(`chunk-addto-menu-${index}`));
+    } catch (err) {
+        showToast(`❌ Failed to add to collection: ${err.message}`, 'error');
+    }
+}
+
+async function newCollectionAndAdd(index) {
+    const name = prompt('Collection name:');
+    if (!name || !name.trim()) return;
+    try {
+        const { collection } = await browser.runtime.sendMessage({
+            action: 'createCollection', name: name.trim(),
+        });
+        if (!collection) throw new Error('Failed to create collection.');
+        collectionsList[collection.id] = collection;
+        renderCollectionSelector();
+        // Refresh all dropdowns.
+        document.querySelectorAll('[id^="chunk-addto-menu-"]').forEach(m => {
+            const menuIndex = parseInt(m.id.replace('chunk-addto-menu-', ''), 10);
+            if (!isNaN(menuIndex)) populateAddToMenu(menuIndex, m);
+        });
+        await addChunkToCollection(index, collection.id);
+    } catch (err) {
+        showToast(`❌ Failed to create collection: ${err.message}`, 'error');
+    }
+}
+
+// Shared helper: auto-add a processed chunk to the resolved default collection.
+// Extracted so both the normal streaming success path and the timeout-fallback path
+// add the chunk with identical resolution, entry construction, and error handling.
+async function autoAddProcessedChunk(index, sessId) {
+    const collId = resolveDefaultCollection(sessId);
+    if (!collId) return;
+    const r = processedResults[index] || {};
+    const content = r.content?.text || '';
+    const rawContent = r.rawContent || allChunks[index] || '';
+    if (!content && !rawContent) return;
+    // Skip if the resolved collection has been deleted from the in-memory cache
+    // (e.g. removed in the options page while this session is still open) —
+    // avoids a pointless worker round-trip and a misleading error toast.
+    if (!collectionsList[collId]) return;
+    try {
+        const res = await browser.runtime.sendMessage({
+            action: 'addEntryToCollection',
+            collectionId: collId,
+            entry: {
+                sessionId: sessId,
+                chunkIndex: index,
+                title: defaultEntryTitle(content, rawContent, index),
+                content,
+                rawContent,
+            },
+        });
+        if (res?.error) throw new Error(res.error);
+        // Update the in-memory cache so the per-chunk dropdown sees the newly
+        // added entry immediately without reloading collections.
+        const coll = collectionsList[collId];
+        if (!res?.alreadyPresent && coll) {
+            const existing = coll.entries.some(e => e.sessionId === sessId && e.chunkIndex === index);
+            if (!existing) {
+                coll.entries.push({
+                    id: crypto.randomUUID(),
+                    sessionId: sessId, chunkIndex: index,
+                    title: defaultEntryTitle(content, rawContent, index),
+                    content, rawContent,
+                    addedAt: Date.now(),
+                });
+            }
+        }
+        populateAddToMenu(index, document.getElementById(`chunk-addto-menu-${index}`));
+    } catch (err) {
+        showToast(`❌ Failed to add chunk ${index + 1} to collection: ${err.message}`, 'error');
+    }
+}
 
 // ─── Image Blob Cache cleanup ─────────────────────────────────────────────────
 function cleanupImageBlobCache() {
@@ -173,18 +369,20 @@ function updateAttemptProgress(attempt, max) {
 }
 
 // ─── Build chunk cards ────────────────────────────────────────────────────────
-function buildChunkCards(chunks) {
+function buildChunkCards(chunks, titles) {
     const container = document.getElementById('chunksContainer');
     container.innerHTML = '';
+    titles = titles || [];
     chunks.forEach((raw, i) => {
         const card = document.createElement('div');
         card.className = 'chunk-card';
         card.id = `chunk-${i}`;
+        const title = titles[i] || `Chunk ${i + 1}`;
         card.innerHTML = `
       <div class="chunk-header" id="chunk-header-${i}">
         <div class="chunk-num">${i + 1}</div>
         <div class="chunk-header-info">
-          <div class="chunk-header-title">Chunk ${i + 1}</div>
+          <div class="chunk-header-title">${escapeHtml(title)}</div>
           <div class="chunk-header-preview" id="chunk-preview-${i}">${escapeHtml(raw.replace(/<[^>]*>/g, '').slice(0, 80))}…</div>
         </div>
         <span class="chunk-status-badge status-pending" id="chunk-badge-${i}">Pending</span>
@@ -202,6 +400,10 @@ function buildChunkCards(chunks) {
           <button class="btn btn-secondary btn-sm" id="chunk-copy-${i}">📋 Copy</button>
           <button class="btn btn-secondary btn-sm" id="chunk-copy-raw-${i}">📄 Copy Raw</button>
           <button class="btn btn-secondary btn-sm" id="chunk-reprocess-${i}">↩ Reprocess</button>
+          <div class="add-to-dropdown" id="chunk-addto-${i}">
+            <button class="btn btn-secondary btn-sm" id="chunk-addto-btn-${i}">⊕ Add to ▾</button>
+            <div class="dropdown-menu" id="chunk-addto-menu-${i}"></div>
+          </div>
         </div>
       </div>`;
         container.appendChild(card);
@@ -215,6 +417,22 @@ function buildChunkCards(chunks) {
         document.getElementById(`chunk-copy-${i}`).addEventListener('click', (e) => { e.stopPropagation(); copyChunk(i, 'processed'); });
         document.getElementById(`chunk-copy-raw-${i}`).addEventListener('click', (e) => { e.stopPropagation(); copyChunkRaw(i); });
         document.getElementById(`chunk-reprocess-${i}`).addEventListener('click', (e) => { e.stopPropagation(); reprocessOne(i); });
+
+        // ── "Add to collection" dropdown ─────────────────────────────────────
+        const addEl = document.getElementById(`chunk-addto-${i}`);
+        const addBtn = document.getElementById(`chunk-addto-btn-${i}`);
+        const addMenu = document.getElementById(`chunk-addto-menu-${i}`);
+        if (addEl && addBtn && addMenu) {
+            addBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // Close all other dropdowns.
+                document.querySelectorAll('.add-to-dropdown.open').forEach(d => {
+                    if (d !== addEl) d.classList.remove('open');
+                });
+                addEl.classList.toggle('open');
+                populateAddToMenu(i, addMenu);
+            });
+        }
     });
 }
 
@@ -237,6 +455,43 @@ function setMicroBar(index, mode) {
     if (mode === 'pulse') { track.classList.add('pulse'); bar.style.width = '30%'; }
     else if (mode === 'done') { track.classList.remove('pulse'); bar.style.width = '100%'; }
     else { track.classList.remove('pulse'); bar.style.width = '0%'; }
+}
+
+// ── Hide-on-scroll: hide header when scrolling down, reveal on scroll up ─────
+function initScrollHide(hideHeader, hideFooter) {
+    if (!hideHeader && !hideFooter) return;
+
+    // Anchor scroll position for the current hide/show decision. Only when the
+    // cumulative scroll from this anchor exceeds the threshold do we flip state
+    // and re-anchor — preventing flicker on small scroll movements.
+    let anchorY = window.scrollY;
+    let ticking = false;
+    const SCROLL_THRESHOLD = 120;
+
+    window.addEventListener('scroll', () => {
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(() => {
+            const y = window.scrollY;
+            const delta = y - anchorY;
+            // Only act once the user has scrolled past the header height, so the
+            // initial page load never triggers an immediate hide.
+            if (y > 80) {
+                if (delta > SCROLL_THRESHOLD) {
+                    // Scrolled down enough — hide.
+                    if (hideHeader) document.body.classList.add('hide-header-scroll');
+                    if (hideFooter) document.body.classList.add('hide-footer-scroll');
+                    anchorY = y;
+                } else if (delta < -SCROLL_THRESHOLD) {
+                    // Scrolled up enough — reveal.
+                    if (hideHeader) document.body.classList.remove('hide-header-scroll');
+                    if (hideFooter) document.body.classList.remove('hide-footer-scroll');
+                    anchorY = y;
+                }
+            }
+            ticking = false;
+        });
+    }, { passive: true });
 }
 
 // ─── Render content into a chunk ──────────────────────────────────────────────
@@ -498,9 +753,12 @@ async function processAllChunks(resume = false) {
                         processedResults[i] = { content: { parts: [result.result], text: result.result }, rawContent: allChunks[i] };
                         renderChunk(i, result.result, false);
                         await saveChunk(i, processedResults[i].content, allChunks[i]);
+                        await autoAddProcessedChunk(i, sessId);
                         success = true; break;
                     }
                     if (timedOut) { throw new Error('Streaming timed out after 5 minutes'); }
+                    // Normal streaming completion — auto-add so every successfully processed stream adds its chunk.
+                    await autoAddProcessedChunk(i, sessId);
                     success = true; break;
                 }
 
@@ -511,6 +769,7 @@ async function processAllChunks(resume = false) {
 
                 processedResults[i] = { content: { parts, text: result.result }, rawContent: allChunks[i] };
                 await saveChunk(i, processedResults[i].content, allChunks[i]);
+                await autoAddProcessedChunk(i, sessId);
                 success = true; break;
             } catch (err) {
                 if (_terminated) break;
@@ -771,7 +1030,7 @@ async function reprocessAll() {
     completedChunks = 0;
     _terminated = false;
     _streamCompleteFlags = {};
-    buildChunkCards(allChunks);
+    buildChunkCards(allChunks, chunkTitles);
     updateOverallProgress(0, totalChunks);
     await processAllChunks(false);
 }
@@ -799,17 +1058,33 @@ async function initPage() {
     prefix = session?.prefix || storedData.prefix || '';
     suffix = session?.suffix || storedData.suffix || '';
     retryCount = session?.retryCount || storedData.retryCount || 3;
+    // Optional per-chunk titles (used by collection-view sessions to show entry titles).
+    chunkTitles = Array.isArray(session?.titles) ? session.titles : [];
     totalChunks = allChunks.length;
+
+    // ── Load collection defaults + collections list ─────────────────────────
+    try {
+        const [colls, defs] = await Promise.all([
+            browser.runtime.sendMessage({ action: 'getCollections' }),
+            browser.runtime.sendMessage({ action: 'getCollectionDefaults' }),
+        ]);
+        collectionsList = colls?.collections ?? {};
+        collectionDefaults = defs?.defaults ?? { global: null, perSession: {} };
+    } catch (err) {
+        console.warn('[collections] failed to load defaults:', err);
+    }
+    renderCollectionSelector();
 
     if (!totalChunks) { showBanner('No chunks to process.', 'error'); return; }
 
-    buildChunkCards(allChunks);
+    buildChunkCards(allChunks, chunkTitles);
     updateOverallProgress(0, totalChunks);
 
     // Apply chunk text size and max width from settings
-    const { chunkFontSize = 1, chunkMaxWidth = 0 } = await browser.storage.local.get(['chunkFontSize', 'chunkMaxWidth']);
+    const { chunkFontSize = 1, chunkMaxWidth = 0, hideHeaderOnScroll = true, hideChunkFooterOnScroll = true } = await browser.storage.local.get(['chunkFontSize', 'chunkMaxWidth', 'hideHeaderOnScroll', 'hideChunkFooterOnScroll']);
     document.documentElement.style.setProperty('--chunk-font-size', `${chunkFontSize}rem`);
     document.documentElement.style.setProperty('--chunk-max-width', chunkMaxWidth > 0 ? `${chunkMaxWidth}px` : 'none');
+    initScrollHide(hideHeaderOnScroll, hideChunkFooterOnScroll);
 
     // Load saved chunks
     const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
