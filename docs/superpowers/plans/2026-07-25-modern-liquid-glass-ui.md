@@ -10,13 +10,13 @@
 
 ## Global Constraints
 
-- **Old UI is sacred:** the existing inline `<style>` blocks in [options.html](options.html) and [chunks.html](chunks.html) are modified ONLY to add a `<link>`/`<script>` in `<head>`/`<body>` and the Appearance `<section>`/nav `<button>`. Do not edit any existing selector, rule, or property in the inline CSS.
+- **Old UI is sacred:** the existing inline `<style>` blocks in [options.html](../../../options.html) and [chunks.html](../../../chunks.html) are modified ONLY to add a `<link>`/`<script>` in `<head>`/`<body>` and the Appearance `<section>`/nav `<button>`. Do not edit any existing selector, rule, or property in the inline CSS.
 - **Modern layer is additive:** every modern override in `ui-theme.css` MUST carry a `[data-ui="modern"]` ancestor prefix. No unprefixed rules in `ui-theme.css`.
 - **Reading-first:** on the chunks page, `.chunk-content-area` stays near-opaque (alpha ≥ 0.92 over a solid base), no `backdrop-filter`, no animation. Text contrast is unchanged.
 - **Reduced motion:** all ambient motion in the modern layer halts under `@media (prefers-reduced-motion: reduce)`.
 - **Fallback:** `@supports not (backdrop-filter: blur(1px))` collapses glass surfaces to opaque base colors. No broken layouts.
 - **Default:** `uiTheme` defaults to `'modern'`; an unset value is treated as `'modern'` by the boot snippet (this is the silent migration of existing users).
-- **No behavior changes:** all existing IDs, classes, and rendering logic in [chunks.js](chunks.js) and [options.js](options.js) stay the same. `uiTheme` is a normal local setting, loaded/saved like the others.
+- **No behavior changes:** all existing IDs, classes, and rendering logic in [chunks.js](../../../chunks.js) and [options.js](../../../options.js) stay the same. `uiTheme` is a normal local setting, loaded/saved like the others.
 - Commit after each task. Commit messages use `feat:` / `style:` / `chore:` prefix.
 
 ---

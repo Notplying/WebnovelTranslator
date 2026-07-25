@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-25
 **Status:** Draft, pending user review
-**Scope:** Settings page ([options.html](options.html)) and translation/chunks page ([chunks.html](chunks.html)). No popup, no injected UI (see Context).
+**Scope:** Settings page ([options.html](../../../options.html)) and translation/chunks page ([chunks.html](../../../chunks.html)). No popup, no injected UI (see Context).
 
 ## Context
 
