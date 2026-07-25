@@ -59,6 +59,31 @@
   [data-ui="modern"] body.has-chunks-aurora::before { animation: none; }
 }
 
+/* ── Type — refined scale, Apple-like calm (display is not decorative) ── */
+[data-ui="modern"] .page-header h1 { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.01em; }
+[data-ui="modern"] .card-title { font-size: 0.9rem; font-weight: 600; }
+[data-ui="modern"] .main,
+[data-ui="modern"] body { font-size: 0.875rem; }
+[data-ui="modern"] label { font-size: 0.8rem; font-weight: 500; }
+/* Mono path: replace Courier New with a modern monospace stack. */
+[data-ui="modern"] .prompt-preview,
+[data-ui="modern"] .session-id,
+[data-ui="modern"] #sessionId,
+[data-ui="modern"] .chunk-header-preview {
+  font-family: "JetBrains Mono", "SF Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+/* Micro progress bar — glass track (gradient fill unchanged). */
+[data-ui="modern"] .chunk-micro-bar {
+  background: rgba(10, 12, 20, 0.55);
+  box-shadow: inset 0 1px 0 var(--g-specular);
+}
+/* Loading spinner — refined to glass. */
+[data-ui="modern"] .spinner {
+  border: 2px solid var(--g-border);
+  border-top-color: var(--g-accent);
+}
+
 /* ── Settings page: sidebar, cards, forms, buttons, toggles ─────────── */
 [data-ui="modern"] .sidebar {
   background: var(--g-glass);
@@ -177,8 +202,8 @@
 }
 
 /* Sticky save bar — frosted. */
-[data-ui="modern"] .main > div[style*="sticky"] {
-  background: linear-gradient(transparent, rgba(10,12,20,0.85) 60%);
+[data-ui="modern"] #saveBar {
+  background: linear-gradient(transparent, var(--bg) 60%);
 }
 
 /* Few-shot example rows + collections list — glass surfaces. */
@@ -298,22 +323,8 @@
   box-shadow: 0 -6px 18px rgba(0,0,0,0.30), inset 0 1px 0 var(--g-specular);
 }
 
-/* Toast + dropdowns on chunks page. */
-[data-ui="modern"] #toast {
-  background: var(--g-glass-2);
-  backdrop-filter: var(--g-blur);
-  -webkit-backdrop-filter: var(--g-blur);
-  border: 1px solid var(--g-border);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.55), inset 0 1px 0 var(--g-specular);
-}
-[data-ui="modern"] .add-to-dropdown .dropdown-menu {
-  background: var(--g-glass-2);
-  backdrop-filter: var(--g-blur);
-  -webkit-backdrop-filter: var(--g-blur);
-  border: 1px solid var(--g-border);
-  border-radius: 12px;
-  box-shadow: 0 12px 36px rgba(0,0,0,0.5), inset 0 1px 0 var(--g-specular);
-}
+/* Toast + dropdowns on chunks page — shared rules (defined once above in the
+   Settings block; the selectors match on both pages). */
 [data-ui="modern"] .collection-selector select {
   background: rgba(10, 12, 20, 0.55);
   border: 1px solid var(--g-border);

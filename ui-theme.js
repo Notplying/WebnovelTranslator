@@ -1,9 +1,9 @@
 // ui-theme.js — shared pre-paint theme boot + toggle helper.
 // Loaded synchronously in <head> of options.html and chunks.html so the
-// data-ui attribute is set before the body paints (no FOUC). The `browser`
-// global is provided by browser-polyfill.min.js, which must load before this
-// script in pages that use it; this boot also works if `browser` is absent
-// (it falls back to the modern default).
+// data-ui attribute is set before the body paints (no FOUC). Uses the
+// `browser` global if available, else falls back to `chrome.storage`, so
+// it works in Chrome (MV3) without the polyfill; stays on the modern
+// default if neither API is present.
 
 (function () {
   const ROOT = document.documentElement;
@@ -14,9 +14,11 @@
 
   async function readAndApply() {
     try {
-      const store = (typeof browser !== 'undefined' && browser.storage)
+      const store = (typeof browser !== 'undefined' && browser.storage && browser.storage.local)
         ? browser.storage.local
-        : null;
+        : (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local)
+          ? chrome.storage.local
+          : null;
       if (!store) return;
       const { uiTheme } = await store.get('uiTheme');
       if (uiTheme === 'classic' || uiTheme === 'modern') {
@@ -32,9 +34,12 @@
     if (value !== 'classic' && value !== 'modern') value = 'modern';
     ROOT.setAttribute('data-ui', value);
     try {
-      if (typeof browser !== 'undefined' && browser.storage) {
-        await browser.storage.local.set({ uiTheme: value });
-      }
+      const store = (typeof browser !== 'undefined' && browser.storage && browser.storage.local)
+        ? browser.storage.local
+        : (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local)
+          ? chrome.storage.local
+          : null;
+      if (store) await store.set({ uiTheme: value });
     } catch (_) {}
     // Reflect the choice in any segmented control on the page.
     document.querySelectorAll('[data-ui-choice]').forEach(el => {
