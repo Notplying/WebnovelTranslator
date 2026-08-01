@@ -932,6 +932,9 @@ async function reprocessOne(index) {
     setChunkStatus(index, 'processing');
     setMicroBar(index, 'pulse');
     document.getElementById(`chunk-${index}`)?.classList.remove('collapsed');
+    // A reprocess is cancellable like a stream — surface the terminate button
+    // (process-all shows/hides it; reprocess-one must do the same).
+    document.getElementById('terminateBtn').style.display = '';
 
     const out = await runChunkAttempts({
         index,
@@ -952,6 +955,7 @@ async function reprocessOne(index) {
     });
 
     reprocessingState.isActive = false;
+    document.getElementById('terminateBtn').style.display = 'none';
     if (out.success && !out.streamed) {
         // Non-streaming + timeout-fallback render via renderAndSaveChunk; the
         // streaming path's status/toast are handled by the message listener
@@ -959,13 +963,17 @@ async function reprocessOne(index) {
         setChunkStatus(index, 'done'); setMicroBar(index, 'done');
         showToast('✅ Reprocessed!', 'success');
     } else if (out.terminated) {
-        // Terminated mid-reprocess: the wait was resolved by the terminate
-        // button and the loop stopped. Restore a sensible status instead of
-        // leaving the "Reprocessing…" placeholder and processing state behind.
-        const hasContent = !!processedResults[index]?.content?.text;
-        setChunkStatus(index, hasContent ? 'done' : 'error');
-        setMicroBar(index, hasContent ? 'done' : 'reset');
-        showToast(hasContent ? '✅ Reprocessed!' : '❌ Reprocessing cancelled', hasContent ? 'success' : 'error');
+        // Terminated mid-reprocess — mirror mid-stream termination: keep the
+        // partial content marked done when it survived, and never leave the
+        // "Reprocessing…" placeholder behind. No cancellation toast; the
+        // terminate button already told the user it stopped.
+        if (processedResults[index]?.content?.text) {
+            setChunkStatus(index, 'done'); setMicroBar(index, 'done');
+            showToast('✅ Reprocessed!', 'success');
+        } else {
+            const el = document.getElementById(`chunk-content-${index}`);
+            if (el) el.innerHTML = '';
+        }
     }
 }
 
