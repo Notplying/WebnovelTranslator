@@ -88,13 +88,25 @@ function longestCommonSuffixPrefix(oldStr, newStr) {
  * Wraps ReadableStreamDefaultReader.read() with retry logic for transient network errors.
  *
  * @param {ReadableStreamDefaultReader} reader
+ * @param {AbortSignal} [signal] - when aborted, an in-progress backoff sleep
+ *   rejects immediately instead of sleeping the full interval
  * @param {number} maxErrors - Maximum consecutive errors before throwing (default 3)
  * @param {number} baseDelayMs - Initial delay between retries in ms (default 1000)
  * @returns {Promise<{done: boolean, value: Uint8Array|null}>}
  */
-async function readWithRetry(reader, maxErrors = 3, baseDelayMs = 1000) {
+async function readWithRetry(reader, signal, maxErrors = 3, baseDelayMs = 1000) {
     let errors = 0;
     let delay = baseDelayMs;
+    const abortErr = () => { const e = new Error('Aborted'); e.name = 'AbortError'; return e; };
+    // Backoff sleep that observes cancellation: an abort during the wait must
+    // not sleep out the full interval — it rejects as AbortError immediately.
+    const waitForRetry = (ms) => {
+        if (signal && signal.aborted) return Promise.reject(abortErr());
+        return new Promise((resolve, reject) => {
+            const t = setTimeout(resolve, ms);
+            if (signal) signal.addEventListener('abort', () => { clearTimeout(t); reject(abortErr()); }, { once: true });
+        });
+    };
     while (true) {
         try {
             return await reader.read();
@@ -108,7 +120,7 @@ async function readWithRetry(reader, maxErrors = 3, baseDelayMs = 1000) {
                 errors++;
                 if (errors > maxErrors) throw e;
                 console.warn(`[Stream read] Attempt ${errors} failed: ${e.message}. Retrying in ${delay}ms...`);
-                await new Promise(r => setTimeout(r, delay));
+                await waitForRetry(delay);
                 delay *= 2; // exponential backoff: 1s → 2s → 4s
                 continue;
             }
@@ -248,9 +260,10 @@ async function streamLLM({
     let fullContent = '';
     let fullReasoning = '';
 
-    // Timeout + abort: ONE timer covers headers AND body streaming. When it
-    // fires it aborts the derived controller, so a stalled body dies too.
-    // Session abort propagates into the fetch via the same derived controller.
+    // Timeout + abort: ONE idle timer covers headers AND body streaming. It is
+    // re-armed after every successful body read, so an active (data-flowing)
+    // stream is never aborted — only a stall with no data for timeoutMs dies.
+    // Session abort propagates into the fetch via the derived controller.
     const timeoutMs = (parseInt(options.apiTimeout) || 120) * 1000;
     const derivedController = new AbortController();
     let timedOut = false;
@@ -260,7 +273,11 @@ async function streamLLM({
     // Node does not re-dispatch `abort` when the listener is added to an
     // already-aborted signal — cover that path explicitly (browser parity).
     if (signal.aborted) derivedController.abort();
-    timeoutId = setTimeout(() => { timedOut = true; derivedController.abort(); }, timeoutMs);
+    const armTimeout = () => {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => { timedOut = true; derivedController.abort(); }, timeoutMs);
+    };
+    armTimeout();
 
     try {
         const response = await fetch(buildUrl(options), {
@@ -281,8 +298,9 @@ async function streamLLM({
         let buffer = '';
         try {
             while (true) {
-                const read = await readWithRetry(reader);
+                const read = await readWithRetry(reader, derivedController.signal);
                 if (read.done) break;
+                armTimeout(); // data flowed — reset the idle timer
                 const { buffer: nextBuffer, lines } = splitSseLines(buffer, read.value, decoder,
                     descriptor.acceptsLineWithoutNewline ? (b) => b.startsWith('data: ') && b.endsWith('}') : null);
                 buffer = nextBuffer;
@@ -311,7 +329,11 @@ async function streamLLM({
         }
         return { content: fullContent, reasoning: fullReasoning };
     } catch (e) {
-        if (timedOut) throw new TimeoutError();
+        // Idle-timeout and session aborts both surface as AbortError on the
+        // derived controller; only the timer's own abort is a TimeoutError.
+        // Checking the abort identity first keeps unrelated post-timer failures
+        // from being misclassified as timeouts.
+        if (timedOut && e.name === 'AbortError') throw new TimeoutError();
         if (e.name === 'AbortError') throw new AbortError();
         throw e;
     } finally {

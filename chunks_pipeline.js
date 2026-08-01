@@ -44,7 +44,11 @@ async function runChunkAttempts({
     getExistingContent, isTerminated, onAttempt, requestChunk, waitStream, renderDirect, onFailure,
     sleep = (ms) => new Promise(r => setTimeout(r, ms)),
 }) {
-    for (let attempt = 0; attempt < retryCount; attempt++) {
+    // Normalize retryCount into a valid attempt count: zero or NaN still
+    // performs one attempt and must not fall through as "terminated".
+    const rc = Number(retryCount);
+    const attempts = Number.isFinite(rc) && rc >= 1 ? Math.floor(rc) : 1;
+    for (let attempt = 0; attempt < attempts; attempt++) {
         if (isTerminated()) break;
         onAttempt(attempt + 1);
         // Capture accumulated content as checkpoint for this retry attempt.
@@ -75,7 +79,7 @@ async function runChunkAttempts({
             return { success: true };
         } catch (err) {
             if (isTerminated()) break;
-            if (attempt === retryCount - 1) {
+            if (attempt === attempts - 1) {
                 await onFailure(err);
                 return { success: false, error: err };
             }

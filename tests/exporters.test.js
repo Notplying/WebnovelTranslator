@@ -6,7 +6,9 @@ const assert = require('node:assert/strict');
 const { crc32, buildStoreZip, buildEpub } = require('../exporters.js');
 
 const enc = (s) => new TextEncoder().encode(s);
-const dv = (u8, off = 0) => new DataView(u8.buffer, off);
+// DataView over the u8's own window (byteOffset + byteLength) so reads stay
+// inside the view — correct even for subarray inputs.
+const dv = (u8, off = 0) => new DataView(u8.buffer, u8.byteOffset + off, u8.byteLength - off);
 
 // ─── crc32 ─────────────────────────────────────────────────────────────────────
 
@@ -105,7 +107,8 @@ test('buildEpub produces a valid zip with mimetype first and all EPUB files', ()
   const entries = readZip(zip);
   assert.equal(entries[0].name, 'mimetype', 'mimetype must be first');
   const names = entries.map(e => e.name);
-  for (const want of ['mimetype', 'chapter-1.xhtml', 'chapter-2.xhtml', 'content.opf', 'META-INF/container.xml', 'toc.ncx', 'nav.xhtml']) {
+  // EPUB 3: nav.xhtml is the sole TOC (no EPUB 2-style toc.ncx).
+  for (const want of ['mimetype', 'chapter-1.xhtml', 'chapter-2.xhtml', 'content.opf', 'META-INF/container.xml', 'nav.xhtml']) {
     assert.ok(names.includes(want), `missing ${want}`);
   }
 

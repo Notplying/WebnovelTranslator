@@ -4,6 +4,9 @@
   "private": true,
   "description": "Firefox extension that translates webnovels via LLM APIs — tests only, no build.",
   "scripts": {
-    "test": "node --test tests/*.test.js"
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

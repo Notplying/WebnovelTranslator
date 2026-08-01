@@ -91,10 +91,11 @@ async function loadSettings() {
 
   // Reflect the stored theme in the toggle — without this it renders unchecked
   // (claiming Classic) while Modern is active, so the first click would be a
-  // no-op write. uiTheme is applied instantly and mirrored to localStorage
-  // (see ui-theme.js); this re-sync also heals a stale/missing mirror.
-  setField('uiTheme', settings.uiTheme !== UI_THEME.CLASSIC);
-  applyUiTheme(settings.uiTheme);
+  // no-op write. Apply first, then derive the checkbox from the NORMALIZED
+  // theme (matching the onChanged listener's ordering), so a value normalized
+  // to Classic also synchronizes the toggle.
+  const normalizedTheme = applyUiTheme(settings.uiTheme);
+  setField('uiTheme', normalizedTheme === UI_THEME.MODERN);
 
   updatePromptPreview();
 }
@@ -579,8 +580,8 @@ function renderCollectionDetail(collectionsMap) {
             rawContent: entry.rawContent,
           });
           if (res?.error) throw new Error(res.error);
-          const result = res.result;
-          const content = result.parts.join('');
+          if (!Array.isArray(res.result?.parts)) throw new Error('Malformed translation result.');
+          const content = res.result.parts.join('');
           // Persist the updated content through the serialized worker mutation.
           const upRes = await browser.runtime.sendMessage({ action: 'updateEntryContent', collectionId: _selectedCollectionId, entryId: entry.id, content });
           if (upRes?.error) throw new Error(upRes.error);
@@ -672,6 +673,7 @@ function renderCollectionDetail(collectionsMap) {
           rawContent: entry.rawContent,
         });
         if (res?.error) throw new Error(res.error);
+        if (!Array.isArray(res.result?.parts)) throw new Error('Malformed translation result.');
         const content = res.result.parts.join('');
         // Persist the updated content through the serialized worker mutation, not a full-collection write.
         const upRes = await browser.runtime.sendMessage({ action: 'updateEntryContent', collectionId: _selectedCollectionId, entryId: entry.id, content });
@@ -746,9 +748,14 @@ ${entriesHtml}
 
 function exportCollectionEPUB(collection) {
   if (!collection || !(collection.entries || []).length) { showToast('Nothing to export.', 'error'); return; }
-  const { zip, baseName } = buildEpub(collection);
-  downloadBlob(new Blob([zip], { type: 'application/epub+zip' }), `${baseName}.epub`);
-  showToast('📖 EPUB exported!', 'success');
+  try {
+    const { zip, baseName } = buildEpub(collection);
+    downloadBlob(new Blob([zip], { type: 'application/epub+zip' }), `${baseName}.epub`);
+    showToast('📖 EPUB exported!', 'success');
+  } catch (err) {
+    console.error('EPUB export failed:', err);
+    showToast('❌ EPUB export failed: ' + err.message, 'error');
+  }
 }
 
 // ─── Export ───────────────────────────────────────────────────────────────────
@@ -786,7 +793,13 @@ async function exportSettings() {
 // Only these keys may be written from an imported file (all schema settings plus
 // the user-authored data keys from settings.js). Any extra keys in the JSON are
 // silently dropped.
-const ALLOWED_IMPORT_KEYS = [...Object.keys(DEFAULTS), ...IMPORTABLE_DATA_KEYS];
+// Setting portion derived from the schema keys (DEFAULTS) minus the
+// non-setting storage keys, so the allowlist exactly matches what export
+// writes — plus the user-authored data keys from settings.js.
+const ALLOWED_IMPORT_KEYS = [
+  ...Object.keys(DEFAULTS).filter(k => !NON_SETTING_STORAGE_KEYS.includes(k)),
+  ...IMPORTABLE_DATA_KEYS,
+];
 const VALID_API_TYPES = ['gemini', 'openRouter', 'openai', 'chatgptWeb', 'geminiWeb'];
 
 async function importFromJSON(json) {
@@ -861,14 +874,10 @@ async function importFromJSON(json) {
 async function resetSettings() {
   if (!confirm('Reset ALL settings to defaults? This cannot be undone.')) return;
   try {
-    // Preserve session data
-    const toKeep = await browser.storage.local.get(['processedChunks', 'translationSessions']);
-    // Clear all storage so no legacy or webPermissions entries remain.
-    // Serialized via store so an in-flight mutation from another context
-    // (chunks page) lands before the wipe instead of being lost.
-    await clearLocal();
-    // Write defaults merged with preserved keys
-    await browser.storage.local.set({ ...DEFAULTS, ...toKeep });
+    // Preserve session data; the get→clear→set sequence runs under the
+    // store's '*' barrier (resetLocal), so an in-flight mutation from another
+    // context lands before the wipe instead of being lost.
+    await resetLocal(['processedChunks', 'translationSessions'], DEFAULTS);
   } catch (err) {
     showToast('❌ Reset failed: ' + err.message, 'error');
     return;
@@ -917,11 +926,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // UI theme toggle — instant apply, no Save button involvement.
   document.getElementById('uiTheme')?.addEventListener('change', async () => {
+    const prevTheme = document.documentElement.hasAttribute('data-ui') ? UI_THEME.MODERN : UI_THEME.CLASSIC;
     const theme = document.getElementById('uiTheme').checked ? UI_THEME.MODERN : UI_THEME.CLASSIC;
     applyUiTheme(theme);
     try {
       await setRaw('uiTheme', theme);
     } catch (err) {
+      // Persistence failed — roll back DOM + mirror to the previously applied
+      // theme so the page stays synchronized with committed storage state.
+      applyUiTheme(prevTheme);
+      setField('uiTheme', prevTheme === UI_THEME.MODERN);
       console.error('Failed to save UI theme:', err);
       showToast('❌ Failed to save UI theme.', 'error');
     }
@@ -987,8 +1001,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   // processedChunks/session write from the chunks page mid-translation).
   document.getElementById('clearResultsButton')?.addEventListener('click', async () => {
     if (!confirm('Delete all saved translation results and session history?')) return;
-    await removeKeys(['processedChunks', 'translationSessions']);
-    showToast('🗑️ All results cleared.', 'success');
+    try {
+      await removeKeys(['processedChunks', 'translationSessions']);
+      showToast('🗑️ All results cleared.', 'success');
+    } catch (err) {
+      console.error('Failed to clear results:', err);
+      showToast('❌ Failed to clear results: ' + err.message, 'error');
+    }
   });
 
   // Few-Shot management

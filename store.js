@@ -28,6 +28,12 @@ function _setChain(key, promise) {
 // Errors thrown inside fn reject the caller's promise but never stall the queue.
 // The queue itself is never allowed to reject — one failed mutation must not
 // poison every later write to the same key.
+//
+// UNSUPPORTED: calling mutate() recursively for the same key inside fn
+// deadlocks — the inner call queues behind the outer lock, which is awaiting
+// the inner. Read other keys with a raw browser.storage.local.get() instead
+// (it does not take a key lock); write other keys with setRaw()/their own
+// mutate().
 async function mutate(key, fn) {
   const prev = _chain(key);
   let settle;
@@ -93,6 +99,19 @@ async function removeKeys(keys) {
   return _barrier(() => browser.storage.local.remove(list));
 }
 
+// Serialized reset: preserves keysToKeep through the clear, then writes
+// replacements (settings DEFAULTS + preserved values) — all ordered through
+// the same '*' barrier so an in-flight mutation from another context lands
+// before the wipe instead of being lost. What remains afterwards is exactly
+// replacements (plus whatever other contexts write after the clear).
+async function resetLocal(keysToKeep, replacements) {
+  return _barrier(async () => {
+    const kept = await browser.storage.local.get(keysToKeep);
+    await browser.storage.local.clear();
+    await browser.storage.local.set({ ...replacements, ...kept });
+  });
+}
+
 // ─── Named accessors for the hot shapes ────────────────────────────────────────
 // These are thin conveniences over mutate(); the policy (caps, dedupe, eviction)
 // lives in the callers.
@@ -102,7 +121,10 @@ async function removeKeys(keys) {
 async function saveSession(sessionId, sessionDataToStore) {
   return mutate('translationSessions', async (translationSessions = []) => {
     const filtered = translationSessions.filter(s => s.id !== sessionId);
-    const sessionEntry = { id: sessionId, timestamp: Date.now(), firstChunk: sessionDataToStore.chunks[0] || '', ...sessionDataToStore };
+    // Caller data spreads FIRST so the generated identity fields (id,
+    // timestamp, firstChunk) always win — caller-provided values cannot
+    // override the session key or eviction ordering.
+    const sessionEntry = { ...sessionDataToStore, id: sessionId, timestamp: Date.now(), firstChunk: sessionDataToStore.chunks[0] || '' };
     const { maxSessions = 3 } = await browser.storage.local.get('maxSessions');
     const updated = [sessionEntry, ...filtered].sort((a, b) => b.timestamp - a.timestamp).slice(0, maxSessions);
     return { changed: true, result: updated };
@@ -111,5 +133,5 @@ async function saveSession(sessionId, sessionDataToStore) {
 
 // ─── Node test seam (fewshot.js/settings.js pattern; inert in the browser) ─────
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { mutate, clearLocal, removeKeys, setRaw, saveSession };
+  module.exports = { mutate, clearLocal, removeKeys, setRaw, resetLocal, saveSession };
 }

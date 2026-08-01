@@ -89,7 +89,7 @@ test('removeKeys deletes the listed keys and nothing else', async () => {
   assert.deepEqual(memory.get('settings'), { x: 1 }); // untouched
 });
 
-test('removeKeys waits for in-flight mutations on other keys', async () => {
+test('removeKeys serializes with an in-flight mutation on the SAME key', async () => {
   reset();
   // Queue a slow mutation on processedChunks, then removeKeys immediately.
   const slow = mutate('processedChunks', async (cur = {}) => {
@@ -101,6 +101,22 @@ test('removeKeys waits for in-flight mutations on other keys', async () => {
 
   // The slow mutation ran BEFORE the remove (removeKeys waited on the chain),
   // so its write was deleted — not silently resurrected after the wipe.
+  assert.equal(memory.get('processedChunks'), undefined);
+});
+
+test('removeKeys waits for in-flight mutations on OTHER keys, leaving them intact', async () => {
+  reset();
+  // Queue a slow mutation on collections, then removeKeys a different key.
+  const slow = mutate('collections', async (cur = {}) => {
+    await new Promise(r => setTimeout(r, 30));
+    return { changed: true, result: { ...cur, c: 1 } };
+  });
+  const removed = removeKeys(['processedChunks']);
+  await Promise.all([slow, removed]);
+
+  // The mutation completed before the removal (barrier waited on its chain)
+  // and its key is untouched by the delete.
+  assert.deepEqual(memory.get('collections'), { c: 1 });
   assert.equal(memory.get('processedChunks'), undefined);
 });
 

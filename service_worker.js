@@ -9,6 +9,14 @@ if (typeof browser === 'undefined' || !browser.runtime) {
     if (typeof WEB_PERMISSIONS === 'undefined') {
         importScripts('shared_web_permissions.js');
     }
+    // The shared modules the worker body relies on (settings schema, store
+    // primitives, collections domain, LLM seam, few-shot pool) are also
+    // background.scripts-only — import them explicitly for the Chrome SW entry.
+    if (typeof DEFAULTS === 'undefined') importScripts('settings.js');
+    if (typeof mutate === 'undefined') importScripts('store.js');
+    if (typeof getCollections === 'undefined') importScripts('collections.js');
+    if (typeof streamLLM === 'undefined') importScripts('llm.js');
+    if (typeof selectForShot === 'undefined') importScripts('fewshot.js');
 }
 // jsrsasign-all-min.js removed – no KJUR/RSAKey symbols are used in this file.
 
@@ -49,11 +57,18 @@ browser.action.onClicked.addListener(function (tab) {
 });
 
 // ─── First-install defaults ───────────────────────────────────────────────────
-// Writes the shared DEFAULTS table from settings.js so a fresh install is
-// identical to a Save All on the options page (the two used to drift).
+// Seeds each DEFAULTS entry into the storage area its schema declares, so a
+// fresh install is identical to a Save All on the options page (the two used
+// to drift). Sync-area keys (collectionIncludeInBackup) go to storage.sync.
 browser.runtime.onInstalled.addListener(function (details) {
     if (details.reason === 'install') {
-        browser.storage.local.set(DEFAULTS);
+        const local = {};
+        const sync = {};
+        for (const [key, value] of Object.entries(DEFAULTS)) {
+            (SETTINGS[key].area === 'sync' ? sync : local)[key] = value;
+        }
+        browser.storage.local.set(local);
+        if (Object.keys(sync).length) browser.storage.sync.set(sync);
     }
 });
 
@@ -94,8 +109,8 @@ const messageHandlers = {
             const session = translationSessions.find(s => s.id === m.sessionId);
             return session
                 ? { chunks: session.chunks, prefix: session.prefix, suffix: session.suffix, retryCount: session.retryCount }
-                : { chunks: [], prefix: '', suffix: '', retryCount: 3 };
-        } catch { return { chunks: [], prefix: '', suffix: '', retryCount: 3 }; }
+                : { chunks: [], prefix: '', suffix: '', retryCount: DEFAULTS.retryCount };
+        } catch { return { chunks: [], prefix: '', suffix: '', retryCount: DEFAULTS.retryCount }; }
     },
     terminateRequest: (m) => terminateRequest(m.sessionId),
     reprocessEntry: (m) => {
@@ -103,7 +118,7 @@ const messageHandlers = {
         const { sessionId, chunkIndex, prefix, suffix, retryCount } = m;
         // An empty prefix is valid (rawContent-only reprocess); reject only missing sessionId/chunkIndex or a non-string rawContent.
         if (!sessionId || chunkIndex == null || typeof m.rawContent !== 'string') throw new Error('Invalid input.');
-        return processChunk({ chunk: m.rawContent, prefix, suffix, sessionId, retryCount: retryCount ?? 3 })
+        return processChunk({ chunk: m.rawContent, prefix, suffix, sessionId, retryCount: retryCount ?? DEFAULTS.retryCount })
             .then(result => ({ success: true, result }));
     },
 
@@ -275,8 +290,13 @@ function withTemperature(body, options) {
 // Each entry is just URL/headers/body builders that read option keys.
 const HTTP_PROVIDER_CONFIGS = {
     gemini: {
-        buildUrl: (options) => `https://generativelanguage.googleapis.com/v1beta/models/${options.geminiModelId}:streamGenerateContent?key=${options.geminiApiKey}&alt=sse`,
-        buildHeaders: () => ({ 'Content-Type': 'application/json' }),
+        buildUrl: (options) => `https://generativelanguage.googleapis.com/v1beta/models/${options.geminiModelId}:streamGenerateContent?alt=sse`,
+        // The API key travels in the x-goog-api-key header, not the query
+        // string — keys must not leak into logs/URL history.
+        buildHeaders: (options) => ({
+            'Content-Type': 'application/json',
+            'x-goog-api-key': options.geminiApiKey
+        }),
         buildBody: (options, message, exampleMessages) => {
             // Gemini casts OpenAI-shaped examples to model/user roles with parts.
             const exampleContents = exampleMessages
@@ -284,9 +304,10 @@ const HTTP_PROVIDER_CONFIGS = {
             const body = {
                 contents: [...exampleContents, { role: 'user', parts: [{ text: `${message.prefix}\n${message.chunk}\n${message.suffix}` }] }],
                 generationConfig: {
-                    temperature: (v => Number.isFinite(v) ? v : 0.9)(parseFloat(options.temperature)),
-                    topK: (v => Number.isFinite(v) ? v : 40)(parseInt(options.topK)),
-                    topP: (v => Number.isFinite(v) ? v : 0.95)(parseFloat(options.topP)),
+                    // Fallbacks come from the settings schema, not local literals.
+                    temperature: (v => Number.isFinite(v) ? v : DEFAULTS.temperature)(parseFloat(options.temperature)),
+                    topK: (v => Number.isFinite(v) ? v : DEFAULTS.topK)(parseInt(options.topK)),
+                    topP: (v => Number.isFinite(v) ? v : DEFAULTS.topP)(parseFloat(options.topP)),
                     thinkingConfig: { thinkingBudget: 0 }
                 },
                 safetySettings: [

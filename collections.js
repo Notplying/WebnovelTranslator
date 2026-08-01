@@ -16,7 +16,9 @@
 // A session's default collection: its per-session override if present,
 // otherwise the global default, otherwise null.
 function resolveDefaultCollection(collectionDefaults, sessionId) {
-    const per = collectionDefaults.perSession;
+    // Tolerate partial shapes (e.g. freshly-imported defaults missing
+    // perSession) — treat a missing map as empty before the lookup.
+    const per = collectionDefaults.perSession || {};
     if (Object.prototype.hasOwnProperty.call(per, sessionId)) return per[sessionId];
     return collectionDefaults.global ?? null;
 }
@@ -189,16 +191,23 @@ async function reorderEntries(collectionId, fromIndex, toIndex) {
 
 async function getCollectionDefaults() {
     const { collectionDefaults } = await browser.storage.local.get('collectionDefaults');
-    return { defaults: collectionDefaults ?? { global: null, perSession: {} } };
+    // Normalize partial persisted shapes: preserve existing values while
+    // supplying null / {} fallbacks for the missing halves.
+    const d = collectionDefaults ?? {};
+    return { defaults: { global: d.global ?? null, perSession: d.perSession ?? {} } };
 }
 
 // Merge-based: updates only the global default, preserving per-session overrides.
 async function setCollectionGlobalDefault(value) {
     const v = value ?? null;
     await mutate('collectionDefaults', async (collectionDefaults = { global: null, perSession: {} }) => {
-        // Null/empty clears the default; any referenced collection must actually exist.
-        if (v !== null && v !== undefined && v !== '' && !(await storeHasCollection(v))) {
-            throw new Error('Invalid collection reference.');
+        // Null/empty clears the default; any referenced collection must actually
+        // exist. Read the collections key inside the same serialized mutation so
+        // a concurrent deleteCollection cannot slip between the check and the
+        // write (deleteCollection's defaults cleanup runs on this same key chain).
+        if (v !== null && v !== undefined && v !== '') {
+            const { collections = {} } = await browser.storage.local.get('collections');
+            if (!collections[v]) throw new Error('Invalid collection reference.');
         }
         collectionDefaults.global = v;
         return { changed: true, result: collectionDefaults };
@@ -210,9 +219,11 @@ async function setCollectionGlobalDefault(value) {
 async function setCollectionSessionDefault(sessionId, value) {
     if (!sessionId) throw new Error('sessionId is required.');
     await mutate('collectionDefaults', async (collectionDefaults = { global: null, perSession: {} }) => {
-        // Null/empty clears the override; any referenced collection must actually exist.
-        if (value !== null && value !== undefined && value !== '' && !(await storeHasCollection(value))) {
-            throw new Error('Invalid collection reference.');
+        // Null/empty clears the override; any referenced collection must actually
+        // exist — validated inside the serialized mutation (see above).
+        if (value !== null && value !== undefined && value !== '') {
+            const { collections = {} } = await browser.storage.local.get('collections');
+            if (!collections[value]) throw new Error('Invalid collection reference.');
         }
         if (value === null || value === undefined || value === '') delete collectionDefaults.perSession[sessionId];
         else collectionDefaults.perSession[sessionId] = value;

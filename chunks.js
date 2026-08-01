@@ -745,8 +745,15 @@ async function processAllChunks(resume = false) {
 // listener resolves the pending wait (completeStreamWait) when it sees the
 // isComplete message, and a safety timer mirrors the old 5-minute timeout.
 let _streamWaits = {};
+// Completion latch: the worker's isComplete message can beat the pipeline's
+// waitStream call (message listener and sendMessage response are separate
+// macrotasks). completeStreamWait records the completion here so the next
+// waitForStreamComplete consumes it instead of hanging for the timeout.
+let _streamCompletions = {};
 
 function waitForStreamComplete(index) {
+    // Consume a completion that arrived before this wait was registered.
+    if (_streamCompletions[index]) { delete _streamCompletions[index]; return Promise.resolve({ timedOut: false }); }
     // Self-cleaning: drop any stale wait for this index (e.g. an abandoned
     // attempt that threw before the completion message could resolve it).
     const stale = _streamWaits[index];
@@ -754,6 +761,7 @@ function waitForStreamComplete(index) {
     return new Promise(resolve => {
         const timer = setTimeout(() => {
             delete _streamWaits[index];
+            delete _streamCompletions[index];
             resolve({ timedOut: true });
         }, STREAM_TIMEOUT_MS);
         _streamWaits[index] = { resolve, timer };
@@ -763,10 +771,14 @@ function waitForStreamComplete(index) {
 // Called by the message listener when the worker's completion message arrives.
 function completeStreamWait(index) {
     const w = _streamWaits[index];
-    if (!w) return;
-    clearTimeout(w.timer);
-    delete _streamWaits[index];
-    w.resolve({ timedOut: false });
+    if (w) {
+        clearTimeout(w.timer);
+        delete _streamWaits[index];
+        w.resolve({ timedOut: false });
+        return;
+    }
+    // No waiter yet — record the completion for the imminent waitStream call.
+    _streamCompletions[index] = true;
 }
 
 
@@ -824,11 +836,15 @@ async function saveChunk(index, content, rawContent) {
         const sessChunks = processedChunks[sessId] || [];
         sessChunks[index] = { content, rawContent };
         processedChunks[sessId] = sessChunks;
-        // Evict sessions beyond maxSessions, keeping only recent ids.
+        // Evict sessions beyond maxSessions, keeping only recent ids — but never
+        // the session being written: a fresh session (no translationSessions row
+        // yet, or pushed out of maxSessions) must not have its chunks wiped.
+        // Copy before sorting — the storage snapshot is shared, never mutate it.
         const { translationSessions = [], maxSessions = 3 } = await browser.storage.local.get(['translationSessions', 'maxSessions']);
-        const recentIds = translationSessions.sort((a, b) => b.timestamp - a.timestamp).slice(0, maxSessions).map(s => s.id);
+        const recentIds = [...translationSessions].sort((a, b) => b.timestamp - a.timestamp).slice(0, maxSessions).map(s => s.id);
+        const kept = new Set([sessId, ...recentIds]);
         const filtered = {};
-        recentIds.forEach(sid => { if (processedChunks[sid]) filtered[sid] = processedChunks[sid]; });
+        kept.forEach(sid => { if (processedChunks[sid]) filtered[sid] = processedChunks[sid]; });
         return { changed: true, result: filtered };
     });
 }
@@ -988,7 +1004,11 @@ async function reprocessAll() {
     processedThinking = [];
     completedChunks = 0;
     _terminated = false;
+    // Cancel every pending safety timer before dropping the map, so no
+    // orphaned timeout fires into the void after the re-render.
+    for (const w of Object.values(_streamWaits)) clearTimeout(w.timer);
     _streamWaits = {};
+    _streamCompletions = {};
     buildChunkCards(allChunks, chunkTitles);
     updateOverallProgress(0, totalChunks);
     await processAllChunks(false);
