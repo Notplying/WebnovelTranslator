@@ -41,6 +41,7 @@
       "fewshot.js",
       "settings.js",
       "store.js",
+      "llm.js",
       "service_worker.js"
     ]
   },

@@ -22,23 +22,8 @@ const WebAutomationConfig = {
     EXECUTION_TIMEOUT_MS: 10000
 };
 
-// Per-session streaming state — keyed by sessionId so concurrent streams don't share timers or counters.
-const UPDATE_DELAY = 500;
-const sessionStreamState = {}; // { [sessionId]: { debounceTimeout, lastUpdateTime } }
-
-function getStreamState(sessionId) {
-    if (!sessionStreamState[sessionId]) {
-        sessionStreamState[sessionId] = { debounceTimeout: undefined, lastUpdateTime: 0 };
-    }
-    return sessionStreamState[sessionId];
-}
-
-function clearStreamState(sessionId) {
-    const state = sessionStreamState[sessionId];
-    if (state) clearTimeout(state.debounceTimeout);
-    delete sessionStreamState[sessionId];
-}
-
+// Per-session streaming state (debounce bookkeeping) lives in llm.js — the
+// seam owns it, keyed by sessionId so concurrent streams don't share timers.
 
 // Track tab IDs and AbortControllers per session
 let sessionTabIds = {};
@@ -392,402 +377,160 @@ async function terminateRequest(sessionId) {
 async function processChunk(message) {
     const options = await browser.storage.local.get();
     const type = options.apiType;
-    if (type === 'gemini') return processChunkWithGemini(message, options);
-
-    if (type === 'openRouter') return processChunkWithOpenRouter(message, options);
-    if (type === 'openai') return processChunkWithOpenAI(message, options);
+    if (type === 'gemini' || type === 'openRouter' || type === 'openai') {
+        return processChunkWithHttpProvider(message, options, type);
+    }
 
     if (type === 'chatgptWeb') return processChunkWithChatGPTWeb(message, options);
     if (type === 'geminiWeb') return processChunkWithGeminiWeb(message, options);
     throw new Error('Invalid API type selected');
 }
 
-/**
- * Finds the longest substring that is both a suffix of oldStr and a prefix of newStr.
- * Used to trim duplicate overlap at stream boundaries when a retry run continues
- * from where a previous run left off.
- *
- * @param {string} oldStr - The previously accumulated content (ending portion checked).
- * @param {string} newStr - The new streaming content (starting portion checked).
- * @returns {{ suffix: string, prefixLength: number }} overlap substring and chars to skip in newStr
- */
-function longestCommonSuffixPrefix(oldStr, newStr) {
-    const maxLen = Math.min(oldStr.length, newStr.length);
-    let overlapLen = 0;
-    for (let i = 1; i <= maxLen; i++) {
-        const suffix = oldStr.slice(-i);
-        if (newStr.startsWith(suffix)) overlapLen = i;
-    }
-    const suffix = overlapLen > 0 ? oldStr.slice(-overlapLen) : '';
-    return { suffix, prefixLength: overlapLen };
-}
+// ─── HTTP LLM providers ───────────────────────────────────────────────────────
+// The fetch/SSE/timeout/abort/LCS core lives in the shared llm.js seam
+// (streamLLM). Each provider shrinks to URL/headers/body builders here in the
+// worker (they read option keys) plus a descriptor row in llm.js.
+// Few-shot selection/saving is injected into the seam from fewshot.js.
 
-/**
- * Wraps ReadableStreamDefaultReader.read() with retry logic for transient network errors.
- *
- * @param {ReadableStreamDefaultReader} reader
- * @param {number} maxErrors - Maximum consecutive errors before throwing (default 3)
- * @param {number} baseDelayMs - Initial delay between retries in ms (default 1000)
- * @returns {Promise<{done: boolean, value: Uint8Array|null}>}
- */
-async function readWithRetry(reader, maxErrors = 3, baseDelayMs = 1000) {
-    let errors = 0;
-    let delay = baseDelayMs;
-    while (true) {
-        try {
-            return await reader.read();
-        } catch (e) {
-            // Do not retry on abort/cancel — these are intentional terminations
-            if (e.name === 'AbortError' || (e.name === 'TypeError' && e.message.includes('cancelled'))) {
-                throw e;
-            }
-            // TypeError with "error in input stream" or network-level failures are retryable
-            if (e.name === 'TypeError' || e.message.includes('error in input stream') || e.message.includes('network')) {
-                errors++;
-                if (errors > maxErrors) throw e;
-                console.warn(`[Stream read] Attempt ${errors} failed: ${e.message}. Retrying in ${delay}ms...`);
-                await new Promise(r => setTimeout(r, delay));
-                delay *= 2; // exponential backoff: 1s → 2s → 4s
-                continue;
-            }
-            // Any other error is non-retryable
-            throw e;
-        }
-    }
-}
+const fewShotAdapter = {
+    selectExamples: ({ maxBudgetChars, chunkText }) => selectForShot({ maxBudgetChars, chunkText }),
+    buildExampleMessages,
+    saveExample: addExample
+};
 
-// ─── Streaming helper (shared SSE logic for OpenAI-compatible APIs) ───────────
-async function processSSEStream(reader, sessionId, message, updateChunksPageFn, initialSnapshot = null) {
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let fullContent = '';
-    let fullReasoning = ''; // OpenRouter stores thinking/reasoning separately
-    let accumulatedSnapshot = initialSnapshot; // accept snapshot from caller for LCS dedup
-    try {
-        while (true) {
-            const { done, value } = await readWithRetry(reader);
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            while (true) {
-                const lineEnd = buffer.indexOf('\n');
-                if (lineEnd === -1) break;
-                const line = buffer.slice(0, lineEnd).trim();
-                buffer = buffer.slice(lineEnd + 1);
-                if (!line.startsWith('data: ')) continue;
-                const data = line.slice(6);
-                if (data === '[DONE]') break;
-                try {
-                    const parsed = JSON.parse(data);
-                    let content = parsed.choices?.[0]?.delta?.content;
-                    let reasoning = parsed.choices?.[0]?.delta?.reasoning; // OpenRouter reasoning field
-                    if (content || reasoning) {
-                        // Trim duplicate overlap at the boundary between an original run and a retry run
-                        if (accumulatedSnapshot !== null) {
-                            const { suffix, prefixLength } = longestCommonSuffixPrefix(accumulatedSnapshot, content || '');
-                            if (prefixLength > 0) {
-                                console.debug(`[SSE stream] Trimmed ${prefixLength}-char overlap at resume boundary: "${suffix}"`);
-                                content = (content || '').slice(prefixLength);
-                            }
-                            accumulatedSnapshot = null;
-                        }
-                        if (content) fullContent += content;
-                        if (reasoning) fullReasoning += reasoning;
-                        const state = getStreamState(sessionId);
-                        const now = Date.now();
-                        if (now - state.lastUpdateTime >= UPDATE_DELAY) {
-                            clearTimeout(state.debounceTimeout);
-                            updateChunksPageFn(sessionId, { action: 'updateStreamContent', content: fullContent, reasoning: fullReasoning, rawContent: message.chunk });
-                            state.lastUpdateTime = now;
-                        } else {
-                            clearTimeout(state.debounceTimeout);
-                            state.debounceTimeout = setTimeout(() => {
-                                updateChunksPageFn(sessionId, { action: 'updateStreamContent', content: fullContent, reasoning: fullReasoning, rawContent: message.chunk });
-                                state.lastUpdateTime = Date.now();
-                            }, UPDATE_DELAY);
-                        }
-                    }
-                } catch (e) {
-                    // Partial SSE chunks are expected during streaming and are non-fatal.
-                    console.debug('[SSE parse] Ignoring benign parse error:', e.message, '| raw data:', data);
-                }
-            }
-        }
-    } catch (e) {
-        // Capture accumulated content for LCS deduplication on retry
-        if (e.name === 'TypeError' || e.message.includes('input stream') || e.message.includes('network')) {
-            accumulatedSnapshot = fullContent;
-            // Throw to signal retry is needed — caller will catch and handle as error
-            throw e;
-        }
-        // Non-retryable errors propagate
-        throw e;
-    }
-    return { content: fullContent, reasoning: fullReasoning, snapshot: null };
-}
-
-// ─── Few-shot example selection (shared by API providers) ─────────────────────
-// Builds the OpenAI-shaped [{role, content}] example messages for a provider,
-// guarding selection in try/catch so a few-shot failure never breaks a
-// translation. Gemini casts role→model/parts itself; OpenRouter/OpenAI spread
-// the array as-is. Returns { chunkText, exampleMessages } so all three providers
-// share identical selection behavior.
-async function buildFewShotExampleMessages(message, options, contextWindowKey, providerLabel) {
-    const chunkText = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
-    let exampleMessages = [];
-    try {
-        if (options.fewShotEnabled) {
-            const budget = parseInt(options[contextWindowKey]) || 0;
-            const examples = await selectForShot({ maxBudgetChars: budget, chunkText });
-            exampleMessages = buildExampleMessages(examples);
-        }
-    } catch (e) { console.error(`[fewshot] ${providerLabel} example selection failed:`, e); }
-    return { chunkText, exampleMessages };
-}
-
-// ─── Gemini API ───────────────────────────────────────────────────────────────
-async function processChunkWithGemini(message, options) {
-    let tabCloseListener;
-    let fullContent = '';
-    let accumulatedSnapshot = null; // captures fullContent state at the last successful chunk; used for LCS dedup on retry
-    const controller = new AbortController();
-    const sessionId = message.sessionId;
-    sessionControllers[sessionId] = controller;
-
-    const { chunkText, exampleMessages } = await buildFewShotExampleMessages(message, options, 'geminiContextWindow', 'Gemini');
-    const exampleContents = exampleMessages
-      .map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
-
-    const requestBody = {
-        contents: [...exampleContents, { role: 'user', parts: [{ text: chunkText }] }],
-        generationConfig: {
-            temperature: (v => Number.isFinite(v) ? v : 0.9)(parseFloat(options.temperature)),
-            topK: (v => Number.isFinite(v) ? v : 40)(parseInt(options.topK)),
-            topP: (v => Number.isFinite(v) ? v : 0.95)(parseFloat(options.topP)),
-            thinkingConfig: {
-                thinkingBudget: 0,
-            }
-        },
-        safetySettings: [
-            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
-            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
-            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-        ],
-    };
-    if (options.geminiMaxTokens?.trim()) {
-        const t = parseInt(options.geminiMaxTokens);
-        if (!isNaN(t) && t > 0) requestBody.generationConfig.maxOutputTokens = t;
-    }
-
-    // AbortController-based timeout (works with the session's controller)
-    const timeoutMs = (parseInt(options.apiTimeout) || 120) * 1000;
-    let timeoutId;
-    const timeoutPromise = new Promise((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error('API response timeout')), timeoutMs);
-    });
-    const controllerWithTimeout = new AbortController();
-    const originalSignal = controller.signal;
-    originalSignal.addEventListener('abort', () => { clearTimeout(timeoutId); controllerWithTimeout.abort(); }, { once: true });
-
-    try {
-        {
-            tabCloseListener = tabId => {
-                if (tabId === sessionTabIds[sessionId]) { controller.abort(); browser.tabs.onRemoved.removeListener(tabCloseListener); delete sessionTabIds[sessionId]; }
+const HTTP_PROVIDER_CONFIGS = {
+    gemini: {
+        buildUrl: (options) => `https://generativelanguage.googleapis.com/v1beta/models/${options.geminiModelId}:streamGenerateContent?key=${options.geminiApiKey}&alt=sse`,
+        buildHeaders: () => ({ 'Content-Type': 'application/json' }),
+        buildBody: (options, message, exampleMessages) => {
+            // Gemini casts OpenAI-shaped examples to model/user roles with parts.
+            const exampleContents = exampleMessages
+                .map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
+            const body = {
+                contents: [...exampleContents, { role: 'user', parts: [{ text: `${message.prefix}\n${message.chunk}\n${message.suffix}` }] }],
+                generationConfig: {
+                    temperature: (v => Number.isFinite(v) ? v : 0.9)(parseFloat(options.temperature)),
+                    topK: (v => Number.isFinite(v) ? v : 40)(parseInt(options.topK)),
+                    topP: (v => Number.isFinite(v) ? v : 0.95)(parseFloat(options.topP)),
+                    thinkingConfig: { thinkingBudget: 0 }
+                },
+                safetySettings: [
+                    { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+                    { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+                    { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+                    { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+                ]
             };
-            browser.tabs.onRemoved.addListener(tabCloseListener);
-            updateChunksPage(sessionId, { action: 'updateStreamContent', content: '', rawContent: message.chunk, isInitial: true });
-
-            const response = await Promise.race([
-                fetch(`https://generativelanguage.googleapis.com/v1beta/models/${options.geminiModelId}:streamGenerateContent?key=${options.geminiApiKey}&alt=sse`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody), signal: controllerWithTimeout.signal,
-                }),
-                timeoutPromise
-            ]);
-            if (!response.ok) {
-                const err = await response.json().catch(() => ({}));
-                throw new Error(`HTTP ${response.status}: ${err.error?.message || ''}`);
+            if (options.geminiMaxTokens?.trim()) {
+                const t = parseInt(options.geminiMaxTokens);
+                if (!isNaN(t) && t > 0) body.generationConfig.maxOutputTokens = t;
             }
-
-            const reader = response.body?.getReader();
-            if (!reader) throw new Error('Response body not readable');
-            const decoder = new TextDecoder();
-            let buffer = '';
-            try {
-                while (true) {
-                    const { done, value } = await readWithRetry(reader);
-                    if (done) break;
-                    buffer += decoder.decode(value, { stream: true });
-                    while (true) {
-                        let lineEnd = buffer.indexOf('\n');
-                        if (lineEnd === -1 && buffer.startsWith('data: ') && buffer.endsWith('}')) lineEnd = buffer.length;
-                        else if (lineEnd === -1) break;
-                        let line = buffer.slice(0, lineEnd).trim();
-                        buffer = buffer.slice(lineEnd + 1);
-                        if (line.startsWith('data: ')) line = line.slice(6).trim();
-                        if (line === '[DONE]') break;
-                        if (!line.startsWith('{') || !line.endsWith('}')) continue;
-                        try {
-                            const parsed = JSON.parse(line);
-                            let text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
-                            if (text) {
-                                // Trim duplicate overlap at the boundary with any previous stream run
-                                if (accumulatedSnapshot !== null) {
-                                    const { suffix, prefixLength } = longestCommonSuffixPrefix(accumulatedSnapshot, text);
-                                    if (prefixLength > 0) {
-                                        console.debug(`[Gemini stream] Trimmed ${prefixLength}-char overlap at resume boundary: "${suffix}"`);
-                                        text = text.slice(prefixLength);
-                                    }
-                                    accumulatedSnapshot = null; // only deduplicate once at the boundary
-                                }
-                                if (text) fullContent += text;
-                                const state = getStreamState(sessionId);
-                                const now = Date.now();
-                                if (now - state.lastUpdateTime >= UPDATE_DELAY) {
-                                    clearTimeout(state.debounceTimeout);
-                                    updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk });
-                                    state.lastUpdateTime = now;
-                                } else {
-                                    clearTimeout(state.debounceTimeout);
-                                    state.debounceTimeout = setTimeout(() => { updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk }); state.lastUpdateTime = Date.now(); }, UPDATE_DELAY);
-                                }
-                            } else if (parsed.error) throw new Error(`Gemini Stream Error: ${parsed.error.message}`);
-                        } catch (e) {
-                            if (e.message.startsWith('Gemini Stream')) throw e;
-                            console.debug('[Gemini SSE parse] Ignoring benign parse error:', e.message, '| raw line:', line);
-                        }
-                    }
-                }
-            } finally {
-                reader.cancel().catch(() => { });
-                clearStreamState(sessionId);
-                if (tabCloseListener) browser.tabs.onRemoved.removeListener(tabCloseListener);
-                delete sessionControllers[sessionId];
-            }
-            updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk, isComplete: true });
-            if (options.fewShotEnabled && fullContent) {
-                try { await addExample({ raw: message.chunk, translation: fullContent, timestamp: Date.now() }); }
-                catch (e) { console.error('[fewshot] addExample failed:', e); }
-            }
-            await new Promise(r => setTimeout(r, 100));
-            return { result: fullContent, streaming: true, complete: true };
+            return body;
         }
-    } catch (error) {
-        // Capture accumulated content for LCS deduplication on retry
-        if (error.name === 'TypeError' || error.message.includes('input stream') || error.message.includes('network')) {
-            accumulatedSnapshot = fullContent;
+    },
+    openRouter: {
+        buildUrl: () => 'https://openrouter.ai/api/v1/chat/completions',
+        buildHeaders: (options) => ({
+            'Authorization': `Bearer ${options.openRouterApiKey}`,
+            'HTTP-Referer': 'https://addons.mozilla.org/en-US/firefox/addon/ai-webnovel-translator/',
+            'X-OpenRouter-Title': 'AI Webnovel Translator',
+            'Content-Type': 'application/json'
+        }),
+        buildBody: (options, message, exampleMessages) => {
+            const body = {
+                model: options.openRouterModelId || 'openai/gpt-4',
+                messages: [...exampleMessages, { role: 'user', content: `${message.prefix}\n${message.chunk}\n${message.suffix}` }],
+                stream: true
+            };
+            if (options.openRouterMaxTokens?.trim()) { const t = parseInt(options.openRouterMaxTokens); if (!isNaN(t) && t > 0) body.max_tokens = t; }
+            const temperature = typeof options.temperature === 'string'
+                ? parseFloat(options.temperature.trim())
+                : Number(options.temperature);
+            if (!isNaN(temperature)) body.temperature = temperature;
+            if (options.openRouterProviderOrder?.trim()) {
+                const order = options.openRouterProviderOrder.split(',').map(s => s.trim()).filter(Boolean);
+                if (order.length) body.provider = { order, allow_fallbacks: options.openRouterAllowFallback !== false };
+            }
+            return body;
         }
-        if (tabCloseListener) browser.tabs.onRemoved.removeListener(tabCloseListener);
-        delete sessionControllers[sessionId];
-        updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk, isComplete: true, error: true });
-        if (error.name === 'AbortError') return { error: 'Gemini request cancelled' };
-        return { error: `Gemini API Error: ${error.message}` };
+    },
+    openai: {
+        buildUrl: (options) => `${(options.openaiBaseUrl?.trim() || 'https://api.openai.com/v1')}/chat/completions`,
+        buildHeaders: (options) => ({
+            'Authorization': `Bearer ${options.openaiApiKey}`,
+            'Content-Type': 'application/json'
+        }),
+        buildBody: (options, message, exampleMessages) => {
+            const body = {
+                model: options.openaiModelId || 'gpt-4o-mini',
+                messages: [...exampleMessages, { role: 'user', content: `${message.prefix}\n${message.chunk}\n${message.suffix}` }],
+                stream: true
+            };
+            if (options.openaiMaxTokens?.trim()) { const t = parseInt(options.openaiMaxTokens); if (!isNaN(t) && t > 0) body.max_tokens = t; }
+            const temperature = typeof options.temperature === 'string'
+                ? parseFloat(options.temperature.trim())
+                : Number(options.temperature);
+            if (!isNaN(temperature)) body.temperature = temperature;
+            return body;
+        }
     }
-}
+};
 
-
-// ─── Generic OpenAI-compatible streaming processor ────────────────────────────
-async function processChunkWithOpenAICompatible(message, options, apiUrl, headers, requestBody, providerName) {
-    let tabCloseListener;
-    let fullContent = '';
-    let accumulatedSnapshot = null; // persists across chunk-level retries; used for LCS dedup if stream resumes
+/**
+ * Runs one HTTP-provider translation through the shared llm.js seam.
+ * Owns the browser edge: session controller, tab-close abort, stream pushes,
+ * few-shot finalize, and error-class → user-string mapping.
+ */
+async function processChunkWithHttpProvider(message, options, providerKey) {
+    const config = HTTP_PROVIDER_CONFIGS[providerKey];
     const controller = new AbortController();
     const sessionId = message.sessionId;
     sessionControllers[sessionId] = controller;
-    const isStreaming = true;
+    const label = { gemini: 'Gemini', openRouter: 'OpenRouter', openai: 'OpenAI' }[providerKey];
 
-    // AbortController-based timeout (works with the session's controller)
-    const timeoutMs = (parseInt(options.apiTimeout) || 120) * 1000;
-    let timeoutId;
-    const timeoutPromise = new Promise((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error('API response timeout')), timeoutMs);
-    });
-    const controllerWithTimeout = new AbortController();
-    const originalSignal = controller.signal;
-    originalSignal.addEventListener('abort', () => { clearTimeout(timeoutId); controllerWithTimeout.abort(); }, { once: true });
+    let tabCloseListener;
+    tabCloseListener = tabId => {
+        if (tabId === sessionTabIds[sessionId]) { controller.abort(); browser.tabs.onRemoved.removeListener(tabCloseListener); delete sessionTabIds[sessionId]; }
+    };
+    browser.tabs.onRemoved.addListener(tabCloseListener);
+    updateChunksPage(sessionId, { action: 'updateStreamContent', content: '', rawContent: message.chunk, isInitial: true });
 
     try {
-        tabCloseListener = tabId => { if (tabId === sessionTabIds[sessionId]) { controller.abort(); browser.tabs.onRemoved.removeListener(tabCloseListener); delete sessionTabIds[sessionId]; } };
-        browser.tabs.onRemoved.addListener(tabCloseListener);
-        if (isStreaming) updateChunksPage(sessionId, { action: 'updateStreamContent', content: '', rawContent: message.chunk, isInitial: true });
-
-        const response = await Promise.race([
-            fetch(apiUrl, { method: 'POST', headers, body: JSON.stringify(requestBody), signal: controllerWithTimeout.signal }),
-            timeoutPromise
-        ]);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error('Response body not readable');
-        let streamResult;
-        try {
-            streamResult = await processSSEStream(reader, sessionId, message, updateChunksPage, accumulatedSnapshot);
-            fullContent = streamResult.content;
-            accumulatedSnapshot = streamResult.snapshot;
-        } finally {
-            reader.cancel().catch(() => { });
-            clearStreamState(sessionId);
-            if (tabCloseListener) browser.tabs.onRemoved.removeListener(tabCloseListener);
-            delete sessionControllers[sessionId];
-        }
-        updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, reasoning: streamResult.reasoning || '', rawContent: message.chunk, isComplete: true });
-        if (options.fewShotEnabled && fullContent) {
-            try { await addExample({ raw: message.chunk, translation: fullContent, timestamp: Date.now() }); }
+        const { content, reasoning } = await streamLLM({
+            provider: providerKey,
+            message,
+            options,
+            signal: controller.signal,
+            buildUrl: config.buildUrl,
+            buildHeaders: config.buildHeaders,
+            buildBody: config.buildBody,
+            onDelta: (delta) => updateChunksPage(sessionId, { action: 'updateStreamContent', content: delta.content, reasoning: delta.reasoning, rawContent: message.chunk }),
+            fewShot: fewShotAdapter
+        });
+        updateChunksPage(sessionId, { action: 'updateStreamContent', content, reasoning, rawContent: message.chunk, isComplete: true });
+        if (options.fewShotEnabled && content) {
+            try { await fewShotAdapter.saveExample({ raw: message.chunk, translation: content, timestamp: Date.now() }); }
             catch (e) { console.error('[fewshot] addExample failed:', e); }
         }
         await new Promise(r => setTimeout(r, 100));
-        return { result: fullContent, streaming: true, complete: true };
+        return { result: content, parts: [content], streaming: true, complete: true };
     } catch (error) {
-        // Capture accumulated content for LCS deduplication on retry
-        if (error.name === 'TypeError' || error.message.includes('input stream') || error.message.includes('network')) {
-            accumulatedSnapshot = fullContent;
+        updateChunksPage(sessionId, { action: 'updateStreamContent', content: '', rawContent: message.chunk, isComplete: true, error: true });
+        if (error.name === 'AbortError') return { error: `${label} request cancelled` };
+        if (error.name === 'TimeoutError') return { error: `${label} request timed out` };
+        if (error.name === 'HttpError') {
+            if (error.status === 401) return { error: `${label}: Invalid API key` };
+            if (error.status === 429) return { error: `${label}: Rate limit exceeded` };
+            return { error: `${label} Error: HTTP ${error.status}${error.bodyMessage ? ': ' + error.bodyMessage : ''}` };
         }
+        return { error: `${label} Error: ${error.message}` };
+    } finally {
+        // Cleanup on BOTH success and failure — the tab-close abort listener
+        // would otherwise accumulate per processed chunk.
         if (tabCloseListener) browser.tabs.onRemoved.removeListener(tabCloseListener);
         delete sessionControllers[sessionId];
-        updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent || '', reasoning: streamResult?.reasoning || '', rawContent: message.chunk, isComplete: true, error: true });
-        if (error.name === 'AbortError') return { error: `${providerName} request cancelled` };
-        if (error.message.includes('401')) return { error: `${providerName}: Invalid API key` };
-        if (error.message.includes('429')) return { error: `${providerName}: Rate limit exceeded` };
-        return { error: `${providerName} Error: ${error.message}` };
     }
 }
-
-async function processChunkWithOpenRouter(message, options) {
-    const { chunkText, exampleMessages } = await buildFewShotExampleMessages(message, options, 'openRouterContextWindow', 'OpenRouter');
-    const requestBody = {
-        model: options.openRouterModelId || 'openai/gpt-4',
-        messages: [...exampleMessages, { role: 'user', content: chunkText }],
-        stream: true
-    };
-    if (options.openRouterMaxTokens?.trim()) { const t = parseInt(options.openRouterMaxTokens); if (!isNaN(t) && t > 0) requestBody.max_tokens = t; }
-    const temperature = typeof options.temperature === 'string'
-        ? parseFloat(options.temperature.trim())
-        : Number(options.temperature);
-    if (!isNaN(temperature)) requestBody.temperature = temperature;
-    if (options.openRouterProviderOrder?.trim()) {
-        const order = options.openRouterProviderOrder.split(',').map(s => s.trim()).filter(Boolean);
-        if (order.length) requestBody.provider = { order, allow_fallbacks: options.openRouterAllowFallback !== false };
-    }
-    const headers = { 'Authorization': `Bearer ${options.openRouterApiKey}`, 'HTTP-Referer': 'https://addons.mozilla.org/en-US/firefox/addon/ai-webnovel-translator/', 'X-OpenRouter-Title': 'AI Webnovel Translator', 'Content-Type': 'application/json' };
-    return processChunkWithOpenAICompatible(message, options, 'https://openrouter.ai/api/v1/chat/completions', headers, requestBody, 'OpenRouter');
-}
-
-async function processChunkWithOpenAI(message, options) {
-    const { chunkText, exampleMessages } = await buildFewShotExampleMessages(message, options, 'openaiContextWindow', 'OpenAI');
-    const requestBody = {
-        model: options.openaiModelId || 'gpt-4o-mini',
-        messages: [...exampleMessages, { role: 'user', content: chunkText }],
-        stream: true
-    };
-    if (options.openaiMaxTokens?.trim()) { const t = parseInt(options.openaiMaxTokens); if (!isNaN(t) && t > 0) requestBody.max_tokens = t; }
-    const temperature = typeof options.temperature === 'string'
-        ? parseFloat(options.temperature.trim())
-        : Number(options.temperature);
-    if (!isNaN(temperature)) requestBody.temperature = temperature;
-    const baseUrl = options.openaiBaseUrl?.trim() || 'https://api.openai.com/v1';
-    const headers = { 'Authorization': `Bearer ${options.openaiApiKey}`, 'Content-Type': 'application/json' };
-    return processChunkWithOpenAICompatible(message, options, `${baseUrl}/chat/completions`, headers, requestBody, 'OpenAI');
-}
-
 
 // Safely convert a URL match pattern (with * wildcards) into an anchored RegExp.
 // All regex metacharacters except * are escaped so e.g. '.' in 'chatgpt.com' is literal.
@@ -945,7 +688,7 @@ async function processChunkWithChatGPTWeb(message, options) {
             new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error('Aborted')), { once: true }))
         ]);
         if (!result?.success) throw new Error(result?.error || 'Unknown error');
-        return { result: 'Sent to ChatGPT Web', parts: ['Sent to ChatGPT Web'] };
+        return { result: 'Sent to ChatGPT Web', parts: ['Sent to ChatGPT Web'], streaming: false };
     } catch (error) {
         return { error: 'Failed to send to ChatGPT: ' + error.message };
     } finally {
@@ -988,7 +731,7 @@ async function processChunkWithGeminiWeb(message, options) {
             new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error('Aborted')), { once: true }))
         ]);
         if (!result?.success) throw new Error(result?.error || 'Unknown error');
-        return { result: 'Sent to Gemini Web', parts: ['Sent to Gemini Web'] };
+        return { result: 'Sent to Gemini Web', parts: ['Sent to Gemini Web'], streaming: false };
     } catch (error) {
         return { error: 'Failed to send to Gemini: ' + error.message };
     } finally {
