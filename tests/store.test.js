@@ -35,7 +35,7 @@ globalThis.browser = {
   },
 };
 
-const { mutate, clearLocal, saveSession } = require('../store.js');
+const { mutate, clearLocal, removeKeys, saveSession } = require('../store.js');
 
 function reset() {
   memory.clear();
@@ -106,6 +106,36 @@ test('saveSession upserts and evicts to maxSessions, newest first', async () => 
   assert.equal(translationSessions.length, 2);
   assert.equal(translationSessions[0].id, 's3'); // newest first
   assert.ok(['s1', 's2'].includes(translationSessions[1].id));
+});
+
+// ─── removeKeys atomicity ─────────────────────────────────────────────────────
+
+test('removeKeys deletes the listed keys and nothing else', async () => {
+  reset();
+  await mutate('collections', () => ({ changed: true, result: { a: 1 } }));
+  await mutate('translationSessions', () => ({ changed: true, result: [{ id: 's1' }] }));
+  await browser.storage.local.set({ settings: { x: 1 } });
+
+  await removeKeys(['collections', 'translationSessions']);
+
+  assert.equal(memory.get('collections'), undefined);
+  assert.equal(memory.get('translationSessions'), undefined);
+  assert.deepEqual(memory.get('settings'), { x: 1 }); // untouched
+});
+
+test('removeKeys waits for in-flight mutations on other keys', async () => {
+  reset();
+  // Queue a slow mutation on processedChunks, then removeKeys immediately.
+  const slow = mutate('processedChunks', async (cur = {}) => {
+    await new Promise(r => setTimeout(r, 30));
+    return { changed: true, result: { ...cur, s1: ['x'] } };
+  });
+  const removed = removeKeys(['processedChunks']);
+  await Promise.all([slow, removed]);
+
+  // The slow mutation ran BEFORE the remove (removeKeys waited on the chain),
+  // so its write was deleted — not silently resurrected after the wipe.
+  assert.equal(memory.get('processedChunks'), undefined);
 });
 
 // ─── clearLocal atomicity ──────────────────────────────────────────────────────

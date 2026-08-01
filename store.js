@@ -77,6 +77,26 @@ async function setRaw(key, value) {
   await browser.storage.local.set({ [key]: value });
 }
 
+// Whole-key delete behind the same barrier clearLocal uses: waits for every
+// in-flight per-key chain, then removes. A bare storage.local.remove([...])
+// can land between a get→mutate→set on the same key and erase the just-written
+// value — that clobber class was live in the options-page clear-results button.
+async function removeKeys(keys) {
+  const list = Array.isArray(keys) ? keys : [keys];
+  const prevs = Promise.all([..._chains.values()]);
+  let settle;
+  const run = new Promise((resolve, reject) => { settle = { resolve, reject }; });
+  _setChain('*', prevs.then(() => run).catch(() => {}));
+  await prevs;
+  try {
+    await browser.storage.local.remove(list);
+    settle.resolve({ changed: true });
+  } catch (err) {
+    settle.reject(err);
+  }
+  return run;
+}
+
 // ─── Named accessors for the hot shapes ────────────────────────────────────────
 // These are thin conveniences over mutate(); the policy (caps, dedupe, eviction)
 // lives in the callers.
@@ -105,5 +125,5 @@ async function getCollections() {
 
 // ─── Node test seam (fewshot.js/settings.js pattern; inert in the browser) ─────
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { mutate, clearLocal, setRaw, getSession, saveSession, getCollections };
+  module.exports = { mutate, clearLocal, removeKeys, setRaw, getSession, saveSession, getCollections };
 }
