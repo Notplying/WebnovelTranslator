@@ -13,7 +13,8 @@ function installStorageFake() {
       local: {
         async get(keys) {
           await new Promise(r => setTimeout(r, 0));
-          if (keys === null) return Object.fromEntries(memory);
+          // Real API: get() with no keys (undefined) or null returns everything.
+          if (keys == null) return Object.fromEntries(memory);
           if (typeof keys === 'string') return { [keys]: memory.get(keys) };
           if (Array.isArray(keys)) return Object.fromEntries(keys.map(k => [k, memory.get(k)]));
           return Object.fromEntries(Object.keys(keys).map(k => [k, memory.get(k)]));

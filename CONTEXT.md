@@ -4,7 +4,7 @@ A Firefox extension that extracts text from webnovel pages and translates it via
 
 ## Architecture
 
-The shared modules below are classic scripts loaded before consumers — in the service worker via `background.scripts` (manifest.json), and in the pages via `<script>` tags in fixed order before the page script. Each carries a `module.exports` guard at the bottom so Node can load it for tests; in the browser the top-level functions are globals. See ADR-0002 for the load-order contract.
+The shared modules below are classic scripts loaded before consumers. In the service worker there are two equivalent registration paths: `background.scripts` in manifest.json (Firefox) and `importScripts` in service_worker.js (Chrome, where MV3 `background.scripts` is unsupported) — a worker module must be registered in both to load everywhere. Worker modules: `browser-polyfill.min.js`, `shared_web_permissions.js`, `fewshot.js`, `settings.js`, `store.js`, `collections.js`, `llm.js`. Page-only modules (`utils.js`, `exporters.js`, `chunks_pipeline.js`) load via `<script>` tags in `options.html` / `chunks.html` and never touch the worker. Each module carries a `module.exports` guard at the bottom so Node can load it for tests; in the browser the top-level functions are globals. New modules may be registered through either worker path or the pages' script tags as needed — not necessarily both. See ADR-0002 for the load-order contract.
 
 **Settings schema** (`settings.js`): the single source of truth for every setting — one flat table (key → default, type, clamp, storage area, element id). Every load, save, sanitize, import and fresh-install write derives from the table, so a fresh install is structurally identical to a Save All. The `NON_SETTING_STORAGE_KEYS` list excludes non-settings keys from import/export.
 
@@ -17,8 +17,6 @@ The shared modules below are classic scripts loaded before consumers — in the 
 **Exporters** (`exporters.js`): pure file-format builders — the minimal STORE-compression ZIP (`buildStoreZip`) and the complete EPUB package (`buildEpub`), hoisted out of options.js so the bit-level logic is Node-testable. `utils.js` holds the single HTML-escaping convention (`escapeHtml`, the safe superset including `&quot;` for attribute contexts) plus `decodeHtmlEntities`.
 
 **Chunks pipeline** (`chunks_pipeline.js`): the one retry/checkpoint/timeout loop for chunk translation (`runChunkAttempts`), with browser/DOM dependencies injected so the decision tree is testable in Node. Callers in chunks.js keep only UI ceremony.
-
-## Language
 
 ## Language
 

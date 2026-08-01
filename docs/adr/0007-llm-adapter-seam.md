@@ -11,6 +11,6 @@ Five providers each re-implemented the timeout/abort dance, the SSE parse + LCS 
 ## Consequences
 
 - Five providers, one interface; a new provider is a descriptor row plus builders.
-- The result shape is uniform (`{ result, parts, streaming }`); consumer feature-detection is gone.
+- The result shape is owned by the `service_worker.js` boundary, not the seam: `streamLLM` returns `{ content, reasoning }`, and the worker maps that to `{ result, parts, streaming, complete }` when replying to the pages. Consumers of the worker (chunks.js / options.js) must not depend on the seam's shape, and seam callers must not depend on the worker's reply shape; feature-detection between them is gone.
 - Timeout, parse and debounce are written once and covered by `tests/llm.test.js` (fake `fetch` with ReadableStream bodies).
 - The seam owns per-session debounce bookkeeping, so concurrent streams don't share timers.
