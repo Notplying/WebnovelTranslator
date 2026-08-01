@@ -57,12 +57,13 @@ browser.runtime.onInstalled.addListener(function (details) {
     }
 });
 
-// ─── Message Router ───────────────────────────────────────────────────────────
-// Serialized read-modify-write lives in the shared store.js module (per-key
-// queues). mutateCollection wraps store.mutate for the collections key; the
-// mutator contract is the store's { changed, note } shape. Call sites that
-// used the old truthy-skip convention (return true = already present) are
-// migrated to return { changed: false, note: 'alreadyPresent' }.
+// ─── Message dispatch ─────────────────────────────────────────────────────────
+// One dispatch table instead of a 214-line if-chain: action → handler returning
+// a promise (or undefined for fire-and-forget). respond() owns the error
+// mapping once — handler rejections become { error } responses, and validation
+// failures are plain throws. Serialized read-modify-write lives in the shared
+// store.js module (per-key queues); mutateCollection wraps store.mutate for the
+// collections key with the store's { changed, note } mutator contract.
 
 async function mutateCollection(collectionId, mutator) {
     return mutate('collections', async (collections = {}) => {
@@ -83,85 +84,83 @@ async function storeHasCollection(id) {
     return !!collections[id];
 }
 
-browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.sessionId && sender?.tab?.id) {
-        // Validate before storing in global state
-        if (typeof message.sessionId === 'string' && message.sessionId.length > 0 && Number.isInteger(sender.tab.id)) {
-            sessionTabIds[message.sessionId] = sender.tab.id;
-        }
-    }
+// Resolves a handler's promise through sendResponse; any rejection (including
+// validation throws) becomes a { error } response. Returns true so the channel
+// stays open for the async sendResponse.
+function respond(sendResponse, promise, action) {
+    promise.then(sendResponse).catch(err => {
+        console.error(`Error handling "${action}":`, err);
+        sendResponse({ error: err.message });
+    });
+    return true;
+}
 
-    if (message.action === 'processChunk') {
-        processChunk(message)
-            .then(sendResponse)
-            .catch(error => { console.error('Error in processChunk:', error); sendResponse({ error: error.message }); });
-        return true;
-    }
-    if (message.action === 'openChunksPage') {
-        const payload = message.chunks
-            ? { chunks: message.chunks, prefix: message.prefix, suffix: message.suffix, retryCount: message.retryCount }
-            : null;
-        openChunksPage(payload)
-            .then(() => sendResponse({ success: true }))
-            .catch(error => { console.error('Error in openChunksPage:', error); sendResponse({ success: false, error: error.message }); });
-        return true;
-    }
-    if (message.action === 'updateChunksPage') {
-        updateChunksPage(message.sessionId, message.data);
-        return false;
-    }
-    if (message.action === 'getStoredData') {
-        // Read from the stored session keyed by the requested sessionId
-        browser.storage.local.get('translationSessions').then(({ translationSessions = [] }) => {
-            const session = translationSessions.find(s => s.id === message.sessionId);
-            sendResponse(session
+const messageHandlers = {
+    // ─── Chunks / sessions ────────────────────────────────────────────────
+    processChunk: (m) => processChunk(m),
+    openChunksPage: (m) => openChunksPage(
+        m.chunks
+            ? { chunks: m.chunks, prefix: m.prefix, suffix: m.suffix, retryCount: m.retryCount }
+            : null
+    ).then(() => ({ success: true })),
+    // Fire-and-forget push to the chunks tab — no response expected.
+    updateChunksPage: (m) => { updateChunksPage(m.sessionId, m.data); },
+    getStoredData: async (m) => {
+        // Read from the stored session keyed by the requested sessionId;
+        // unknown sessions and storage errors both fall back to the empty shape.
+        try {
+            const { translationSessions = [] } = await browser.storage.local.get('translationSessions');
+            const session = translationSessions.find(s => s.id === m.sessionId);
+            return session
                 ? { chunks: session.chunks, prefix: session.prefix, suffix: session.suffix, retryCount: session.retryCount }
-                : { chunks: [], prefix: '', suffix: '', retryCount: 3 }
-            );
-        }).catch(() => sendResponse({ chunks: [], prefix: '', suffix: '', retryCount: 3 }));
-        return true; // async sendResponse
-    }
-    if (message.action === 'terminateRequest') {
-        terminateRequest(message.sessionId)
-            .then(result => sendResponse(result))
-            .catch(error => sendResponse({ success: false, error: error.message }));
-        return true;
-    }
-    // ─── Collections ────────────────────────────────────────────────────────
-    if (message.action === 'getCollections') {
-        browser.storage.local.get('collections').then(({ collections = {} }) =>
-            sendResponse({ collections })).catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    if (message.action === 'createCollection') {
-        const name = (message.name || '').trim();
-        if (!name) { sendResponse({ error: 'Collection name is required.' }); return true; }
+                : { chunks: [], prefix: '', suffix: '', retryCount: 3 };
+        } catch { return { chunks: [], prefix: '', suffix: '', retryCount: 3 }; }
+    },
+    terminateRequest: (m) => terminateRequest(m.sessionId),
+    reprocessEntry: (m) => {
+        // Re-translate an entry from its rawContent using current settings.
+        const { sessionId, chunkIndex, prefix, suffix, retryCount } = m;
+        // An empty prefix is valid (rawContent-only reprocess); reject only missing sessionId/chunkIndex or a non-string rawContent.
+        if (!sessionId || chunkIndex == null || typeof m.rawContent !== 'string') throw new Error('Invalid input.');
+        return processChunk({ chunk: m.rawContent, prefix, suffix, sessionId, retryCount: retryCount ?? 3 })
+            .then(result => ({ success: true, result }));
+    },
+
+    // ─── Collections ──────────────────────────────────────────────────────
+    getCollections: async () => {
+        const { collections = {} } = await browser.storage.local.get('collections');
+        return { collections };
+    },
+    createCollection: async (m) => {
+        const name = (m.name || '').trim();
+        if (!name) throw new Error('Collection name is required.');
         const now = Date.now();
         const collection = { id: crypto.randomUUID(), name, createdAt: now, updatedAt: now, entries: [] };
         // Serialized via the store so a concurrent addEntryToCollection or
         // deleteCollection can't read a stale snapshot and clobber this write.
-        mutate('collections', (collections = {}) => {
+        await mutate('collections', (collections = {}) => {
             collections[collection.id] = collection;
             return { changed: true, result: collections };
-        }).then(() => sendResponse({ collection })).catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    if (message.action === 'updateCollection') {
-        const { collectionId, name } = message;
-        if (!collectionId || !(name || '').trim()) { sendResponse({ error: 'Invalid input.' }); return true; }
-        mutate('collections', (collections = {}) => {
+        });
+        return { collection };
+    },
+    updateCollection: async (m) => {
+        const { collectionId, name } = m;
+        if (!collectionId || !(name || '').trim()) throw new Error('Invalid input.');
+        await mutate('collections', (collections = {}) => {
             const c = collections[collectionId]; if (!c) throw new Error('Collection not found.');
             c.name = name.trim(); c.updatedAt = Date.now();
             return { changed: true, result: collections };
-        }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    if (message.action === 'deleteCollection') {
-        const { collectionId } = message;
+        });
+        return { success: true };
+    },
+    deleteCollection: async (m) => {
+        const { collectionId } = m;
+        if (!collectionId) throw new Error('Invalid input.');
         // Delete the collection, then clean up defaults referencing it. Two
         // serialized writes; the defaults cleanup is idempotent, so the small
         // window between them is safe against a concurrent create.
-        Promise.all([
+        await Promise.all([
             mutate('collections', (collections = {}) => {
                 delete collections[collectionId];
                 return { changed: true, result: collections };
@@ -174,75 +173,69 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
                 return { changed: true, result: collectionDefaults };
             })
-        ]).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    if (message.action === 'addEntryToCollection') {
-        const { collectionId, entry } = message;
-        if (!collectionId || !entry) { sendResponse({ error: 'Invalid input.' }); return true; }
+        ]);
+        return { success: true };
+    },
+    addEntryToCollection: async (m) => {
+        const { collectionId, entry } = m;
+        if (!collectionId || !entry) throw new Error('Invalid input.');
         // Validate the entry before persisting: require a non-empty sessionId and a non-negative integer chunkIndex.
-        if (!entry.sessionId || !Number.isInteger(entry.chunkIndex) || entry.chunkIndex < 0) {
-            sendResponse({ error: 'Invalid input.' }); return true;
-        }
-        mutateCollection(collectionId, c => {
+        if (!entry.sessionId || !Number.isInteger(entry.chunkIndex) || entry.chunkIndex < 0) throw new Error('Invalid input.');
+        const { note } = await mutateCollection(collectionId, c => {
             // Prevent duplicate entries from the same chunk.
             const exists = c.entries.some(e => e.sessionId === entry.sessionId && e.chunkIndex === entry.chunkIndex);
             if (exists) return { changed: false, note: 'alreadyPresent' };
             c.entries.push({ ...entry, id: crypto.randomUUID(), addedAt: Date.now() });
             return { changed: true };
-        }).then(({ note }) => sendResponse({ success: true, alreadyPresent: note === 'alreadyPresent' }))
-            .catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    if (message.action === 'removeEntryFromCollection') {
-        const { collectionId, entryId } = message;
-        if (!collectionId || !entryId) { sendResponse({ error: 'Invalid input.' }); return true; }
-        mutateCollection(collectionId, c => {
+        });
+        return { success: true, alreadyPresent: note === 'alreadyPresent' };
+    },
+    removeEntryFromCollection: async (m) => {
+        const { collectionId, entryId } = m;
+        if (!collectionId || !entryId) throw new Error('Invalid input.');
+        await mutateCollection(collectionId, c => {
             const idx = c.entries.findIndex(e => e.id === entryId);
             if (idx === -1) throw new Error('Entry not found.');
             c.entries.splice(idx, 1);
             return { changed: true };
-        }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
+        });
+        return { success: true };
+    },
     // Update a single entry's title — routed through the serialized mutation path.
-    if (message.action === 'updateEntryTitle') {
-        const { collectionId, entryId, title } = message;
-        if (!collectionId || !entryId || title == null) { sendResponse({ error: 'Invalid input.' }); return true; }
-        mutateCollection(collectionId, c => {
+    updateEntryTitle: async (m) => {
+        const { collectionId, entryId, title } = m;
+        if (!collectionId || !entryId || title == null) throw new Error('Invalid input.');
+        await mutateCollection(collectionId, c => {
             const entry = c.entries.find(e => e.id === entryId);
             if (!entry) throw new Error('Entry not found.');
             entry.title = title;
             return { changed: true };
-        }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
+        });
+        return { success: true };
+    },
     // Update a single entry's translated content (e.g. after re-processing) — serialized.
-    if (message.action === 'updateEntryContent') {
-        const { collectionId, entryId, content } = message;
-        if (!collectionId || !entryId || content == null) { sendResponse({ error: 'Invalid input.' }); return true; }
-        mutateCollection(collectionId, c => {
+    updateEntryContent: async (m) => {
+        const { collectionId, entryId, content } = m;
+        if (!collectionId || !entryId || content == null) throw new Error('Invalid input.');
+        await mutateCollection(collectionId, c => {
             const entry = c.entries.find(e => e.id === entryId);
             if (!entry) throw new Error('Entry not found.');
             entry.content = content;
             return { changed: true };
-        }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
+        });
+        return { success: true };
+    },
     // Clear all entries in a collection — serialized.
-    if (message.action === 'clearCollectionEntries') {
-        const { collectionId } = message;
-        if (!collectionId) { sendResponse({ error: 'Invalid input.' }); return true; }
-        mutateCollection(collectionId, c => {
-            c.entries = [];
-            return { changed: true };
-        }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    if (message.action === 'reorderEntries') {
-        const { collectionId, fromIndex, toIndex } = message;
-        if (!collectionId || fromIndex == null || toIndex == null) { sendResponse({ error: 'Invalid input.' }); return true; }
-        mutateCollection(collectionId, c => {
+    clearCollectionEntries: async (m) => {
+        const { collectionId } = m;
+        if (!collectionId) throw new Error('Invalid input.');
+        await mutateCollection(collectionId, c => { c.entries = []; return { changed: true }; });
+        return { success: true };
+    },
+    reorderEntries: async (m) => {
+        const { collectionId, fromIndex, toIndex } = m;
+        if (!collectionId || fromIndex == null || toIndex == null) throw new Error('Invalid input.');
+        await mutateCollection(collectionId, c => {
             // Validate the original indices are already integers within bounds before mutating.
             if (!Number.isInteger(fromIndex) || !Number.isInteger(toIndex) || fromIndex < 0 || fromIndex >= c.entries.length || toIndex < 0 || toIndex >= c.entries.length) {
                 throw new Error('Invalid fromIndex or toIndex.');
@@ -250,34 +243,31 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const [moved] = c.entries.splice(fromIndex, 1);
             c.entries.splice(toIndex, 0, moved);
             return { changed: true };
-        }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    if (message.action === 'getCollectionDefaults') {
-        browser.storage.local.get('collectionDefaults').then(({ collectionDefaults }) =>
-            sendResponse({ defaults: collectionDefaults ?? { global: null, perSession: {} } }))
-            .catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
+        });
+        return { success: true };
+    },
+    getCollectionDefaults: async () => {
+        const { collectionDefaults } = await browser.storage.local.get('collectionDefaults');
+        return { defaults: collectionDefaults ?? { global: null, perSession: {} } };
+    },
     // Merge-based: updates only the global default, preserving per-session overrides.
-    if (message.action === 'setCollectionGlobalDefault') {
-        const value = message.value ?? null;
-        mutate('collectionDefaults', async (collectionDefaults = { global: null, perSession: {} }) => {
+    setCollectionGlobalDefault: async (m) => {
+        const value = m.value ?? null;
+        await mutate('collectionDefaults', async (collectionDefaults = { global: null, perSession: {} }) => {
             // Null/empty clears the default; any referenced collection must actually exist.
             if (value !== null && value !== undefined && value !== '' && !(await storeHasCollection(value))) {
                 throw new Error('Invalid collection reference.');
             }
             collectionDefaults.global = value;
             return { changed: true, result: collectionDefaults };
-        }).then(() => sendResponse({ success: true }))
-            .catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
+        });
+        return { success: true };
+    },
     // Merge-based: updates only one session's override, preserving global + other sessions.
-    if (message.action === 'setCollectionSessionDefault') {
-        const { sessionId, value } = message;
-        if (!sessionId) { sendResponse({ error: 'sessionId is required.' }); return true; }
-        mutate('collectionDefaults', async (collectionDefaults = { global: null, perSession: {} }) => {
+    setCollectionSessionDefault: async (m) => {
+        const { sessionId, value } = m;
+        if (!sessionId) throw new Error('sessionId is required.');
+        await mutate('collectionDefaults', async (collectionDefaults = { global: null, perSession: {} }) => {
             // Null/empty clears the override; any referenced collection must actually exist.
             if (value !== null && value !== undefined && value !== '' && !(await storeHasCollection(value))) {
                 throw new Error('Invalid collection reference.');
@@ -285,21 +275,31 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             if (value === null || value === undefined || value === '') delete collectionDefaults.perSession[sessionId];
             else collectionDefaults.perSession[sessionId] = value;
             return { changed: true, result: collectionDefaults };
-        }).then(() => sendResponse({ success: true }))
-            .catch(err => sendResponse({ error: err.message }));
-        return true;
+        });
+        return { success: true };
     }
-    if (message.action === 'reprocessEntry') {
-        // Re-translate an entry from its rawContent using current settings.
-        const { sessionId, chunkIndex, prefix, suffix, retryCount } = message;
-        // An empty prefix is valid (rawContent-only reprocess); reject only missing sessionId/chunkIndex or a non-string rawContent.
-        if (!sessionId || chunkIndex == null || typeof message.rawContent !== 'string') {
-            sendResponse({ error: 'Invalid input.' }); return true;
+};
+
+browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.sessionId && sender?.tab?.id) {
+        // Validate before storing in global state
+        if (typeof message.sessionId === 'string' && message.sessionId.length > 0 && Number.isInteger(sender.tab.id)) {
+            sessionTabIds[message.sessionId] = sender.tab.id;
         }
-        processChunk({ chunk: message.rawContent, prefix, suffix, sessionId, retryCount: retryCount ?? 3 })
-            .then(result => sendResponse({ success: true, result }))
-            .catch(err => sendResponse({ error: err.message }));
-        return true;
+    }
+
+    const handler = messageHandlers[message.action];
+    if (!handler) {
+        console.warn('Unknown message action:', message.action);
+        return;
+    }
+    try {
+        const result = handler(message, sender);
+        if (result === undefined) return false; // fire-and-forget — no response expected
+        return respond(sendResponse, result, message.action);
+    } catch (err) {
+        // Synchronous validation throws from non-async handlers.
+        return respond(sendResponse, Promise.reject(err), message.action);
     }
 });
 

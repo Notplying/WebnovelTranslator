@@ -1166,10 +1166,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Reset
   document.getElementById('resetButton')?.addEventListener('click', resetSettings);
 
-  // Clear results
+  // Clear results — routed through the store's removeKeys so the delete waits
+  // for any in-flight per-key chain (a raw remove() could erase a just-written
+  // processedChunks/session write from the chunks page mid-translation).
   document.getElementById('clearResultsButton')?.addEventListener('click', async () => {
     if (!confirm('Delete all saved translation results and session history?')) return;
-    await browser.storage.local.remove(['processedChunks', 'translationSessions']);
+    await removeKeys(['processedChunks', 'translationSessions']);
     showToast('🗑️ All results cleared.', 'success');
   });
 
