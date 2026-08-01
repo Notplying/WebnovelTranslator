@@ -118,12 +118,7 @@ async function saveSession(sessionId, sessionDataToStore) {
   });
 }
 
-async function getCollections() {
-  const { collections = {} } = await browser.storage.local.get('collections');
-  return collections;
-}
-
 // ─── Node test seam (fewshot.js/settings.js pattern; inert in the browser) ─────
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { mutate, clearLocal, removeKeys, setRaw, getSession, saveSession, getCollections };
+  module.exports = { mutate, clearLocal, removeKeys, setRaw, getSession, saveSession };
 }
