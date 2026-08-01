@@ -655,6 +655,25 @@ function renderThinkingSection(index) {
 }
 
 // ─── Process all chunks sequentially ─────────────────────────────────────────
+// The retry/checkpoint/timeout loop lives in chunks_pipeline.js
+// (runChunkAttempts); this function keeps only the per-chunk UI ceremony and
+// the auto-add-to-collection step.
+
+// Shared deps for runChunkAttempts — identical for process-all and reprocess.
+function requestChunkFor(sessId, chunk, checkpointPrefix, suffix) {
+    return browser.runtime.sendMessage({ action: 'processChunk', chunk, prefix: checkpointPrefix, suffix, sessionId: sessId });
+}
+
+// Render + persist a completed (non-streamed) result — used by the
+// non-streaming path and the safety-timeout fallback alike.
+async function renderAndSaveChunk(index, result) {
+    const parts = result.parts || [result.result];
+    if (parts.length > 1) renderMultiPart(index, parts);
+    else renderChunk(index, result.result, false);
+    processedResults[index] = { content: { parts, text: result.result }, rawContent: allChunks[index] };
+    await saveChunk(index, processedResults[index].content, allChunks[index]);
+}
+
 async function processAllChunks(resume = false) {
     const sessId = getSessionId();
     if (!sessId) { showBanner('No session ID — cannot process chunks.', 'error'); isProcessing = false; return; }
@@ -675,70 +694,26 @@ async function processAllChunks(resume = false) {
         const card = document.getElementById(`chunk-${i}`);
         card?.classList.remove('collapsed');
 
-        let success = false;
-        for (let attempt = 0; attempt < retryCount; attempt++) {
-            if (_terminated) break;
-            _streamCompleteFlags[i] = false; // Reset per-chunk streaming state before each retry
-            updateAttemptProgress(attempt + 1, retryCount);
-            // Capture accumulated content as checkpoint for this retry attempt.
-            // Uses a minimal directive to avoid confusing LLMs that might echo the marker text.
-            const existingContent = processedResults[i]?.content?.text || null;
-            const checkpointPrefix = existingContent
-                ? `${prefix}\n\nContinue from the following content:\n${existingContent}\n\n`
-                : prefix;
-            try {
-                const result = await browser.runtime.sendMessage({
-                    action: 'processChunk',
-                    chunk: allChunks[i],
-                    prefix: checkpointPrefix,
-                    suffix,
-                    sessionId: sessId
-                });
-
-                if (_terminated) break;
-                if (result.error) throw new Error(result.error);
-
-                if (result.streaming) {
-                    // Streaming updates come via message listener; wait for them
-                    const { timedOut } = await waitForStreamComplete(i);
-                    if (_terminated) { success = !!processedResults[i]?.content?.text; break; }
-                    // If safety timeout fired but we have a direct response, use it instead of retrying
-                    if (timedOut && result.result) {
-                        processedResults[i] = { content: { parts: [result.result], text: result.result }, rawContent: allChunks[i] };
-                        renderChunk(i, result.result, false);
-                        await saveChunk(i, processedResults[i].content, allChunks[i]);
-                        await autoAddProcessedChunk(i, sessId);
-                        success = true; break;
-                    }
-                    if (timedOut) { throw new Error('Streaming timed out after 5 minutes'); }
-                    // Normal streaming completion — auto-add so every successfully processed stream adds its chunk.
-                    await autoAddProcessedChunk(i, sessId);
-                    success = true; break;
-                }
-
-                // Non-streaming
-                const parts = result.parts;
-                if (parts.length > 1) renderMultiPart(i, parts);
-                else renderChunk(i, result.result, false);
-
-                processedResults[i] = { content: { parts, text: result.result }, rawContent: allChunks[i] };
-                await saveChunk(i, processedResults[i].content, allChunks[i]);
-                await autoAddProcessedChunk(i, sessId);
-                success = true; break;
-            } catch (err) {
-                if (_terminated) break;
-                console.error(`Chunk ${i} attempt ${attempt + 1} failed:`, err);
-                if (attempt === retryCount - 1) {
-                    const errEl = document.getElementById(`chunk-content-${i}`);
-                    if (errEl) errEl.innerHTML = `<div class="chunk-error-box">❌ ${escapeHtml(err.message)}</div>`;
-                    setChunkStatus(i, 'error');
-                    setMicroBar(i, 'reset');
-                    showBanner(`Chunk ${i + 1} failed: ${err.message}`, 'error');
-                } else {
-                    await new Promise(r => setTimeout(r, 7000));
-                }
-            }
-        }
+        const out = await runChunkAttempts({
+            index: i,
+            chunk: allChunks[i],
+            pfx: prefix, sfx: suffix,
+            retryCount,
+            getExistingContent: () => processedResults[i]?.content?.text || null,
+            isTerminated: () => _terminated,
+            onAttempt: (n) => updateAttemptProgress(n, retryCount),
+            requestChunk: ({ chunk, checkpointPrefix, suffix }) => requestChunkFor(sessId, chunk, checkpointPrefix, suffix),
+            waitStream: waitForStreamComplete,
+            renderDirect: renderAndSaveChunk,
+            onFailure: async (err) => {
+                console.error(`Chunk ${i} failed after ${retryCount} attempts:`, err);
+                const errEl = document.getElementById(`chunk-content-${i}`);
+                if (errEl) errEl.innerHTML = `<div class="chunk-error-box">❌ ${escapeHtml(err.message)}</div>`;
+                setChunkStatus(i, 'error');
+                setMicroBar(i, 'reset');
+                showBanner(`Chunk ${i + 1} failed: ${err.message}`, 'error');
+            },
+        });
 
         if (_terminated) {
             // Mark current chunk as done if it has content
@@ -748,7 +723,15 @@ async function processAllChunks(resume = false) {
             }
             break;
         }
-        if (success) { setChunkStatus(i, 'done'); setMicroBar(i, 'done'); completedChunks = i + 1; updateOverallProgress(completedChunks, totalChunks); updateAttemptProgress(0, retryCount); }
+        if (out.success) {
+            // Auto-add so every successfully processed chunk lands in its
+            // resolved default collection (streaming, timeout-fallback and
+            // non-streaming paths alike).
+            await autoAddProcessedChunk(i, sessId);
+            setChunkStatus(i, 'done'); setMicroBar(i, 'done');
+            completedChunks = i + 1; updateOverallProgress(completedChunks, totalChunks);
+            updateAttemptProgress(0, retryCount);
+        }
     }
 
     isProcessing = false; streamingIndex = -1;
@@ -759,21 +742,34 @@ async function processAllChunks(resume = false) {
 }
 
 // ─── Streaming wait ───────────────────────────────────────────────────────────
+// Promise-based completion instead of the old 200 ms poll over a shared flag
+// map. The worker still pushes updateStreamContent messages; the message
+// listener resolves the pending wait (completeStreamWait) when it sees the
+// isComplete message, and a safety timer mirrors the old 5-minute timeout.
+let _streamWaits = {};
+
 function waitForStreamComplete(index) {
+    // Self-cleaning: drop any stale wait for this index (e.g. an abandoned
+    // attempt that threw before the completion message could resolve it).
+    const stale = _streamWaits[index];
+    if (stale) { clearTimeout(stale.timer); delete _streamWaits[index]; stale.resolve({ timedOut: true }); }
     return new Promise(resolve => {
-        const check = setInterval(() => {
-            if (!isStreamingActive(index)) { clearInterval(check); resolve({ timedOut: false }); }
-        }, 200);
-        // Safety timeout 5 min — signal timeout so caller can treat as failure
-        setTimeout(() => {
-            clearInterval(check);
+        const timer = setTimeout(() => {
+            delete _streamWaits[index];
             resolve({ timedOut: true });
-        }, 300000);
+        }, STREAM_TIMEOUT_MS);
+        _streamWaits[index] = { resolve, timer };
     });
 }
 
-let _streamCompleteFlags = {};
-function isStreamingActive(index) { return !_streamCompleteFlags[index]; }
+// Called by the message listener when the worker's completion message arrives.
+function completeStreamWait(index) {
+    const w = _streamWaits[index];
+    if (!w) return;
+    clearTimeout(w.timer);
+    delete _streamWaits[index];
+    w.resolve({ timedOut: false });
+}
 
 
 // ─── Message handler (streaming updates from service worker) ──────────────────
@@ -801,7 +797,7 @@ browser.runtime.onMessage.addListener((msg) => {
         }
 
         if (msg.isComplete) {
-            _streamCompleteFlags[index] = true;
+            completeStreamWait(index);
             const text = msg.content || '';
             if (text) {
                 processedResults[index] = { content: { parts: [text], text }, rawContent: msg.rawContent || allChunks[index] };
@@ -929,52 +925,35 @@ async function reprocessOne(index) {
     if (contentEl) contentEl.innerHTML = '<em style="color:var(--text-muted)">Reprocessing…</em>';
 
     reprocessingState = { isActive: true, targetIndex: index };
-    _streamCompleteFlags[index] = false;
     setChunkStatus(index, 'processing');
     setMicroBar(index, 'pulse');
     document.getElementById(`chunk-${index}`)?.classList.remove('collapsed');
 
-    for (let attempt = 0; attempt < rc; attempt++) {
-        _streamCompleteFlags[index] = false; // Reset per-chunk streaming state before each retry
-        updateAttemptProgress(attempt + 1, rc);
-        // Recompute checkpoint from current partial output each attempt (supports streaming resume)
-        const currentContent = processedResults[index]?.content?.text || null;
-        const checkpointPrefix = currentContent ? `${pfx}\n\nContinue from the following content:\n${currentContent}\n\n` : pfx;
-        try {
-            const result = await browser.runtime.sendMessage({ action: 'processChunk', chunk: allChunks[index], prefix: checkpointPrefix, suffix: sfx, sessionId: sessId });
-            if (result.error) throw new Error(result.error);
-            if (result.streaming) {
-                const { timedOut } = await waitForStreamComplete(index);
-                reprocessingState.isActive = false;
-                // If safety timeout fired but we have a direct response, use it instead of retrying
-                if (timedOut && result.result) {
-                    processedResults[index] = { content: { parts: [result.result], text: result.result }, rawContent: allChunks[index] };
-                    renderChunk(index, result.result, false);
-                    await saveChunk(index, processedResults[index].content, allChunks[index]);
-                    setChunkStatus(index, 'done'); setMicroBar(index, 'done');
-                    showToast('✅ Reprocessed!', 'success');
-                    return;
-                }
-                if (timedOut) { throw new Error('Streaming timed out after 5 minutes'); }
-                return;
-            }
-            const parts = result.parts;
-            parts.length > 1 ? renderMultiPart(index, parts) : renderChunk(index, result.result, false);
-            processedResults[index] = { content: { parts, text: result.result }, rawContent: allChunks[index] };
-            await saveChunk(index, processedResults[index].content, allChunks[index]);
-            setChunkStatus(index, 'done'); setMicroBar(index, 'done');
-            showToast('✅ Reprocessed!', 'success');
-            reprocessingState.isActive = false;
-            return;
-        } catch (err) {
-            if (attempt === rc - 1) {
-                showToast(`❌ Reprocess failed: ${err.message}`, 'error');
-                setChunkStatus(index, 'error'); setMicroBar(index, 'reset');
-                reprocessingState.isActive = false;
-                return;
-            }
-            await new Promise(r => setTimeout(r, 7000));
-        }
+    const out = await runChunkAttempts({
+        index,
+        chunk: allChunks[index],
+        pfx, sfx,
+        retryCount: rc,
+        getExistingContent: () => processedResults[index]?.content?.text || null,
+        isTerminated: () => _terminated,
+        onAttempt: (n) => updateAttemptProgress(n, rc),
+        requestChunk: ({ chunk, checkpointPrefix, suffix }) => requestChunkFor(sessId, chunk, checkpointPrefix, suffix),
+        waitStream: waitForStreamComplete,
+        renderDirect: renderAndSaveChunk,
+        onFailure: async (err) => {
+            console.error(`Chunk ${index} reprocess failed after ${rc} attempts:`, err);
+            showToast(`❌ Reprocess failed: ${err.message}`, 'error');
+            setChunkStatus(index, 'error'); setMicroBar(index, 'reset');
+        },
+    });
+
+    reprocessingState.isActive = false;
+    if (out.success && !out.streamed) {
+        // Non-streaming + timeout-fallback render via renderAndSaveChunk; the
+        // streaming path's status/toast are handled by the message listener
+        // when the completion message arrived, so skip the duplicate UI here.
+        setChunkStatus(index, 'done'); setMicroBar(index, 'done');
+        showToast('✅ Reprocessed!', 'success');
     }
 }
 
@@ -991,14 +970,20 @@ async function reprocessAll() {
     processedThinking = [];
     completedChunks = 0;
     _terminated = false;
-    _streamCompleteFlags = {};
+    _streamWaits = {};
     buildChunkCards(allChunks, chunkTitles);
     updateOverallProgress(0, totalChunks);
     await processAllChunks(false);
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
+let _initStarted = false;
 async function initPage() {
+    // Idempotence guard: the worker's initializeChunksPage message and the
+    // 500 ms fallback timer can both fire — without this, buildChunkCards and
+    // processAllChunks would run twice and double-translate.
+    if (_initStarted) return;
+    _initStarted = true;
     cleanupImageBlobCache(); // Clear any leftover Blob URLs from previous sessions
     sessionId = getSessionId();
     document.getElementById('sessionId').textContent = sessionId ? `Session: ${sessionId.slice(0, 12)}…` : 'No session';
@@ -1062,7 +1047,6 @@ async function initPage() {
         if (parts.length > 1) renderMultiPart(i, parts);
         else renderChunk(i, parts[0] || '', false);
         setChunkStatus(i, 'done'); setMicroBar(i, 'done');
-        _streamCompleteFlags[i] = true;
         completedChunks++;
         document.getElementById(`chunk-${i}`)?.classList.add('collapsed');
         hasPartial = true;
@@ -1091,7 +1075,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('terminateBtn')?.addEventListener('click', async () => {
         const idx = streamingIndex; // Save before anything changes
         _terminated = true;
-        if (idx >= 0) _streamCompleteFlags[idx] = true;
+        if (idx >= 0) completeStreamWait(idx); // unblock the streaming wait; the loop breaks on _terminated
 
         try {
             await browser.runtime.sendMessage({ action: 'terminateRequest', sessionId: getSessionId() });
