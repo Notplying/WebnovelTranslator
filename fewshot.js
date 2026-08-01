@@ -14,30 +14,21 @@ function makeId(timestamp) {
 
 // ─── Auto pool (rolling recent translations) ──────────────────────────────────
 // fewShotExamples: array newest-first. Each pair: { id, raw, translation, timestamp }.
-// Serialize the read-modify-write: the SW is single-threaded, but `storage.local`
-// reads await, so two concurrent sessions completing a chunk can interleave a
-// get→set and drop an example. Chain each addExample onto the previous one so
-// only one write runs at a time (same shape as service_worker's updateSessionStorage).
-let _addExampleLock = Promise.resolve();
+// Serialized read-modify-write via store.js mutate — the SW is single-threaded,
+// but storage.local reads await, so two concurrent sessions completing a chunk
+// could otherwise interleave a get→set and drop an example.
 async function addExample({ raw, translation, timestamp }) {
   if (!raw || !translation) return;
-  const prev = _addExampleLock;
-  let releaseLock;
-  _addExampleLock = new Promise(resolve => { releaseLock = resolve; });
-  await prev;
-  try {
-    const { fewShotExamples = [], fewShotMaxExamples = 20 } =
-      await browser.storage.local.get(['fewShotExamples', 'fewShotMaxExamples']);
+  await mutate('fewShotExamples', async (fewShotExamples = []) => {
     // Dedupe by raw: drop any existing entry with the same raw text.
     const filtered = fewShotExamples.filter(e => e.raw !== raw);
     // Newest-first: prepend the new pair.
     const updated = [{ id: makeId(timestamp), raw, translation, timestamp }, ...filtered];
     // Cap to fewShotMaxExamples (drop oldest = tail).
+    const { fewShotMaxExamples = 20 } = await browser.storage.local.get('fewShotMaxExamples');
     const capped = updated.slice(0, Math.max(1, fewShotMaxExamples));
-    await browser.storage.local.set({ fewShotExamples: capped });
-  } finally {
-    releaseLock();
-  }
+    return { changed: true, result: capped };
+  });
 }
 
 async function getExamples() {
@@ -53,11 +44,14 @@ async function clearExamples() {
 // fewShotCustomExamples: array, insertion order (append). Each pair like above.
 async function addCustomExample({ raw, translation, timestamp }) {
   if (!raw || !translation) return null;
-  const { fewShotCustomExamples = [] } = await browser.storage.local.get('fewShotCustomExamples');
-  const entry = { id: makeId(timestamp), raw, translation, timestamp };
-  const updated = [...fewShotCustomExamples, entry];
-  await browser.storage.local.set({ fewShotCustomExamples: updated });
-  return entry.id;
+  let entryId = null;
+  await mutate('fewShotCustomExamples', (fewShotCustomExamples = []) => {
+    const entry = { id: makeId(timestamp), raw, translation, timestamp };
+    entryId = entry.id;
+    const updated = [...fewShotCustomExamples, entry];
+    return { changed: true, result: updated };
+  });
+  return entryId;
 }
 
 async function getCustomExamples() {
@@ -66,9 +60,10 @@ async function getCustomExamples() {
 }
 
 async function removeCustomExample(id) {
-  const { fewShotCustomExamples = [] } = await browser.storage.local.get('fewShotCustomExamples');
-  const updated = fewShotCustomExamples.filter(e => e.id !== id);
-  await browser.storage.local.set({ fewShotCustomExamples: updated });
+  await mutate('fewShotCustomExamples', (fewShotCustomExamples = []) => {
+    const updated = fewShotCustomExamples.filter(e => e.id !== id);
+    return { changed: true, result: updated };
+  });
 }
 
 async function clearCustomExamples() {
