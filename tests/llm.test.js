@@ -113,28 +113,6 @@ test('gemini stream-level error event is thrown, not swallowed as benign', async
     );
 });
 
-// ─── LCS dedup through the seam ────────────────────────────────────────────────
-
-test('initialSnapshot trims duplicated overlap at first delta', async () => {
-    globalThis.fetch = async () => {
-        return sseResponse([
-            encoder.encode('data: {"choices":[{"delta":{"content":"abcdefghij"}}]}\n\n'),
-            encoder.encode('data: [DONE]\n\n')
-        ]);
-    };
-
-    const { content } = await streamLLM({
-        provider: 'openai',
-        message: baseMessage,
-        options: baseOptions,
-        signal: new AbortController().signal,
-        initialSnapshot: 'abcdef',
-        buildUrl: () => 'x', buildHeaders: () => ({}), buildBody: () => ({})
-    });
-
-    assert.equal(content, 'ghij');
-});
-
 // ─── Error classification ──────────────────────────────────────────────────────
 
 test('non-ok response throws HttpError with parsed body for gemini', async () => {

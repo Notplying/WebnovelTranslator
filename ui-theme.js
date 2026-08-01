@@ -23,6 +23,12 @@ function applyUiTheme(value) {
   } else {
     document.documentElement.removeAttribute('data-ui');
   }
-  localStorage.setItem('uiTheme', theme);
+  try {
+    localStorage.setItem('uiTheme', theme);
+  } catch (e) {
+    // Storage may be disabled (private browsing / blocked) — the data-ui
+    // attribute above is already applied, so the page is themed correctly;
+    // only the pre-paint mirror is lost.
+  }
   return theme;
 }

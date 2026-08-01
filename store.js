@@ -50,24 +50,31 @@ async function mutate(key, fn) {
   return run;
 }
 
-// Serialized full-clear of browser.storage.local. Waits for every in-flight
-// per-key chain before clearing, so a mutation already queued from another
-// context (options page, chunks page) lands before the wipe rather than being
-// silently lost between the clear and a later re-set. Writes that start after
-// the clear are inherently racy — same semantics as storage.local.clear().
-async function clearLocal() {
+// The whole-key barrier clearLocal and removeKeys share: wait for every
+// in-flight per-key chain, run the storage op, then release. Chains the
+// barrier itself on '*' so a second barrier queues behind the first.
+async function _barrier(fn) {
   const prevs = Promise.all([..._chains.values()]);
   let settle;
   const run = new Promise((resolve, reject) => { settle = { resolve, reject }; });
   _setChain('*', prevs.then(() => run).catch(() => {}));
   await prevs;
   try {
-    await browser.storage.local.clear();
+    await fn();
     settle.resolve({ changed: true });
   } catch (err) {
     settle.reject(err);
   }
   return run;
+}
+
+// Serialized full-clear of browser.storage.local. Waits for every in-flight
+// per-key chain before clearing, so a mutation already queued from another
+// context (options page, chunks page) lands before the wipe rather than being
+// silently lost between the clear and a later re-set. Writes that start after
+// the clear are inherently racy — same semantics as storage.local.clear().
+async function clearLocal() {
+  return _barrier(() => browser.storage.local.clear());
 }
 
 // Unlocked single-key write. Safe because a plain set() cannot lose data to
@@ -83,28 +90,12 @@ async function setRaw(key, value) {
 // value — that clobber class was live in the options-page clear-results button.
 async function removeKeys(keys) {
   const list = Array.isArray(keys) ? keys : [keys];
-  const prevs = Promise.all([..._chains.values()]);
-  let settle;
-  const run = new Promise((resolve, reject) => { settle = { resolve, reject }; });
-  _setChain('*', prevs.then(() => run).catch(() => {}));
-  await prevs;
-  try {
-    await browser.storage.local.remove(list);
-    settle.resolve({ changed: true });
-  } catch (err) {
-    settle.reject(err);
-  }
-  return run;
+  return _barrier(() => browser.storage.local.remove(list));
 }
 
 // ─── Named accessors for the hot shapes ────────────────────────────────────────
 // These are thin conveniences over mutate(); the policy (caps, dedupe, eviction)
 // lives in the callers.
-
-async function getSession(sessionId) {
-  const { translationSessions = [] } = await browser.storage.local.get('translationSessions');
-  return translationSessions.find(s => s.id === sessionId);
-}
 
 // Upsert a session, newest-first, evicted to maxSessions — mirrors the worker's
 // updateSessionStorage behavior exactly, serialized under the key lock.
@@ -120,5 +111,5 @@ async function saveSession(sessionId, sessionDataToStore) {
 
 // ─── Node test seam (fewshot.js/settings.js pattern; inert in the browser) ─────
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { mutate, clearLocal, removeKeys, setRaw, getSession, saveSession };
+  module.exports = { mutate, clearLocal, removeKeys, setRaw, saveSession };
 }

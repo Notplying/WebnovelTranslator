@@ -3,35 +3,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-// Same fake browser.storage.local as store.test.js — microtask gap in get()
-// so serialization through the store is exercised for real.
-const memory = new Map();
-globalThis.browser = {
-  storage: {
-    local: {
-      async get(keys) {
-        await new Promise(r => setTimeout(r, 0));
-        if (keys === null) return Object.fromEntries(memory);
-        if (typeof keys === 'string') return { [keys]: memory.get(keys) };
-        if (Array.isArray(keys)) return Object.fromEntries(keys.map(k => [k, memory.get(k)]));
-        return Object.fromEntries(Object.keys(keys).map(k => [k, memory.get(k)]));
-      },
-      async set(obj) {
-        await new Promise(r => setTimeout(r, 0));
-        for (const [k, v] of Object.entries(obj)) memory.set(k, v);
-      },
-      async clear() {
-        await new Promise(r => setTimeout(r, 0));
-        memory.clear();
-      },
-      async remove(keys) {
-        await new Promise(r => setTimeout(r, 0));
-        const list = Array.isArray(keys) ? keys : [keys];
-        list.forEach(k => memory.delete(k));
-      },
-    },
-  },
-};
+const { installStorageFake } = require('./helpers/storage-fake.js');
+const { memory, reset } = installStorageFake();
 
 // collections.js consumes store.js's mutate as a browser global (script load
 // order in manifest/pages). Mirror that in Node: expose the store exports as
@@ -54,8 +27,6 @@ const {
   setCollectionGlobalDefault,
   setCollectionSessionDefault,
 } = require('../collections.js');
-
-function reset() { memory.clear(); }
 
 // ─── resolveDefaultCollection (pure) ───────────────────────────────────────────
 

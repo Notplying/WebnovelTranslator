@@ -225,7 +225,9 @@ async function terminateRequest(sessionId) {
 async function processChunk(message) {
     const options = await browser.storage.local.get();
     const type = options.apiType;
-    if (type === 'gemini' || type === 'openRouter' || type === 'openai') {
+    // One HTTP-provider list: the configs table below (keys mirror the
+    // PROVIDER_DESCRIPTORS rows in llm.js). Web providers fall through.
+    if (HTTP_PROVIDER_CONFIGS[type]) {
         return processChunkWithHttpProvider(message, options, type);
     }
 
@@ -246,6 +248,31 @@ const fewShotAdapter = {
     saveExample: addExample
 };
 
+// Shared token-cap guard for the OpenAI-shaped providers: a positive integer
+// in options[maxTokensKey] is written to body[maxTokensField], else skipped.
+// (Gemini guards its own maxOutputTokens inline — different config shape.)
+function withMaxTokens(body, maxTokensField, maxTokensKey, options) {
+    const raw = options[maxTokensKey];
+    if (typeof raw === 'string' && raw.trim()) {
+        const t = parseInt(raw);
+        if (!isNaN(t) && t > 0) body[maxTokensField] = t;
+    }
+    return body;
+}
+
+// Shared temperature parsing for the OpenAI-shaped providers: a numeric
+// options.temperature (string or number) is written to body.temperature, else
+// skipped (provider default applies).
+function withTemperature(body, options) {
+    const temperature = typeof options.temperature === 'string'
+        ? parseFloat(options.temperature.trim())
+        : Number(options.temperature);
+    if (!isNaN(temperature)) body.temperature = temperature;
+    return body;
+}
+
+// The single HTTP-provider list (keys mirror llm.js PROVIDER_DESCRIPTORS).
+// Each entry is just URL/headers/body builders that read option keys.
 const HTTP_PROVIDER_CONFIGS = {
     gemini: {
         buildUrl: (options) => `https://generativelanguage.googleapis.com/v1beta/models/${options.geminiModelId}:streamGenerateContent?key=${options.geminiApiKey}&alt=sse`,
@@ -269,8 +296,9 @@ const HTTP_PROVIDER_CONFIGS = {
                     { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
                 ]
             };
-            if (options.geminiMaxTokens?.trim()) {
-                const t = parseInt(options.geminiMaxTokens);
+            const raw = options.geminiMaxTokens;
+            if (typeof raw === 'string' && raw.trim()) {
+                const t = parseInt(raw);
                 if (!isNaN(t) && t > 0) body.generationConfig.maxOutputTokens = t;
             }
             return body;
@@ -290,11 +318,8 @@ const HTTP_PROVIDER_CONFIGS = {
                 messages: [...exampleMessages, { role: 'user', content: `${message.prefix}\n${message.chunk}\n${message.suffix}` }],
                 stream: true
             };
-            if (options.openRouterMaxTokens?.trim()) { const t = parseInt(options.openRouterMaxTokens); if (!isNaN(t) && t > 0) body.max_tokens = t; }
-            const temperature = typeof options.temperature === 'string'
-                ? parseFloat(options.temperature.trim())
-                : Number(options.temperature);
-            if (!isNaN(temperature)) body.temperature = temperature;
+            withMaxTokens(body, 'max_tokens', 'openRouterMaxTokens', options);
+            withTemperature(body, options);
             if (options.openRouterProviderOrder?.trim()) {
                 const order = options.openRouterProviderOrder.split(',').map(s => s.trim()).filter(Boolean);
                 if (order.length) body.provider = { order, allow_fallbacks: options.openRouterAllowFallback !== false };
@@ -314,11 +339,8 @@ const HTTP_PROVIDER_CONFIGS = {
                 messages: [...exampleMessages, { role: 'user', content: `${message.prefix}\n${message.chunk}\n${message.suffix}` }],
                 stream: true
             };
-            if (options.openaiMaxTokens?.trim()) { const t = parseInt(options.openaiMaxTokens); if (!isNaN(t) && t > 0) body.max_tokens = t; }
-            const temperature = typeof options.temperature === 'string'
-                ? parseFloat(options.temperature.trim())
-                : Number(options.temperature);
-            if (!isNaN(temperature)) body.temperature = temperature;
+            withMaxTokens(body, 'max_tokens', 'openaiMaxTokens', options);
+            withTemperature(body, options);
             return body;
         }
     }
@@ -334,7 +356,8 @@ async function processChunkWithHttpProvider(message, options, providerKey) {
     const controller = new AbortController();
     const sessionId = message.sessionId;
     sessionControllers[sessionId] = controller;
-    const label = { gemini: 'Gemini', openRouter: 'OpenRouter', openai: 'OpenAI' }[providerKey];
+    // Human label comes from the descriptor row in llm.js — one source.
+    const label = PROVIDER_DESCRIPTORS[providerKey]?.label || providerKey;
 
     let tabCloseListener;
     tabCloseListener = tabId => {

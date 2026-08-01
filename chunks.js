@@ -92,6 +92,18 @@ let _terminated = false;
 let collectionsList = {};     // collections map from storage
 let collectionDefaults = { global: null, perSession: {} };
 
+// The one shape a collection entry takes everywhere this page sends it
+// (add-to menus and auto-add). Title follows the domain's convention.
+function makeCollectionEntry(sessId, index, content, rawContent) {
+    return {
+        sessionId: sessId,
+        chunkIndex: index,
+        title: defaultEntryTitle({ content, rawContent, chunkIndex: index }),
+        content,
+        rawContent,
+    };
+}
+
 async function renderCollectionSelector() {
     const sel = document.getElementById('collectionDefaultSelect');
     if (!sel) return;
@@ -171,13 +183,7 @@ async function addChunkToCollection(index, collectionId) {
         const res = await browser.runtime.sendMessage({
             action: 'addEntryToCollection',
             collectionId,
-            entry: {
-                sessionId: sessionId,
-                chunkIndex: index,
-                title: defaultEntryTitle({ content, rawContent, chunkIndex: index }),
-                content,
-                rawContent,
-            },
+            entry: makeCollectionEntry(sessionId, index, content, rawContent),
         });
         if (res?.error) throw new Error(res.error);
         if (res?.alreadyPresent) { showToast('ℹ️ Already in this collection.', 'success'); }
@@ -188,9 +194,7 @@ async function addChunkToCollection(index, collectionId) {
             if (!existing) {
                 coll.entries.push({
                     id: crypto.randomUUID(),
-                    sessionId, chunkIndex: index,
-                    title: defaultEntryTitle({ content, rawContent, chunkIndex: index }),
-                    content, rawContent,
+                    ...makeCollectionEntry(sessionId, index, content, rawContent),
                     addedAt: Date.now(),
                 });
             }
@@ -241,13 +245,7 @@ async function autoAddProcessedChunk(index, sessId) {
         const res = await browser.runtime.sendMessage({
             action: 'addEntryToCollection',
             collectionId: collId,
-            entry: {
-                sessionId: sessId,
-                chunkIndex: index,
-                title: defaultEntryTitle({ content, rawContent, chunkIndex: index }),
-                content,
-                rawContent,
-            },
+            entry: makeCollectionEntry(sessId, index, content, rawContent),
         });
         if (res?.error) throw new Error(res.error);
         // Update the in-memory cache so the per-chunk dropdown sees the newly
@@ -258,9 +256,7 @@ async function autoAddProcessedChunk(index, sessId) {
             if (!existing) {
                 coll.entries.push({
                     id: crypto.randomUUID(),
-                    sessionId: sessId, chunkIndex: index,
-                    title: defaultEntryTitle({ content, rawContent, chunkIndex: index }),
-                    content, rawContent,
+                    ...makeCollectionEntry(sessId, index, content, rawContent),
                     addedAt: Date.now(),
                 });
             }
@@ -665,9 +661,11 @@ function requestChunkFor(sessId, chunk, checkpointPrefix, suffix) {
 }
 
 // Render + persist a completed (non-streamed) result — used by the
-// non-streaming path and the safety-timeout fallback alike.
+// non-streaming path and the safety-timeout fallback alike. The seam's result
+// shape is uniform ({ result, parts, streaming } — ADR-0007), so parts is
+// always present.
 async function renderAndSaveChunk(index, result) {
-    const parts = result.parts || [result.result];
+    const parts = result.parts;
     if (parts.length > 1) renderMultiPart(index, parts);
     else renderChunk(index, result.result, false);
     processedResults[index] = { content: { parts, text: result.result }, rawContent: allChunks[index] };
@@ -1009,6 +1007,17 @@ async function initPage() {
     document.getElementById('sessionId').textContent = sessionId ? `Session: ${sessionId.slice(0, 12)}…` : 'No session';
 
     if (!sessionId) { showBanner('No session ID in URL.', 'error'); return; }
+
+    // Reconcile the theme with storage.local: ui-boot.js read the localStorage
+    // mirror before first paint, but a stale or missing mirror (e.g. cleared
+    // while this tab was closed) must be healed so the page matches the
+    // persisted theme — applyUiTheme re-mirrors as a side effect.
+    try {
+        const { uiTheme } = await browser.storage.local.get('uiTheme');
+        applyUiTheme(uiTheme);
+    } catch (err) {
+        console.warn('Failed to load UI theme:', err);
+    }
 
     // Load session data
     const { translationSessions = [] } = await browser.storage.local.get('translationSessions');

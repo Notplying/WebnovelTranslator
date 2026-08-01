@@ -3,44 +3,10 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-// Fake browser.storage.local with an explicit microtask gap inside get() so
-// the tests genuinely interleave two get→mutate→set sequences the way the
-// real API does across contexts.
-const memory = new Map();
-let deferreds = [];
-globalThis.browser = {
-  storage: {
-    local: {
-      async get(keys) {
-        await new Promise(r => setTimeout(r, 0));
-        if (keys === null) return Object.fromEntries(memory);
-        if (typeof keys === 'string') return { [keys]: memory.get(keys) };
-        if (Array.isArray(keys)) return Object.fromEntries(keys.map(k => [k, memory.get(k)]));
-        return Object.fromEntries(Object.keys(keys).map(k => [k, memory.get(k)]));
-      },
-      async set(obj) {
-        await new Promise(r => setTimeout(r, 0));
-        for (const [k, v] of Object.entries(obj)) memory.set(k, v);
-      },
-      async clear() {
-        await new Promise(r => setTimeout(r, 0));
-        memory.clear();
-      },
-      async remove(keys) {
-        await new Promise(r => setTimeout(r, 0));
-        const list = Array.isArray(keys) ? keys : [keys];
-        list.forEach(k => memory.delete(k));
-      },
-    },
-  },
-};
+const { installStorageFake } = require('./helpers/storage-fake.js');
+const { memory, reset } = installStorageFake();
 
 const { mutate, clearLocal, removeKeys, saveSession } = require('../store.js');
-
-function reset() {
-  memory.clear();
-  deferreds = [];
-}
 
 // ─── serialization ─────────────────────────────────────────────────────────────
 

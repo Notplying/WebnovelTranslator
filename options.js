@@ -920,7 +920,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const theme = document.getElementById('uiTheme').checked ? UI_THEME.MODERN : UI_THEME.CLASSIC;
     applyUiTheme(theme);
     try {
-      await browser.storage.local.set({ uiTheme: theme });
+      await setRaw('uiTheme', theme);
     } catch (err) {
       console.error('Failed to save UI theme:', err);
       showToast('❌ Failed to save UI theme.', 'error');

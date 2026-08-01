@@ -220,9 +220,6 @@ async function buildFewShotExampleMessages(message, options, fewShot, contextWin
  * @param {Function} params.buildBody - (options, message, exampleMessages) => body object
  * @param {Function} params.buildHeaders - (options) => headers object
  * @param {Function} params.buildUrl - (options) => request URL
- * @param {string|null} [params.initialSnapshot] - previous stream content; trimmed as
- *   duplicate overlap at the first delta (retry-resume dedup). The worker passes
- *   null today; the hook exists so resume dedup is testable and wireable.
  * @param {Function} [params.onDelta] - (delta {content, reasoning}) => push (debounced)
  * @param {object} [params.fewShot] - { selectExamples, buildExampleMessages, saveExample }
  *   injected from the worker (fewshot.js wiring)
@@ -237,7 +234,6 @@ async function streamLLM({
     buildBody,
     buildHeaders,
     buildUrl,
-    initialSnapshot = null,
     onDelta = () => {},
     fewShot = null
 }) {
@@ -251,7 +247,6 @@ async function streamLLM({
 
     let fullContent = '';
     let fullReasoning = '';
-    let accumulatedSnapshot = initialSnapshot; // LCS dedup only once at the first delta
 
     // Timeout + abort: ONE timer covers headers AND body streaming. When it
     // fires it aborts the derived controller, so a stalled body dies too.
@@ -299,16 +294,6 @@ async function streamLLM({
                         const parsed = JSON.parse(data);
                         let { content, reasoning } = descriptor.extractEvent(parsed);
                         if (content || reasoning) {
-                            // Trim duplicate overlap at the boundary between an
-                            // original run and a retry run.
-                            if (accumulatedSnapshot !== null) {
-                                const { suffix, prefixLength } = longestCommonSuffixPrefix(accumulatedSnapshot, content || '');
-                                if (prefixLength > 0) {
-                                    console.debug(`[${descriptor.label} stream] Trimmed ${prefixLength}-char overlap at resume boundary: "${suffix}"`);
-                                }
-                                content = (content || '').slice(prefixLength);
-                                accumulatedSnapshot = null;
-                            }
                             if (content) fullContent += content;
                             if (reasoning) fullReasoning += reasoning;
                             pushDeltaDebounced(sessionId, onDelta, { content: fullContent, reasoning: fullReasoning });

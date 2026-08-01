@@ -35,7 +35,7 @@ function zipLocalHeader(name, data) {
   return { header: h, data, nameBytes, crc, size: data.length };
 }
 
-function zipCentralEntry(name, info, offset) {
+function zipCentralEntry(info, offset) {
   const h = new Uint8Array(46 + info.nameBytes.length);
   const v = new DataView(h.buffer);
   v.setUint32(0, 0x02014b50, true);    // central dir signature
@@ -67,7 +67,7 @@ function buildStoreZip(files) {
     locals.push({ offset, info });
     offset += 30 + info.nameBytes.length + info.data.length;
   }
-  const cdEntries = locals.map(l => zipCentralEntry(l.info.nameBytes, l.info, l.offset));
+  const cdEntries = locals.map(l => zipCentralEntry(l.info, l.offset));
   const cdSize = cdEntries.reduce((s, e) => s + e.length, 0);
   const cdOffset = locals.length ? locals[locals.length - 1].offset + 30 + locals[locals.length - 1].info.nameBytes.length + locals[locals.length - 1].info.data.length : 0;
 
