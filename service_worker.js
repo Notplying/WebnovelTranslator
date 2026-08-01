@@ -73,38 +73,29 @@ browser.runtime.onInstalled.addListener(function (details) {
 });
 
 // ─── Message Router ───────────────────────────────────────────────────────────
-// Serializes every collection/collectionDefaults read-modify-write through a
-// single module-level promise queue so concurrent updates (options page +
-// chunks page) don't clobber each other or resurrect deleted collections.
-// Each call reads the latest persisted state, applies the mutator, and writes back.
-let collectionQueue = Promise.resolve();
-
-// Enqueue a mutation task so it runs only after every previously enqueued task
-// has completed its own get→mutate→set sequence. Errors are propagated to the
-// returned promise; the queue itself never stalls so subsequent tasks still run.
-function enqueueCollectionMutation(task) {
-    const prev = collectionQueue;
-    let settle;
-    const wrapped = new Promise((resolve, reject) => { settle = { resolve, reject }; });
-    collectionQueue = prev.then(() => task()).then(
-        result => { settle.resolve(result); return result; },
-        err => { settle.reject(err); throw err; }
-    ).catch(() => {}); // absorb so the chain never stalls
-    return wrapped;
-}
+// Serialized read-modify-write lives in the shared store.js module (per-key
+// queues). mutateCollection wraps store.mutate for the collections key; the
+// mutator contract is the store's { changed, note } shape. Call sites that
+// used the old truthy-skip convention (return true = already present) are
+// migrated to return { changed: false, note: 'alreadyPresent' }.
 
 async function mutateCollection(collectionId, mutator) {
-    return enqueueCollectionMutation(async () => {
-        const { collections = {} } = await browser.storage.local.get('collections');
+    return mutate('collections', async (collections = {}) => {
         const c = collections[collectionId];
         if (!c) throw new Error('Collection not found.');
-        const result = mutator(c);
-        // If the mutator signals to skip (returns true/truthy to abort), don't persist.
-        if (result) return result;
-        c.updatedAt = Date.now();
-        await browser.storage.local.set({ collections });
-        return result;
+        const outcome = await mutator(c);
+        // Outcome: { changed: false, note } (skip write) or { changed: true } (write).
+        if (outcome && outcome.changed === true) {
+            c.updatedAt = Date.now();
+            return { changed: true, result: collections };
+        }
+        return { changed: false, note: outcome && outcome.note };
     });
+}
+
+async function storeHasCollection(id) {
+    const { collections = {} } = await browser.storage.local.get('collections');
+    return !!collections[id];
 }
 
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -162,41 +153,43 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!name) { sendResponse({ error: 'Collection name is required.' }); return true; }
         const now = Date.now();
         const collection = { id: crypto.randomUUID(), name, createdAt: now, updatedAt: now, entries: [] };
-        // Route through the serialized mutation queue so a concurrent addEntryToCollection
-        // or deleteCollection can't read a stale snapshot and clobber this write.
-        enqueueCollectionMutation(async () => {
-            const { collections = {} } = await browser.storage.local.get('collections');
+        // Serialized via the store so a concurrent addEntryToCollection or
+        // deleteCollection can't read a stale snapshot and clobber this write.
+        mutate('collections', (collections = {}) => {
             collections[collection.id] = collection;
-            return browser.storage.local.set({ collections });
+            return { changed: true, result: collections };
         }).then(() => sendResponse({ collection })).catch(err => sendResponse({ error: err.message }));
         return true;
     }
     if (message.action === 'updateCollection') {
         const { collectionId, name } = message;
         if (!collectionId || !(name || '').trim()) { sendResponse({ error: 'Invalid input.' }); return true; }
-        // Route through the serialized mutation queue so a concurrent queued mutation
-        // can't read a stale snapshot and clobber this rename (or vice versa).
-        enqueueCollectionMutation(async () => {
-            const { collections = {} } = await browser.storage.local.get('collections');
+        mutate('collections', (collections = {}) => {
             const c = collections[collectionId]; if (!c) throw new Error('Collection not found.');
             c.name = name.trim(); c.updatedAt = Date.now();
-            return browser.storage.local.set({ collections });
+            return { changed: true, result: collections };
         }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
         return true;
     }
     if (message.action === 'deleteCollection') {
         const { collectionId } = message;
-        enqueueCollectionMutation(async () => {
-            const { collections = {}, collectionDefaults = { global: null, perSession: {} } } = await browser.storage.local.get(['collections', 'collectionDefaults']);
-            delete collections[collectionId];
-            // Clear any default that referenced the deleted collection so we don't point at nothing.
-            if (collectionDefaults.global === collectionId) collectionDefaults.global = null;
-            // perSession is keyed by sessionId; remove every session whose value equals the deleted collection.
-            for (const sid of Object.keys(collectionDefaults.perSession)) {
-                if (collectionDefaults.perSession[sid] === collectionId) delete collectionDefaults.perSession[sid];
-            }
-            return browser.storage.local.set({ collections, collectionDefaults });
-        }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
+        // Delete the collection, then clean up defaults referencing it. Two
+        // serialized writes; the defaults cleanup is idempotent, so the small
+        // window between them is safe against a concurrent create.
+        Promise.all([
+            mutate('collections', (collections = {}) => {
+                delete collections[collectionId];
+                return { changed: true, result: collections };
+            }),
+            mutate('collectionDefaults', (collectionDefaults = { global: null, perSession: {} }) => {
+                // Clear any default that referenced the deleted collection so we don't point at nothing.
+                if (collectionDefaults.global === collectionId) collectionDefaults.global = null;
+                for (const sid of Object.keys(collectionDefaults.perSession)) {
+                    if (collectionDefaults.perSession[sid] === collectionId) delete collectionDefaults.perSession[sid];
+                }
+                return { changed: true, result: collectionDefaults };
+            })
+        ]).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
         return true;
     }
     if (message.action === 'addEntryToCollection') {
@@ -209,10 +202,10 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         mutateCollection(collectionId, c => {
             // Prevent duplicate entries from the same chunk.
             const exists = c.entries.some(e => e.sessionId === entry.sessionId && e.chunkIndex === entry.chunkIndex);
-            if (exists) return true; // signal already present; skip the push
+            if (exists) return { changed: false, note: 'alreadyPresent' };
             c.entries.push({ ...entry, id: crypto.randomUUID(), addedAt: Date.now() });
-            return false;
-        }).then(alreadyPresent => sendResponse({ success: true, alreadyPresent: alreadyPresent ?? false }))
+            return { changed: true };
+        }).then(({ note }) => sendResponse({ success: true, alreadyPresent: note === 'alreadyPresent' }))
             .catch(err => sendResponse({ error: err.message }));
         return true;
     }
@@ -223,6 +216,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const idx = c.entries.findIndex(e => e.id === entryId);
             if (idx === -1) throw new Error('Entry not found.');
             c.entries.splice(idx, 1);
+            return { changed: true };
         }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
         return true;
     }
@@ -234,6 +228,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const entry = c.entries.find(e => e.id === entryId);
             if (!entry) throw new Error('Entry not found.');
             entry.title = title;
+            return { changed: true };
         }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
         return true;
     }
@@ -245,6 +240,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const entry = c.entries.find(e => e.id === entryId);
             if (!entry) throw new Error('Entry not found.');
             entry.content = content;
+            return { changed: true };
         }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
         return true;
     }
@@ -254,6 +250,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!collectionId) { sendResponse({ error: 'Invalid input.' }); return true; }
         mutateCollection(collectionId, c => {
             c.entries = [];
+            return { changed: true };
         }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
         return true;
     }
@@ -267,6 +264,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
             const [moved] = c.entries.splice(fromIndex, 1);
             c.entries.splice(toIndex, 0, moved);
+            return { changed: true };
         }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
         return true;
     }
@@ -279,14 +277,13 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Merge-based: updates only the global default, preserving per-session overrides.
     if (message.action === 'setCollectionGlobalDefault') {
         const value = message.value ?? null;
-        enqueueCollectionMutation(async () => {
-            const { collections = {}, collectionDefaults = { global: null, perSession: {} } } = await browser.storage.local.get(['collections', 'collectionDefaults']);
+        mutate('collectionDefaults', async (collectionDefaults = { global: null, perSession: {} }) => {
             // Null/empty clears the default; any referenced collection must actually exist.
-            if (value !== null && value !== undefined && value !== '' && !collections[value]) {
+            if (value !== null && value !== undefined && value !== '' && !(await storeHasCollection(value))) {
                 throw new Error('Invalid collection reference.');
             }
             collectionDefaults.global = value;
-            return browser.storage.local.set({ collectionDefaults });
+            return { changed: true, result: collectionDefaults };
         }).then(() => sendResponse({ success: true }))
             .catch(err => sendResponse({ error: err.message }));
         return true;
@@ -295,15 +292,14 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'setCollectionSessionDefault') {
         const { sessionId, value } = message;
         if (!sessionId) { sendResponse({ error: 'sessionId is required.' }); return true; }
-        enqueueCollectionMutation(async () => {
-            const { collections = {}, collectionDefaults = { global: null, perSession: {} } } = await browser.storage.local.get(['collections', 'collectionDefaults']);
+        mutate('collectionDefaults', async (collectionDefaults = { global: null, perSession: {} }) => {
             // Null/empty clears the override; any referenced collection must actually exist.
-            if (value !== null && value !== undefined && value !== '' && !collections[value]) {
+            if (value !== null && value !== undefined && value !== '' && !(await storeHasCollection(value))) {
                 throw new Error('Invalid collection reference.');
             }
             if (value === null || value === undefined || value === '') delete collectionDefaults.perSession[sessionId];
             else collectionDefaults.perSession[sessionId] = value;
-            return browser.storage.local.set({ collectionDefaults });
+            return { changed: true, result: collectionDefaults };
         }).then(() => sendResponse({ success: true }))
             .catch(err => sendResponse({ error: err.message }));
         return true;
@@ -331,33 +327,10 @@ async function generateContentHash(chunks, prefix, suffix) {
     return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Per-sessionId mutex to serialize concurrent updateSessionStorage calls
-const sessionStorageLocks = new Map();
-
+// Session upsert + maxSessions eviction now lives in store.js saveSession,
+// serialized per-key (replaces the old per-sessionId lock map).
 async function updateSessionStorage(sessionId, sessionDataToStore) {
-    // Acquire lock: chain onto the previous promise for this sessionId
-    const prev = sessionStorageLocks.get(sessionId) ?? Promise.resolve();
-    let releaseLock;
-    const next = new Promise(resolve => { releaseLock = resolve; });
-    const chained = prev.then(() => next);
-    sessionStorageLocks.set(sessionId, chained);
-    await prev;
-    try {
-        let { translationSessions = [] } = await browser.storage.local.get('translationSessions');
-        translationSessions = translationSessions.filter(s => s.id !== sessionId);
-        const sessionEntry = { id: sessionId, timestamp: Date.now(), firstChunk: sessionDataToStore.chunks[0] || '', ...sessionDataToStore };
-        const { maxSessions = 3 } = await browser.storage.local.get('maxSessions');
-        const updatedSessions = [sessionEntry, ...translationSessions]
-            .sort((a, b) => b.timestamp - a.timestamp)
-            .slice(0, maxSessions);
-        await browser.storage.local.set({ translationSessions: updatedSessions });
-    } finally {
-        releaseLock();
-        // Clean up the lock entry once it resolves to avoid unbounded growth
-        chained.then(() => {
-            if (sessionStorageLocks.get(sessionId) === chained) sessionStorageLocks.delete(sessionId);
-        });
-    }
+    await saveSession(sessionId, sessionDataToStore);
 }
 
 async function openChunksPage(payload) {

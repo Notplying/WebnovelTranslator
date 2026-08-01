@@ -40,6 +40,7 @@
       "shared_web_permissions.js",
       "fewshot.js",
       "settings.js",
+      "store.js",
       "service_worker.js"
     ]
   },
