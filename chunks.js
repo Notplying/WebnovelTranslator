@@ -123,14 +123,10 @@ let reprocessingState = { isActive: false, targetIndex: -1 };
 let _terminated = false;
 
 // ─── Collections state ──────────────────────────────────────────────────────
+// The defaults rule (per-session overrides global) lives in collections.js;
+// this local mirror feeds the shared resolveDefaultCollection().
 let collectionsList = {};     // collections map from storage
 let collectionDefaults = { global: null, perSession: {} };
-
-function resolveDefaultCollection(sessionId) {
-    const per = collectionDefaults.perSession;
-    if (Object.prototype.hasOwnProperty.call(per, sessionId)) return per[sessionId];
-    return collectionDefaults.global ?? null;
-}
 
 // Derive a default entry title from the first non-empty line of the translated
 // chunk content. Falls back to the raw source, then to the legacy "Chunk N" label.
@@ -148,7 +144,7 @@ function defaultEntryTitle(content, rawContent, index) {
 async function renderCollectionSelector() {
     const sel = document.getElementById('collectionDefaultSelect');
     if (!sel) return;
-    const resolved = resolveDefaultCollection(sessionId);
+    const resolved = resolveDefaultCollection(collectionDefaults, sessionId);
     // Preserve user selection while rebuilding options.
     const existingValue = sel.value;
     sel.innerHTML = '<option value="">None</option>' +
@@ -162,17 +158,24 @@ async function renderCollectionSelector() {
 
 document.getElementById('collectionDefaultSelect')?.addEventListener('change', async (e) => {
     const val = e.target.value || null;
-    // Capture the prior value before mutating local state so we can roll back on failure.
-    const prior = collectionDefaults.perSession[sessionId] ?? null;
+    // Capture the prior state before mutating local mirrors so we can roll back
+    // on failure: the effective default (per-session override, else global) and
+    // whether a per-session entry existed at all.
+    const hadOverride = Object.prototype.hasOwnProperty.call(collectionDefaults.perSession, sessionId);
+    const prior = resolveDefaultCollection(collectionDefaults, sessionId);
     collectionDefaults.perSession[sessionId] = val;
     try {
         const res = await browser.runtime.sendMessage({ action: 'setCollectionSessionDefault', sessionId, value: val });
         if (res?.error) throw new Error(res.error);
     } catch (err) {
-        // Restore the previous value. Set the DOM directly rather than calling
-        // renderCollectionSelector() — that function reads sel.value from the DOM,
-        // which still holds the failed selection and would re-apply it.
-        collectionDefaults.perSession[sessionId] = prior;
+        // Restore the previous state. When the effective default came from the
+        // global (no per-session entry before), delete the optimistic override
+        // instead of pinning a duplicate per-session entry that would shadow
+        // the global. Set the DOM directly rather than calling
+        // renderCollectionSelector() — that function reads sel.value from the
+        // DOM, which still holds the failed selection and would re-apply it.
+        if (hadOverride) collectionDefaults.perSession[sessionId] = prior;
+        else delete collectionDefaults.perSession[sessionId];
         const sel = document.getElementById('collectionDefaultSelect');
         if (sel) sel.value = prior || '';
         showToast(`❌ Failed to save session default: ${err.message}`, 'error');
@@ -273,7 +276,7 @@ async function newCollectionAndAdd(index) {
 // Extracted so both the normal streaming success path and the timeout-fallback path
 // add the chunk with identical resolution, entry construction, and error handling.
 async function autoAddProcessedChunk(index, sessId) {
-    const collId = resolveDefaultCollection(sessId);
+    const collId = resolveDefaultCollection(collectionDefaults, sessId);
     if (!collId) return;
     const r = processedResults[index] || {};
     const content = r.content?.text || '';
