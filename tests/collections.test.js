@@ -39,6 +39,7 @@ globalThis.browser = {
 Object.assign(globalThis, require('../store.js'));
 
 const {
+  defaultEntryTitle,
   resolveDefaultCollection,
   createCollection,
   addEntryToCollection,
@@ -74,6 +75,28 @@ test('resolveDefaultCollection: per-session null entry pins to null, not global'
   // fall through to the global.
   const d = { global: 'a', perSession: { s1: null } };
   assert.equal(resolveDefaultCollection(d, 's1'), null);
+});
+
+// ─── defaultEntryTitle (pure) ───────────────────────────────────────────────────
+
+test('defaultEntryTitle: stored title wins', () => {
+  assert.equal(defaultEntryTitle({ title: 'Kept', content: 'First line', rawContent: 'raw' }), 'Kept');
+});
+
+test('defaultEntryTitle: first non-empty line of content, falling back to raw source', () => {
+  assert.equal(defaultEntryTitle({ content: '  \nTranslated line', rawContent: 'raw line' }), 'Translated line');
+  assert.equal(defaultEntryTitle({ content: '', rawContent: 'raw line' }), 'raw line');
+  assert.equal(defaultEntryTitle({ content: '  \n ', rawContent: '  raw  ' }), 'raw');
+});
+
+test('defaultEntryTitle: falls back to Chunk N when nothing usable', () => {
+  assert.equal(defaultEntryTitle({ content: '', rawContent: '' }), 'Chunk 1');
+  assert.equal(defaultEntryTitle({ content: '', rawContent: '', chunkIndex: 4 }), 'Chunk 5');
+});
+
+test('defaultEntryTitle: caps a single long line at 120 chars with ellipsis', () => {
+  const long = 'x'.repeat(200);
+  assert.equal(defaultEntryTitle({ content: long }), 'x'.repeat(120) + '…');
 });
 
 // ─── CRUD ───────────────────────────────────────────────────────────────────────
