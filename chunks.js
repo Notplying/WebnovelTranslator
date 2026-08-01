@@ -866,18 +866,23 @@ browser.runtime.onMessage.addListener((msg) => {
 });
 
 // ─── Storage helpers ──────────────────────────────────────────────────────────
+// Serialized read-modify-write via store.js mutate (per-key queue on
+// processedChunks), so concurrent saves from two streaming sessions can't
+// interleave a get→set and drop a chunk.
 async function saveChunk(index, content, rawContent) {
     const sessId = getSessionId();
     if (!sessId) return;
-    const { processedChunks = {}, translationSessions = [] } = await browser.storage.local.get(['processedChunks', 'translationSessions']);
-    const sessChunks = processedChunks[sessId] || [];
-    sessChunks[index] = { content, rawContent };
-    processedChunks[sessId] = sessChunks;
-    const { maxSessions = 3 } = await browser.storage.local.get('maxSessions');
-    const recentIds = translationSessions.sort((a, b) => b.timestamp - a.timestamp).slice(0, maxSessions).map(s => s.id);
-    const filtered = {};
-    recentIds.forEach(sid => { if (processedChunks[sid]) filtered[sid] = processedChunks[sid]; });
-    await browser.storage.local.set({ processedChunks: filtered });
+    await mutate('processedChunks', async (processedChunks = {}) => {
+        const sessChunks = processedChunks[sessId] || [];
+        sessChunks[index] = { content, rawContent };
+        processedChunks[sessId] = sessChunks;
+        // Evict sessions beyond maxSessions, keeping only recent ids.
+        const { translationSessions = [], maxSessions = 3 } = await browser.storage.local.get(['translationSessions', 'maxSessions']);
+        const recentIds = translationSessions.sort((a, b) => b.timestamp - a.timestamp).slice(0, maxSessions).map(s => s.id);
+        const filtered = {};
+        recentIds.forEach(sid => { if (processedChunks[sid]) filtered[sid] = processedChunks[sid]; });
+        return { changed: true, result: filtered };
+    });
 }
 
 // ─── Copy / Download ──────────────────────────────────────────────────────────
@@ -957,10 +962,12 @@ async function reprocessOne(index) {
     const sfx = storedData.suffix || suffix;
     const rc = storedData.retryCount || retryCount;
 
-    // Clear saved storage
-    const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
-    const sessChunks = processedChunks[sessId] || [];
-    if (sessChunks[index]) { delete sessChunks[index]; processedChunks[sessId] = sessChunks; await browser.storage.local.set({ processedChunks }); }
+    // Clear saved storage (serialized)
+    await mutate('processedChunks', (processedChunks = {}) => {
+        const sessChunks = processedChunks[sessId] || [];
+        if (sessChunks[index]) { delete sessChunks[index]; processedChunks[sessId] = sessChunks; }
+        return { changed: true, result: processedChunks };
+    });
 
     // Clear in-memory result and UI immediately
     processedResults[index] = null;
@@ -1022,9 +1029,10 @@ async function reprocessAll() {
     if (isProcessing) { showToast('Processing already in progress. Please wait or terminate first.', 'error'); return; }
     if (!confirm(`Reprocess all ${totalChunks} chunks? All saved results will be cleared.`)) return;
     const sessId = getSessionId();
-    const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
-    delete processedChunks[sessId];
-    await browser.storage.local.set({ processedChunks });
+    await mutate('processedChunks', (processedChunks = {}) => {
+        delete processedChunks[sessId];
+        return { changed: true, result: processedChunks };
+    });
     processedResults = [];
     processedThinking = [];
     completedChunks = 0;

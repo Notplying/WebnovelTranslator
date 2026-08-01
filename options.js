@@ -284,22 +284,24 @@ async function openCollectionViewAsChunks(viewSessionId, sessionName, items) {
     content: { parts: [contents[i]], text: contents[i] },
     rawContent: raw,
   }));
-  const { translationSessions = [] } = await browser.storage.local.get('translationSessions');
-  const prior = translationSessions.findIndex(s => s.id === viewSessionId);
-  const session = {
-    id: viewSessionId,
-    name: sessionName,
-    chunks, titles,
-    prefix: '', suffix: '', retryCount: 3,
-    createdAt: Date.now(),
-  };
-  if (prior >= 0) translationSessions[prior] = session;
-  else translationSessions.push(session);
-  await browser.storage.local.set({ translationSessions });
+  await mutate('translationSessions', (translationSessions = []) => {
+    const prior = translationSessions.findIndex(s => s.id === viewSessionId);
+    const session = {
+      id: viewSessionId,
+      name: sessionName,
+      chunks, titles,
+      prefix: '', suffix: '', retryCount: 3,
+      createdAt: Date.now(),
+    };
+    if (prior >= 0) translationSessions[prior] = session;
+    else translationSessions.push(session);
+    return { changed: true, result: translationSessions };
+  });
   // Persist the processed results so every chunk renders as already done.
-  const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
-  processedChunks[viewSessionId] = processed;
-  await browser.storage.local.set({ processedChunks });
+  await mutate('processedChunks', (processedChunks = {}) => {
+    processedChunks[viewSessionId] = processed;
+    return { changed: true, result: processedChunks };
+  });
   // Open the chunks page in a new tab (user-triggered, so popup blockers allow it).
   const url = browser.runtime.getURL('chunks.html') + '?session=' + encodeURIComponent(viewSessionId);
   const a = document.createElement('a');
@@ -560,11 +562,12 @@ function renderCollectionDetail(collectionsMap) {
         const entry = entries.find(e => e.id === btn.dataset.entryId);
         if (!entry) return;
         try {
-          const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
-          const sess = processedChunks[entry.sessionId] || [];
-          sess[entry.chunkIndex] = { content: { parts: [entry.content], text: entry.content }, rawContent: entry.rawContent };
-          processedChunks[entry.sessionId] = sess;
-          await browser.storage.local.set({ processedChunks });
+          await mutate('processedChunks', (processedChunks = {}) => {
+            const sess = processedChunks[entry.sessionId] || [];
+            sess[entry.chunkIndex] = { content: { parts: [entry.content], text: entry.content }, rawContent: entry.rawContent };
+            processedChunks[entry.sessionId] = sess;
+            return { changed: true, result: processedChunks };
+          });
           showToast('✅ Re-imported to session.', 'success');
         } catch (err) { showToast('❌ Re-import failed.', 'error'); }
       });
@@ -1044,8 +1047,10 @@ async function resetSettings() {
   try {
     // Preserve session data
     const toKeep = await browser.storage.local.get(['processedChunks', 'translationSessions']);
-    // Clear all storage so no legacy or webPermissions entries remain
-    await browser.storage.local.clear();
+    // Clear all storage so no legacy or webPermissions entries remain.
+    // Serialized via store so an in-flight mutation from another context
+    // (chunks page) lands before the wipe instead of being lost.
+    await clearLocal();
     // Write defaults merged with preserved keys
     await browser.storage.local.set({ ...DEFAULTS, ...toKeep });
   } catch (err) {
