@@ -594,7 +594,7 @@ function renderCollectionDetail(collectionsMap) {
           });
           if (res?.error) throw new Error(res.error);
           const result = res.result;
-          const content = Array.isArray(result.parts) ? result.parts.join('') : (result.result || '');
+          const content = result.parts.join('');
           // Persist the updated content through the serialized worker mutation.
           const upRes = await browser.runtime.sendMessage({ action: 'updateEntryContent', collectionId: _selectedCollectionId, entryId: entry.id, content });
           if (upRes?.error) throw new Error(upRes.error);
@@ -686,7 +686,7 @@ function renderCollectionDetail(collectionsMap) {
           rawContent: entry.rawContent,
         });
         if (res?.error) throw new Error(res.error);
-        const content = Array.isArray(res.result.parts) ? res.result.parts.join('') : (res.result.result || '');
+        const content = res.result.parts.join('');
         // Persist the updated content through the serialized worker mutation, not a full-collection write.
         const upRes = await browser.runtime.sendMessage({ action: 'updateEntryContent', collectionId: _selectedCollectionId, entryId: entry.id, content });
         if (upRes?.error) throw new Error(upRes.error);

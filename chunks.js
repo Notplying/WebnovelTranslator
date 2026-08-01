@@ -763,7 +763,7 @@ async function processAllChunks(resume = false) {
                 }
 
                 // Non-streaming
-                const parts = result.parts || [result.result];
+                const parts = result.parts;
                 if (parts.length > 1) renderMultiPart(i, parts);
                 else renderChunk(i, result.result, false);
 
@@ -1004,7 +1004,7 @@ async function reprocessOne(index) {
                 if (timedOut) { throw new Error('Streaming timed out after 5 minutes'); }
                 return;
             }
-            const parts = result.parts || [result.result];
+            const parts = result.parts;
             parts.length > 1 ? renderMultiPart(index, parts) : renderChunk(index, result.result, false);
             processedResults[index] = { content: { parts, text: result.result }, rawContent: allChunks[index] };
             await saveChunk(index, processedResults[index].content, allChunks[index]);
