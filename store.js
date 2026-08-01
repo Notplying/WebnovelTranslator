@@ -50,17 +50,17 @@ async function mutate(key, fn) {
   return run;
 }
 
-// Serialized full-clear of browser.storage.local. Goes through the same per-key
-// machinery as every other write so a concurrent mutation from another context
-// (options page, chunks page) cannot interleave between the clear and a later
-// re-set and be silently lost. The `reset` op writes the new state inside the
-// same queue hold as the clear.
+// Serialized full-clear of browser.storage.local. Waits for every in-flight
+// per-key chain before clearing, so a mutation already queued from another
+// context (options page, chunks page) lands before the wipe rather than being
+// silently lost between the clear and a later re-set. Writes that start after
+// the clear are inherently racy — same semantics as storage.local.clear().
 async function clearLocal() {
-  const prev = _chain('*');
+  const prevs = Promise.all([..._chains.values()]);
   let settle;
   const run = new Promise((resolve, reject) => { settle = { resolve, reject }; });
-  _setChain('*', prev.then(() => run).catch(() => {}));
-  await prev;
+  _setChain('*', prevs.then(() => run).catch(() => {}));
+  await prevs;
   try {
     await browser.storage.local.clear();
     settle.resolve({ changed: true });
