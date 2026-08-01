@@ -5,12 +5,15 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "{4c5a03a4-c0a1-4978-b840-9cbd90a43e18}",
-      "strict_min_version": "109.0",
+      "strict_min_version": "140.0",
       "data_collection_permissions": {
         "required": [
           "none"
         ]
       }
+    },
+    "gecko_android": {
+      "strict_min_version": "142.0"
     }
   },
   "description": "Extracts text from Syosetsu/Kakuyomu/Booktoki/novel543/generic novel sites and translates them using Gemini, OpenRouter, OpenAI-compatible, or ChatGPT/Gemini web automation. Bring your own key.",
@@ -44,7 +47,8 @@
       "collections.js",
       "llm.js",
       "service_worker.js"
-    ]
+    ],
+    "preferred_environment": ["document"]
   },
   "icons": {
     "48": "48.png"

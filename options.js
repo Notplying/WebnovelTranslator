@@ -140,14 +140,26 @@ function updatePromptPreview() {
   const preview = document.getElementById('promptPreview');
   if (!preview) return;
   const full = prefix + '\n' + sample + '\n' + suffix;
-  const escaped = escapeHtml(full);
-  let highlighted = escaped.replace(/\[Sample chunk text would appear here\.\.\.\]/g, '<em>[Sample chunk text would appear here...]</em>');
+  preview.replaceChildren();
   const enabled = document.getElementById('fewShotEnabled')?.checked;
   if (enabled) {
     const count = parseInt(document.getElementById('fewShotCount')?.value, 10) || 0;
-    highlighted = `<div class="badge">${count} example(s) will be prepended</div>\n` + highlighted;
+    const badge = document.createElement('div');
+    badge.className = 'badge';
+    badge.textContent = `${count} example(s) will be prepended`;
+    preview.append(badge, document.createTextNode('\n'));
   }
-  preview.innerHTML = highlighted;
+  // Render as text nodes (textContent escapes), wrapping every occurrence of
+  // the sample marker in <em> — the old string-replace semantics, unescaped.
+  const parts = full.split('[Sample chunk text would appear here...]');
+  parts.forEach((part, i) => {
+    if (part) preview.append(document.createTextNode(part));
+    if (i < parts.length - 1) {
+      const em = document.createElement('em');
+      em.textContent = '[Sample chunk text would appear here...]';
+      preview.append(em);
+    }
+  });
 }
 
 // ─── Few-Shot management ──────────────────────────────────────────────────────
@@ -187,17 +199,39 @@ async function renderFewShotCustomList() {
     list.innerHTML = '<div class="fewshot-empty">No custom examples yet — add an original excerpt and its translation above.</div>';
     return;
   }
-  list.innerHTML = items.map(ex => {
-    const raw = escapeHtml(ex.raw.length > 160 ? ex.raw.slice(0, 160) + '…' : ex.raw);
-    const tr  = escapeHtml(ex.translation.length > 160 ? ex.translation.slice(0, 160) + '…' : ex.translation);
-    return `<div class="example-row">
-      <div class="example-pair">
-        <div class="example-cell example-cell--raw"><span class="example-eyebrow">Raw</span><p class="example-text">${raw}</p></div>
-        <div class="example-cell example-cell--trans"><span class="example-eyebrow">Translation</span><p class="example-text">${tr}</p></div>
-      </div>
-      <button type="button" class="btn btn-danger fewshot-remove" data-id="${escapeHtml(ex.id)}" aria-label="Remove custom example" title="Remove custom example">🗑</button>
-    </div>`;
-  }).join('');
+  const frag = document.createDocumentFragment();
+  for (const ex of items) {
+    const row = document.createElement('div');
+    row.className = 'example-row';
+    const pair = document.createElement('div');
+    pair.className = 'example-pair';
+    for (const [cellClass, eyebrow, value] of [
+      ['example-cell example-cell--raw', 'Raw', ex.raw],
+      ['example-cell example-cell--trans', 'Translation', ex.translation],
+    ]) {
+      const cell = document.createElement('div');
+      cell.className = cellClass;
+      const label = document.createElement('span');
+      label.className = 'example-eyebrow';
+      label.textContent = eyebrow;
+      const text = document.createElement('p');
+      text.className = 'example-text';
+      text.textContent = value.length > 160 ? value.slice(0, 160) + '…' : value;
+      cell.append(label, text);
+      pair.append(cell);
+    }
+    row.append(pair);
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn btn-danger fewshot-remove';
+    removeBtn.dataset.id = ex.id;
+    removeBtn.setAttribute('aria-label', 'Remove custom example');
+    removeBtn.title = 'Remove custom example';
+    removeBtn.textContent = '🗑';
+    row.append(removeBtn);
+    frag.append(row);
+  }
+  list.replaceChildren(frag);
   list.querySelectorAll('.fewshot-remove').forEach(btn => {
     btn.addEventListener('click', async () => {
       await removeCustomExample(btn.dataset.id);
@@ -320,10 +354,19 @@ async function renderCollectionsSection() {
   const globalSel = document.getElementById('collectionGlobalDefault');
   if (globalSel) {
     const cur = globalSel.value;
-    globalSel.innerHTML = '<option value="">None</option>' +
-      Object.values(collectionsMap).map(c =>
-        `<option value="${escapeHtml(c.id)}"${c.id === defaults.global ? ' selected' : ''}>${escapeHtml(c.name)}</option>`
-      ).join('');
+    const frag = document.createDocumentFragment();
+    const noneOpt = document.createElement('option');
+    noneOpt.value = '';
+    noneOpt.textContent = 'None';
+    frag.append(noneOpt);
+    for (const c of Object.values(collectionsMap)) {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name;
+      if (c.id === defaults.global) opt.selected = true;
+      frag.append(opt);
+    }
+    globalSel.replaceChildren(frag);
     if (cur && collectionsMap[cur]) globalSel.value = cur;
     else if (defaults.global) globalSel.value = defaults.global;
     // Assigned handler (not addEventListener) so re-rendering replaces rather than accumulates.
@@ -362,23 +405,48 @@ async function renderCollectionsSection() {
     if (colls.length === 0) {
       list.innerHTML = '<div class="collection-empty" style="padding:24px 12px">No collections yet. Add chunks from the translation page, or create one here.</div>';
     } else {
-      list.innerHTML = colls.map(c => {
+      const frag = document.createDocumentFragment();
+      for (const c of colls) {
         const count = (c.entries || []).length;
         const updated = c.updatedAt ? new Date(c.updatedAt).toLocaleDateString() : '';
         const selected = c.id === _selectedCollectionId;
-        return `<div class="collection-item${selected ? ' active' : ''}" data-id="${escapeHtml(c.id)}"
-          role="option" aria-selected="${selected}" tabindex="0"
-          aria-label="${escapeHtml(c.name)}">
-          <div class="collection-item-info">
-            <div class="collection-item-name">${escapeHtml(c.name)}</div>
-            <div class="collection-item-meta">${count} entr${count === 1 ? 'y' : 'ies'}${updated ? ' · ' + updated : ''}</div>
-          </div>
-          <div class="collection-item-actions">
-            <button class="collection-item-action-btn" data-action="rename" data-id="${escapeHtml(c.id)}" aria-label="Rename" title="Rename">✏️</button>
-            <button class="collection-item-action-btn delete" data-action="delete" data-id="${escapeHtml(c.id)}" aria-label="Delete" title="Delete">🗑</button>
-          </div>
-        </div>`;
-      }).join('');
+        const item = document.createElement('div');
+        item.className = 'collection-item' + (selected ? ' active' : '');
+        item.dataset.id = c.id;
+        item.setAttribute('role', 'option');
+        item.setAttribute('aria-selected', String(selected));
+        item.tabIndex = 0;
+        item.setAttribute('aria-label', c.name);
+        const info = document.createElement('div');
+        info.className = 'collection-item-info';
+        const name = document.createElement('div');
+        name.className = 'collection-item-name';
+        name.textContent = c.name;
+        const meta = document.createElement('div');
+        meta.className = 'collection-item-meta';
+        meta.textContent = `${count} entr${count === 1 ? 'y' : 'ies'}${updated ? ' · ' + updated : ''}`;
+        info.append(name, meta);
+        const actions = document.createElement('div');
+        actions.className = 'collection-item-actions';
+        const renameBtn = document.createElement('button');
+        renameBtn.className = 'collection-item-action-btn';
+        renameBtn.dataset.action = 'rename';
+        renameBtn.dataset.id = c.id;
+        renameBtn.setAttribute('aria-label', 'Rename');
+        renameBtn.title = 'Rename';
+        renameBtn.textContent = '✏️';
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'collection-item-action-btn delete';
+        deleteBtn.dataset.action = 'delete';
+        deleteBtn.dataset.id = c.id;
+        deleteBtn.setAttribute('aria-label', 'Delete');
+        deleteBtn.title = 'Delete';
+        deleteBtn.textContent = '🗑';
+        actions.append(renameBtn, deleteBtn);
+        item.append(info, actions);
+        frag.append(item);
+      }
+      list.replaceChildren(frag);
       // Click or keyboard (Enter/Space) to select. Action buttons are excluded.
       list.querySelectorAll('.collection-item').forEach(item => {
         const select = () => {
@@ -436,51 +504,124 @@ function renderCollectionDetail(collectionsMap) {
     return;
   }
   const entries = coll.entries || [];
-  detail.innerHTML = `
-    <div class="collection-header-row">
-      <h2>${escapeHtml(coll.name)}</h2>
-      <div class="action-row">
-        <div class="add-to-dropdown" id="collectionExportDropdown">
-          <button class="btn btn-secondary btn-sm" id="collectionExportBtn">Export ▾</button>
-          <div class="dropdown-menu" style="min-width:160px">
-            <button class="dropdown-item" data-format="md">📄 Export .md</button>
-            <button class="dropdown-item" data-format="epub">📖 Export .epub</button>
-            <button class="dropdown-item" data-format="html">🖨 Export .html (→ PDF)</button>
-          </div>
-        </div>
-        <button class="btn btn-danger btn-sm" id="collectionDeleteBtn">🗑 Delete collection</button>
-      </div>
-    </div>
-    <p style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px">${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}</p>
-    <div class="action-row" style="margin-bottom:12px">
-      <button class="btn btn-secondary btn-sm" id="collectionRemoveAllBtn">🗑 Remove all</button>
-      <button class="btn btn-secondary btn-sm" id="collectionReprocessAllBtn">↩ Re-process all</button>
-      <button class="btn btn-secondary btn-sm" id="collectionViewAllBtn">👁 View collection</button>
-    </div>
-    <div class="collection-entries" id="collectionEntries">${entries.length === 0 ? '<div class="collection-empty" style="padding:24px 12px">No entries yet.</div>' : ''}</div>`;
+  detail.replaceChildren();
+  const headerRow = document.createElement('div');
+  headerRow.className = 'collection-header-row';
+  const h2 = document.createElement('h2');
+  h2.textContent = coll.name;
+  const topActions = document.createElement('div');
+  topActions.className = 'action-row';
+  const exportDropdown = document.createElement('div');
+  exportDropdown.className = 'add-to-dropdown';
+  exportDropdown.id = 'collectionExportDropdown';
+  const exportBtnEl = document.createElement('button');
+  exportBtnEl.className = 'btn btn-secondary btn-sm';
+  exportBtnEl.id = 'collectionExportBtn';
+  exportBtnEl.textContent = 'Export ▾';
+  const exportMenu = document.createElement('div');
+  exportMenu.className = 'dropdown-menu';
+  exportMenu.style.minWidth = '160px';
+  for (const [fmt, label] of [['md', '📄 Export .md'], ['epub', '📖 Export .epub'], ['html', '🖨 Export .html (→ PDF)']]) {
+    const item = document.createElement('button');
+    item.className = 'dropdown-item';
+    item.dataset.format = fmt;
+    item.textContent = label;
+    exportMenu.append(item);
+  }
+  exportDropdown.append(exportBtnEl, exportMenu);
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'btn btn-danger btn-sm';
+  deleteBtn.id = 'collectionDeleteBtn';
+  deleteBtn.textContent = '🗑 Delete collection';
+  topActions.append(exportDropdown, deleteBtn);
+  headerRow.append(h2, topActions);
+  const meta = document.createElement('p');
+  meta.style.fontSize = '0.78rem';
+  meta.style.color = 'var(--text-muted)';
+  meta.style.marginBottom = '12px';
+  meta.textContent = `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}`;
+  const row2 = document.createElement('div');
+  row2.className = 'action-row';
+  row2.style.marginBottom = '12px';
+  for (const [btnId, label] of [['collectionRemoveAllBtn', '🗑 Remove all'], ['collectionReprocessAllBtn', '↩ Re-process all'], ['collectionViewAllBtn', '👁 View collection']]) {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-secondary btn-sm';
+    btn.id = btnId;
+    btn.textContent = label;
+    row2.append(btn);
+  }
+  const entriesWrap = document.createElement('div');
+  entriesWrap.className = 'collection-entries';
+  entriesWrap.id = 'collectionEntries';
+  if (entries.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'collection-empty';
+    empty.style.padding = '24px 12px';
+    empty.textContent = 'No entries yet.';
+    entriesWrap.append(empty);
+  }
+  detail.append(headerRow, meta, row2, entriesWrap);
 
   if (entries.length > 0) {
     const entriesEl = document.getElementById('collectionEntries');
-    entriesEl.innerHTML = entries.map((e, idx) => {
+    const frag = document.createDocumentFragment();
+    entries.forEach((e, idx) => {
       const added = e.addedAt ? new Date(e.addedAt).toLocaleString() : '';
       const source = `Session ${((e.sessionId || '').slice(0, 8))} · Chunk ${e.chunkIndex + 1}`;
-      return `<div class="collection-entry" data-index="${idx}">
-        <div style="display:flex;flex-direction:column;gap:2px;align-items:center;padding-top:2px">
-          <button class="collection-item-action-btn reorder-up" data-idx="${idx}" aria-label="Move up" title="Move up" ${idx === 0 ? 'disabled style="opacity:0.3;cursor:default"' : ''}>▲</button>
-          <button class="collection-item-action-btn reorder-down" data-idx="${idx}" aria-label="Move down" title="Move down" ${idx === entries.length - 1 ? 'disabled style="opacity:0.3;cursor:default"' : ''}>▼</button>
-        </div>
-        <div>
-          <div class="collection-entry-title" contenteditable="true" data-entry-id="${escapeHtml(e.id)}" title="Click to edit title">${escapeHtml(defaultEntryTitle(e))}</div>
-          <div class="collection-entry-meta">${escapeHtml(source)} · Added ${escapeHtml(added)}</div>
-        </div>
-        <div class="collection-entry-actions">
-          <button class="btn btn-secondary btn-sm entry-view" data-entry-id="${escapeHtml(e.id)}" title="View in chunks page">👁 View</button>
-          <button class="btn btn-secondary btn-sm entry-reimport" data-entry-id="${escapeHtml(e.id)}" title="Re-import to session">↩ Re-import</button>
-          <button class="btn btn-secondary btn-sm entry-reprocess" data-entry-id="${escapeHtml(e.id)}" title="Re-translate from raw">↩ Re-process</button>
-          <button class="btn btn-danger btn-sm entry-remove" data-entry-id="${escapeHtml(e.id)}">🗑 Remove</button>
-        </div>
-      </div>`;
-    }).join('');
+      const entryEl = document.createElement('div');
+      entryEl.className = 'collection-entry';
+      entryEl.dataset.index = idx;
+      const reorderCol = document.createElement('div');
+      reorderCol.style.display = 'flex';
+      reorderCol.style.flexDirection = 'column';
+      reorderCol.style.gap = '2px';
+      reorderCol.style.alignItems = 'center';
+      reorderCol.style.paddingTop = '2px';
+      const upBtn = document.createElement('button');
+      upBtn.className = 'collection-item-action-btn reorder-up';
+      upBtn.dataset.idx = idx;
+      upBtn.setAttribute('aria-label', 'Move up');
+      upBtn.title = 'Move up';
+      upBtn.textContent = '▲';
+      if (idx === 0) { upBtn.disabled = true; upBtn.style.opacity = '0.3'; upBtn.style.cursor = 'default'; }
+      const downBtn = document.createElement('button');
+      downBtn.className = 'collection-item-action-btn reorder-down';
+      downBtn.dataset.idx = idx;
+      downBtn.setAttribute('aria-label', 'Move down');
+      downBtn.title = 'Move down';
+      downBtn.textContent = '▼';
+      if (idx === entries.length - 1) { downBtn.disabled = true; downBtn.style.opacity = '0.3'; downBtn.style.cursor = 'default'; }
+      reorderCol.append(upBtn, downBtn);
+      const mid = document.createElement('div');
+      const titleEl = document.createElement('div');
+      titleEl.className = 'collection-entry-title';
+      titleEl.setAttribute('contenteditable', 'true');
+      titleEl.dataset.entryId = e.id;
+      titleEl.title = 'Click to edit title';
+      titleEl.textContent = defaultEntryTitle(e);
+      const metaEl = document.createElement('div');
+      metaEl.className = 'collection-entry-meta';
+      metaEl.textContent = `${source} · Added ${added}`;
+      mid.append(titleEl, metaEl);
+      const actionsEl = document.createElement('div');
+      actionsEl.className = 'collection-entry-actions';
+      for (const [btnClass, btnTitle, label] of [
+        ['entry-view', 'View in chunks page', '👁 View'],
+        ['entry-reimport', 'Re-import to session', '↩ Re-import'],
+        ['entry-reprocess', 'Re-translate from raw', '↩ Re-process'],
+        ['entry-remove', null, '🗑 Remove'],
+      ]) {
+        const btn = document.createElement('button');
+        btn.className = 'btn ' + (btnClass === 'entry-remove' ? 'btn-danger' : 'btn-secondary') + ' btn-sm ' + btnClass;
+        btn.dataset.entryId = e.id;
+        if (btnTitle) btn.title = btnTitle;
+        btn.textContent = label;
+        actionsEl.append(btn);
+      }
+      entryEl.append(reorderCol, mid, actionsEl);
+      frag.append(entryEl);
+    });
+    entriesEl.replaceChildren(frag);
 
     // Title edit (blur → save).
     entriesEl.querySelectorAll('[contenteditable="true"]').forEach(el => {

@@ -27,8 +27,14 @@ if (typeof marked !== 'undefined') {
 // escapeHtml + decodeHtmlEntities live in utils.js (single convention for
 // both pages; escapeHtml includes &quot; for attribute contexts).
 
-function renderMarkdown(text) {
-    if (typeof marked === 'undefined') return `<p>${escapeHtml(text)}</p>`;
+// Sanitized markdown as a DOM fragment (RETURN_DOM) so callers can
+// replaceChildren() instead of assigning innerHTML — satisfies web-ext lint.
+function renderMarkdownFragment(text) {
+    if (typeof marked === 'undefined') {
+        const p = document.createElement('p');
+        p.textContent = text || '';
+        return p;
+    }
 
     const imgTags = [];
     // Decode entities first so we always work with literal chars, never double-encoded strings
@@ -50,6 +56,7 @@ function renderMarkdown(text) {
 
     const html = marked.parse(processed);
     return DOMPurify.sanitize(html, {
+        RETURN_DOM: true,
         ADD_ATTR: ['target', 'data-original-src', 'style'],
         FORBID_TAGS: ['style', 'script']
     });
@@ -110,10 +117,19 @@ async function renderCollectionSelector() {
     const resolved = resolveDefaultCollection(collectionDefaults, sessionId);
     // Preserve user selection while rebuilding options.
     const existingValue = sel.value;
-    sel.innerHTML = '<option value="">None</option>' +
-        Object.values(collectionsList).map(c =>
-            `<option value="${escapeHtml(c.id)}"${c.id === resolved ? ' selected' : ''}>${escapeHtml(c.name)}</option>`
-        ).join('');
+    const frag = document.createDocumentFragment();
+    const noneOpt = document.createElement('option');
+    noneOpt.value = '';
+    noneOpt.textContent = 'None';
+    frag.append(noneOpt);
+    for (const c of Object.values(collectionsList)) {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.name;
+        if (c.id === resolved) opt.selected = true;
+        frag.append(opt);
+    }
+    sel.replaceChildren(frag);
     // If nothing was explicitly set for this session and a global default exists, reflect it.
     if (existingValue) sel.value = existingValue;
     else if (resolved) sel.value = resolved;
@@ -158,11 +174,26 @@ function populateAddToMenu(index, menuEl) {
     if (colls.length === 0) {
         menuEl.innerHTML = `<button class="dropdown-item" data-action="new">✨ New collection…</button>`;
     } else {
-        menuEl.innerHTML = colls.map(c => {
+        const frag = document.createDocumentFragment();
+        for (const c of colls) {
             const added = (c.entries || []).some(e => e.sessionId === sessionId && e.chunkIndex === index);
-            return `<button class="dropdown-item${added ? ' added' : ''}" data-action="add" data-id="${escapeHtml(c.id)}" ${added ? 'disabled' : ''}>${added ? '✓ ' : ''}${escapeHtml(c.name)}</button>`;
-        }).join('') +
-            `<div class="dropdown-sep"></div><button class="dropdown-item" data-action="new">✨ New collection…</button>`;
+            const btn = document.createElement('button');
+            btn.className = 'dropdown-item' + (added ? ' added' : '');
+            btn.dataset.action = 'add';
+            btn.dataset.id = c.id;
+            if (added) btn.disabled = true;
+            btn.textContent = (added ? '✓ ' : '') + c.name;
+            frag.append(btn);
+        }
+        const sep = document.createElement('div');
+        sep.className = 'dropdown-sep';
+        frag.append(sep);
+        const newBtn = document.createElement('button');
+        newBtn.className = 'dropdown-item';
+        newBtn.dataset.action = 'new';
+        newBtn.textContent = '✨ New collection…';
+        frag.append(newBtn);
+        menuEl.replaceChildren(frag);
     }
     menuEl.querySelectorAll('.dropdown-item[data-action="add"]').forEach(btn => {
         btn.addEventListener('click', (e) => { e.stopPropagation(); addChunkToCollection(index, btn.dataset.id); });
@@ -328,34 +359,80 @@ function buildChunkCards(chunks, titles) {
         card.className = 'chunk-card';
         card.id = `chunk-${i}`;
         const title = titles[i] || `Chunk ${i + 1}`;
-        card.innerHTML = `
-      <div class="chunk-header" id="chunk-header-${i}">
-        <div class="chunk-num">${i + 1}</div>
-        <div class="chunk-header-info">
-          <div class="chunk-header-title">${escapeHtml(title)}</div>
-          <div class="chunk-header-preview" id="chunk-preview-${i}">${escapeHtml(raw.replace(/<[^>]*>/g, '').slice(0, 80))}…</div>
-        </div>
-        <span class="chunk-status-badge status-pending" id="chunk-badge-${i}">Pending</span>
-        <span class="chunk-chevron">▾</span>
-      </div>
-      <div class="chunk-body">
-        <div class="chunk-micro-bar"><div class="chunk-micro-fill" id="chunk-micro-${i}"></div></div>
-        <div class="part-tabs" id="chunk-tabs-${i}"></div>
-        <div class="part-contents" id="chunk-contents-${i}">
-          <div class="part-content active" data-part="0">
-            <div class="chunk-content-area" id="chunk-content-${i}"><em style="color:var(--text-muted)">Waiting…</em></div>
-          </div>
-        </div>
-        <div class="chunk-actions" id="chunk-actions-${i}">
-          <button class="btn btn-secondary btn-sm" id="chunk-copy-${i}">📋 Copy</button>
-          <button class="btn btn-secondary btn-sm" id="chunk-copy-raw-${i}">📄 Copy Raw</button>
-          <button class="btn btn-secondary btn-sm" id="chunk-reprocess-${i}">↩ Reprocess</button>
-          <div class="add-to-dropdown" id="chunk-addto-${i}">
-            <button class="btn btn-secondary btn-sm" id="chunk-addto-btn-${i}">⊕ Add to ▾</button>
-            <div class="dropdown-menu" id="chunk-addto-menu-${i}"></div>
-          </div>
-        </div>
-      </div>`;
+        const header = document.createElement('div');
+        header.className = 'chunk-header';
+        header.id = `chunk-header-${i}`;
+        const num = document.createElement('div');
+        num.className = 'chunk-num';
+        num.textContent = i + 1;
+        const headerInfo = document.createElement('div');
+        headerInfo.className = 'chunk-header-info';
+        const headerTitle = document.createElement('div');
+        headerTitle.className = 'chunk-header-title';
+        headerTitle.textContent = title;
+        const preview = document.createElement('div');
+        preview.className = 'chunk-header-preview';
+        preview.id = `chunk-preview-${i}`;
+        preview.textContent = raw.replace(/<[^>]*>/g, '').slice(0, 80) + '…';
+        headerInfo.append(headerTitle, preview);
+        const badge = document.createElement('span');
+        badge.className = 'chunk-status-badge status-pending';
+        badge.id = `chunk-badge-${i}`;
+        badge.textContent = 'Pending';
+        const chevron = document.createElement('span');
+        chevron.className = 'chunk-chevron';
+        chevron.textContent = '▾';
+        header.append(num, headerInfo, badge, chevron);
+        const body = document.createElement('div');
+        body.className = 'chunk-body';
+        const microBar = document.createElement('div');
+        microBar.className = 'chunk-micro-bar';
+        const microFill = document.createElement('div');
+        microFill.className = 'chunk-micro-fill';
+        microFill.id = `chunk-micro-${i}`;
+        microBar.append(microFill);
+        const tabs = document.createElement('div');
+        tabs.className = 'part-tabs';
+        tabs.id = `chunk-tabs-${i}`;
+        const contents = document.createElement('div');
+        contents.className = 'part-contents';
+        contents.id = `chunk-contents-${i}`;
+        const part = document.createElement('div');
+        part.className = 'part-content active';
+        part.dataset.part = '0';
+        const contentArea = document.createElement('div');
+        contentArea.className = 'chunk-content-area';
+        contentArea.id = `chunk-content-${i}`;
+        const waiting = document.createElement('em');
+        waiting.style.color = 'var(--text-muted)';
+        waiting.textContent = 'Waiting…';
+        contentArea.append(waiting);
+        part.append(contentArea);
+        contents.append(part);
+        const actions = document.createElement('div');
+        actions.className = 'chunk-actions';
+        actions.id = `chunk-actions-${i}`;
+        for (const [btnId, label] of [['chunk-copy', '📋 Copy'], ['chunk-copy-raw', '📄 Copy Raw'], ['chunk-reprocess', '↩ Reprocess']]) {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-secondary btn-sm';
+            btn.id = `${btnId}-${i}`;
+            btn.textContent = label;
+            actions.append(btn);
+        }
+        const addTo = document.createElement('div');
+        addTo.className = 'add-to-dropdown';
+        addTo.id = `chunk-addto-${i}`;
+        const addToBtn = document.createElement('button');
+        addToBtn.className = 'btn btn-secondary btn-sm';
+        addToBtn.id = `chunk-addto-btn-${i}`;
+        addToBtn.textContent = '⊕ Add to ▾';
+        const addToMenu = document.createElement('div');
+        addToMenu.className = 'dropdown-menu';
+        addToMenu.id = `chunk-addto-menu-${i}`;
+        addTo.append(addToBtn, addToMenu);
+        actions.append(addTo);
+        body.append(microBar, tabs, contents, actions);
+        card.append(header, body);
         container.appendChild(card);
 
         // Collapse toggle
@@ -469,7 +546,7 @@ function renderChunk(index, text, isStreaming = false, reasoning = '') {
     const cleanText = removeThinking(text);
 
     contentEl.classList.toggle('streaming', isStreaming);
-    contentEl.innerHTML = renderMarkdown(cleanText);
+    contentEl.replaceChildren(renderMarkdownFragment(cleanText));
     handleImages(contentEl);
 
     // Render thinking section if there's thinking content
@@ -505,7 +582,7 @@ function renderMultiPart(index, parts) {
         content.dataset.part = pi;
         const area = document.createElement('div');
         area.className = 'chunk-content-area';
-        area.innerHTML = renderMarkdown(removeThinking(part));
+        area.replaceChildren(renderMarkdownFragment(removeThinking(part)));
         handleImages(area);
         content.appendChild(area);
         contentsEl.appendChild(content);
@@ -624,13 +701,21 @@ function renderThinkingSection(index) {
 
     const thinkingSection = document.createElement('div');
     thinkingSection.className = 'thinking-section';
-    thinkingSection.innerHTML = `
-        <div class="thinking-header" id="thinking-header-${index}">
-            <span class="thinking-toggle">▸</span>
-            <span class="thinking-label">🤔 Thinking</span>
-        </div>
-        <div class="thinking-content" id="thinking-content-${index}">${escapeHtml(thinkingContent)}</div>
-    `;
+    const headerEl = document.createElement('div');
+    headerEl.className = 'thinking-header';
+    headerEl.id = `thinking-header-${index}`;
+    const toggle = document.createElement('span');
+    toggle.className = 'thinking-toggle';
+    toggle.textContent = '▸';
+    const label = document.createElement('span');
+    label.className = 'thinking-label';
+    label.textContent = '🤔 Thinking';
+    headerEl.append(toggle, label);
+    const content = document.createElement('div');
+    content.className = 'thinking-content';
+    content.id = `thinking-content-${index}`;
+    content.textContent = thinkingContent;
+    thinkingSection.append(headerEl, content);
 
     // Insert at the beginning of the chunk body (above the content)
     const chunkBody = card.querySelector('.chunk-body');
@@ -706,7 +791,12 @@ async function processAllChunks(resume = false) {
             onFailure: async (err) => {
                 console.error(`Chunk ${i} failed after ${retryCount} attempts:`, err);
                 const errEl = document.getElementById(`chunk-content-${i}`);
-                if (errEl) errEl.innerHTML = `<div class="chunk-error-box">❌ ${escapeHtml(err.message)}</div>`;
+                if (errEl) {
+                    const errBox = document.createElement('div');
+                    errBox.className = 'chunk-error-box';
+                    errBox.textContent = '❌ ' + err.message;
+                    errEl.replaceChildren(errBox);
+                }
                 setChunkStatus(i, 'error');
                 setMicroBar(i, 'reset');
                 showBanner(`Chunk ${i + 1} failed: ${err.message}`, 'error');
