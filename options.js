@@ -1,9 +1,8 @@
 // options.js — Settings page logic for AI Webnovel Translator v3
 // Uses browser polyfill (loaded before this script)
 
-// DEFAULTS and the settings schema live in the shared settings.js module
-// (loaded before this script); KEYS_TO_EXCLUDE_FROM_EXPORT is mirrored there
-// as NON_SETTING_STORAGE_KEYS.
+// DEFAULTS, SETTINGS, sanitizeNumericSettings and NON_SETTING_STORAGE_KEYS
+// live in the shared settings.js module (loaded before this script).
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 let toastTimer;
@@ -74,17 +73,12 @@ async function loadSettings() {
   }
   const settings = { ...DEFAULTS, ...stored };
 
-  ['apiType', 'maxLength', 'prefix', 'suffix', 'retryCount', 'temperature', 'topK', 'topP', 'maxSessions', 'chunkFontSize', 'chunkMaxWidth',
-    'hideHeaderOnScroll', 'hideChunkFooterOnScroll',
-    'geminiApiKey', 'geminiModelId', 'geminiMaxTokens', 'geminiContextWindow',
-
-    'openRouterApiKey', 'openRouterModelId', 'openRouterMaxTokens', 'openRouterContextWindow', 'openRouterProviderOrder', 'openRouterAllowFallback',
-    'openaiApiKey', 'openaiModelId', 'openaiMaxTokens', 'openaiContextWindow', 'openaiBaseUrl',
-
-    'apiTimeout', 'webAutomationTimeout',
-
-    'fewShotEnabled', 'fewShotCount', 'fewShotMaxExamples'
-  ].forEach(key => { setField(key, settings[key]); });
+  // Local-storage settings loop over the schema; sync-area (collectionIncludeInBackup)
+  // and instant-apply (uiTheme) keys are handled separately below.
+  for (const [key, def] of Object.entries(SETTINGS)) {
+    if (def.area === 'sync' || def.instant) continue;
+    setField(def.elementId || key, settings[key]);
+  }
 
   // collectionIncludeInBackup lives in browser.storage.sync — the single source of truth.
   // Read it from sync here so the general load path reflects the persisted toggle, not local.
@@ -106,26 +100,7 @@ async function loadSettings() {
 }
 
 // ─── Numeric sanitizer ───────────────────────────────────────────────────────
-function sanitizeNumericSettings(raw) {
-  const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
-  const parseNum = (v, fallback) => { const n = parseFloat(v); return isNaN(n) ? fallback : n; };
-  const parseInt2 = (v, fallback) => { const n = parseInt(v, 10); return isNaN(n) ? fallback : n; };
-  return {
-    ...raw,
-    maxLength: clamp(parseInt2(raw.maxLength, DEFAULTS.maxLength), 1, 500000),
-    retryCount: clamp(parseInt2(raw.retryCount, DEFAULTS.retryCount), 1, 20),
-    maxSessions: clamp(parseInt2(raw.maxSessions, DEFAULTS.maxSessions), 1, 50),
-    chunkFontSize: clamp(parseNum(raw.chunkFontSize, 1.05), 0.1, 10),
-    chunkMaxWidth: clamp(parseInt2(raw.chunkMaxWidth, DEFAULTS.chunkMaxWidth), 0, 10000),
-    apiTimeout: clamp(parseInt2(raw.apiTimeout, DEFAULTS.apiTimeout), 30, 600),
-    webAutomationTimeout: clamp(parseInt2(raw.webAutomationTimeout, DEFAULTS.webAutomationTimeout), 10, 120),
-    temperature: clamp(parseNum(raw.temperature, 0.3), 0, 2),
-    topK: clamp(parseInt2(raw.topK, 30), 1, 1000),
-    topP: clamp(parseNum(raw.topP, 0.95), 0.01, 1),
-    fewShotCount: clamp(parseInt2(raw.fewShotCount, DEFAULTS.fewShotCount), 0, 100),
-    fewShotMaxExamples: clamp(parseInt2(raw.fewShotMaxExamples, DEFAULTS.fewShotMaxExamples), 1, 100),
-  };
-}
+// Lives in settings.js (table-driven, fallbacks = schema defaults).
 
 // ─── Save settings from form ──────────────────────────────────────────────────
 function getField(id) {
@@ -136,49 +111,13 @@ function getField(id) {
 }
 
 async function saveSettings() {
-  const raw = {
-    apiType: getField('apiType'),
-    maxLength: getField('maxLength'),
-    prefix: getField('prefix'),
-    suffix: getField('suffix'),
-    retryCount: getField('retryCount'),
-    temperature: getField('temperature'),
-    topK: getField('topK'),
-    topP: getField('topP'),
-    maxSessions: getField('maxSessions'),
-    chunkFontSize: getField('chunkFontSize'),
-    chunkMaxWidth: getField('chunkMaxWidth'),
-
-    hideHeaderOnScroll: getField('hideHeaderOnScroll'),
-    hideChunkFooterOnScroll: getField('hideChunkFooterOnScroll'),
-
-    geminiApiKey: getField('geminiApiKey'),
-    geminiModelId: getField('geminiModelId'),
-    geminiMaxTokens: getField('geminiMaxTokens'),
-    geminiContextWindow: getField('geminiContextWindow'),
-
-
-
-    openRouterApiKey: getField('openRouterApiKey'),
-    openRouterModelId: getField('openRouterModelId'),
-    openRouterMaxTokens: getField('openRouterMaxTokens'),
-    openRouterContextWindow: getField('openRouterContextWindow'),
-    openRouterProviderOrder: getField('openRouterProviderOrder'),
-    openRouterAllowFallback: getField('openRouterAllowFallback'),
-
-    openaiApiKey: getField('openaiApiKey'),
-    openaiModelId: getField('openaiModelId'),
-    openaiMaxTokens: getField('openaiMaxTokens'),
-    openaiContextWindow: getField('openaiContextWindow'),
-    openaiBaseUrl: getField('openaiBaseUrl'),
-
-    apiTimeout: getField('apiTimeout'),
-    webAutomationTimeout: getField('webAutomationTimeout'),
-
-    fewShotEnabled: getField('fewShotEnabled'),
-    fewShotCount: getField('fewShotCount'),
-    fewShotMaxExamples: getField('fewShotMaxExamples'),
-  };
+  // Local-storage settings loop over the schema; sync-area and instant-apply
+  // keys are written by their dedicated paths below.
+  const raw = {};
+  for (const [key, def] of Object.entries(SETTINGS)) {
+    if (def.area === 'sync' || def.instant) continue;
+    raw[key] = getField(def.elementId || key);
+  }
   try {
     await browser.storage.local.set(sanitizeNumericSettings(raw));
     // collectionIncludeInBackup is the only setting stored in sync — keep it there as source of truth.
@@ -1003,7 +942,7 @@ async function exportSettings() {
     return;
   }
   const filtered = Object.fromEntries(
-    Object.entries(all).filter(([k]) => !KEYS_TO_EXCLUDE_FROM_EXPORT.includes(k))
+    Object.entries(all).filter(([k]) => !NON_SETTING_STORAGE_KEYS.includes(k))
   );
 
   // Optionally merge collections into the backup.
@@ -1025,11 +964,10 @@ async function exportSettings() {
 }
 
 // ─── Import ───────────────────────────────────────────────────────────────────
-// Only these keys may be written from an imported file (mirrors the DEFAULTS keys
-// and the set loaded by loadSettings). Any extra keys in the JSON are silently dropped.
-// fewShotCustomExamples is user-authored data, not a DEFAULTS setting, so it must be
-// allow-listed separately for import (DEFAULTS-derived keys would otherwise drop it).
-const ALLOWED_IMPORT_KEYS = [...Object.keys(DEFAULTS), 'fewShotCustomExamples', 'collections', 'collectionDefaults', 'collectionIncludeInBackup'];
+// Only these keys may be written from an imported file (all schema settings plus
+// the user-authored data keys from settings.js). Any extra keys in the JSON are
+// silently dropped.
+const ALLOWED_IMPORT_KEYS = [...Object.keys(DEFAULTS), ...IMPORTABLE_DATA_KEYS];
 const VALID_API_TYPES = ['gemini', 'openRouter', 'openai', 'chatgptWeb', 'geminiWeb'];
 
 async function importFromJSON(json) {
