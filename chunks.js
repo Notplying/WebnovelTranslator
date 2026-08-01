@@ -899,6 +899,10 @@ async function reprocessOne(index) {
     if (reprocessingState.isActive) { showToast('Already reprocessing, please wait.', 'error'); return; }
     // Block reprocessing if ANY chunk is actively processing (even if it's this one)
     if (isProcessing) { showToast('Wait for current processing to finish first.', 'error'); return; }
+    // A reprocess is fresh user intent — clear a stale terminate flag left by
+    // a previous process-all stop, or runChunkAttempts would abort before the
+    // first request and the chunk would sit at "Reprocessing…" forever.
+    _terminated = false;
     const sessId = getSessionId();
 
     let storedData;
@@ -954,6 +958,14 @@ async function reprocessOne(index) {
         // when the completion message arrived, so skip the duplicate UI here.
         setChunkStatus(index, 'done'); setMicroBar(index, 'done');
         showToast('✅ Reprocessed!', 'success');
+    } else if (out.terminated) {
+        // Terminated mid-reprocess: the wait was resolved by the terminate
+        // button and the loop stopped. Restore a sensible status instead of
+        // leaving the "Reprocessing…" placeholder and processing state behind.
+        const hasContent = !!processedResults[index]?.content?.text;
+        setChunkStatus(index, hasContent ? 'done' : 'error');
+        setMicroBar(index, hasContent ? 'done' : 'reset');
+        showToast(hasContent ? '✅ Reprocessed!' : '❌ Reprocessing cancelled', hasContent ? 'success' : 'error');
     }
 }
 
@@ -1073,7 +1085,10 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('copyAllBtn')?.addEventListener('click', copyAll);
     document.getElementById('downloadAllBtn')?.addEventListener('click', downloadAll);
     document.getElementById('terminateBtn')?.addEventListener('click', async () => {
-        const idx = streamingIndex; // Save before anything changes
+        // During a reprocess, streamingIndex is -1 — the active wait belongs
+        // to reprocessingState.targetIndex. Same resolution the message
+        // listener uses.
+        const idx = reprocessingState.isActive ? reprocessingState.targetIndex : streamingIndex; // Save before anything changes
         _terminated = true;
         if (idx >= 0) completeStreamWait(idx); // unblock the streaming wait; the loop breaks on _terminated
 
