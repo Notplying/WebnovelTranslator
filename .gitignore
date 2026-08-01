@@ -1,3 +1,5 @@
 # AI coding-agent tooling (kept local, not published)
 CLAUDE.md
-docs/agents/
+CONTEXT.md
+docs/
+.claude/
