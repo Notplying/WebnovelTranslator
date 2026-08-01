@@ -22,6 +22,8 @@ const DEFAULTS = {
   hideHeaderOnScroll: true,
   hideChunkFooterOnScroll: true,
 
+  uiTheme: 'modern',
+
   apiTimeout: 120,
   webAutomationTimeout: 30,
 
@@ -87,6 +89,19 @@ function setField(id, value) {
   else el.value = value != null ? value : '';
 }
 
+// ─── UI theme (Modern/Classic) ────────────────────────────────────────────────
+// Applied instantly on toggle (not via the Save button) and mirrored to
+// localStorage so ui-boot.js can read it synchronously before first paint.
+function applyUiTheme(uiTheme) {
+  const theme = uiTheme === 'classic' ? 'classic' : 'modern';
+  if (theme === 'modern') {
+    document.documentElement.setAttribute('data-ui', 'modern');
+  } else {
+    document.documentElement.removeAttribute('data-ui');
+  }
+  localStorage.setItem('uiTheme', theme);
+}
+
 async function loadSettings() {
   let stored;
   try {
@@ -118,6 +133,10 @@ async function loadSettings() {
   } catch (err) {
     setField('collectionIncludeInBackup', settings.collectionIncludeInBackup);
   }
+
+  // uiTheme is applied instantly and mirrored to localStorage (see applyUiTheme);
+  // this re-sync also heals a stale/missing mirror after the boot snippet ran.
+  applyUiTheme(settings.uiTheme);
 
   updatePromptPreview();
 }
@@ -1172,6 +1191,26 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupNav();
   setupPasswordToggles();
   await loadSettings();
+
+  // UI theme toggle — instant apply, no Save button involvement.
+  document.getElementById('uiTheme')?.addEventListener('change', async () => {
+    const theme = document.getElementById('uiTheme').checked ? 'modern' : 'classic';
+    applyUiTheme(theme);
+    try {
+      await browser.storage.local.set({ uiTheme: theme });
+    } catch (err) {
+      console.error('Failed to save UI theme:', err);
+      showToast('❌ Failed to save UI theme.', 'error');
+    }
+  });
+  // Live-sync: another options/chunks tab changed the theme.
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.uiTheme) {
+      const theme = changes.uiTheme.newValue === 'classic' ? 'classic' : 'modern';
+      setField('uiTheme', theme === 'modern');
+      applyUiTheme(theme);
+    }
+  });
 
   // Save
   document.getElementById('saveButton')?.addEventListener('click', async () => {

@@ -2,6 +2,7 @@
 <html lang="en">
 
 <head>
+    <script src="ui-boot.js"></script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI Webnovel Translator</title>
@@ -16,7 +17,8 @@
             --border: rgba(255, 255, 255, 0.07);
             --accent: #7c6af7;
             --accent2: #5eead4;
-            --accent-glow: rgba(124, 106, 247, 0.2);
+            --accent-glow: rgba(var(--accent-rgb), 0.2);
+            --accent-rgb: 124, 106, 247;
             --text: #e2e8f0;
             --text-muted: #64748b;
             --danger: #f87171;
@@ -26,6 +28,11 @@
             --transition: 0.2s ease;
             --chunk-font-size: 1rem;
             --chunk-max-width: none;
+            --btn-primary-hover: #6a58e5;
+            --btn-secondary-hover: #252a3d;
+            --on-accent: #fff;
+            --accent-gradient: linear-gradient(90deg, var(--accent), var(--accent2));
+            --accent-gradient-diag: linear-gradient(135deg, var(--accent), var(--accent2));
         }
 
         *,
@@ -195,8 +202,8 @@
         }
 
         #statusBanner.info {
-            background: rgba(124, 106, 247, 0.12);
-            border-color: rgba(124, 106, 247, 0.25);
+            background: rgba(var(--accent-rgb), 0.12);
+            border-color: rgba(var(--accent-rgb), 0.25);
             color: var(--accent);
         }
 
@@ -226,7 +233,7 @@
             height: 100%;
             border-radius: 99px;
             transition: width 0.4s ease;
-            background: linear-gradient(90deg, var(--accent), var(--accent2));
+            background: var(--accent-gradient);
         }
 
         #attemptProgress {
@@ -251,11 +258,11 @@
 
         .btn-primary {
             background: var(--accent);
-            color: #fff;
+            color: var(--on-accent);
         }
 
         .btn-primary:hover {
-            background: #6a58e5;
+            background: var(--btn-primary-hover);
             box-shadow: 0 0 16px var(--accent-glow);
         }
 
@@ -266,7 +273,7 @@
         }
 
         .btn-secondary:hover {
-            background: #252a3d;
+            background: var(--btn-secondary-hover);
         }
 
         .btn-danger {
@@ -322,8 +329,8 @@
         }
 
         .chunk-card.processing {
-            border-color: rgba(124, 106, 247, 0.3);
-            box-shadow: 0 0 20px rgba(124, 106, 247, 0.1);
+            border-color: rgba(var(--accent-rgb), 0.3);
+            box-shadow: 0 0 20px rgba(var(--accent-rgb), 0.1);
         }
 
         .chunk-header {
@@ -392,7 +399,7 @@
         }
 
         .status-processing {
-            background: rgba(124, 106, 247, 0.2);
+            background: rgba(var(--accent-rgb), 0.2);
             color: var(--accent);
         }
 
@@ -438,7 +445,7 @@
             border-radius: 99px;
             width: 0;
             transition: width 0.3s;
-            background: linear-gradient(90deg, var(--accent), var(--accent2));
+            background: var(--accent-gradient);
         }
 
         .chunk-micro-bar.pulse .chunk-micro-fill {
@@ -523,7 +530,7 @@
         }
 
         .chunk-content-area ul li:hover {
-            background: rgba(124, 106, 247, 0.06);
+            background: rgba(var(--accent-rgb), 0.06);
         }
 
         .chunk-content-area ul li::before {
@@ -534,7 +541,7 @@
             width: 6px;
             height: 6px;
             border-radius: 50%;
-            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            background: var(--accent-gradient-diag);
             box-shadow: 0 0 6px var(--accent-glow);
             flex-shrink: 0;
         }
@@ -573,8 +580,8 @@
             width: 22px;
             height: 22px;
             border-radius: 6px;
-            background: linear-gradient(135deg, var(--accent), var(--accent2));
-            color: #fff;
+            background: var(--accent-gradient-diag);
+            color: var(--on-accent);
             font-size: 0.65rem;
             font-weight: 700;
             display: flex;
@@ -624,7 +631,7 @@
             margin: 0.8em 0;
             padding: 10px 16px;
             border-left: 3px solid var(--accent);
-            background: rgba(124, 106, 247, 0.07);
+            background: rgba(var(--accent-rgb), 0.07);
             border-radius: 0 8px 8px 0;
             color: var(--text-muted);
             font-style: italic;
@@ -639,9 +646,9 @@
         .chunk-content-area code {
             font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
             font-size: 0.8rem;
-            background: rgba(124, 106, 247, 0.12);
+            background: rgba(var(--accent-rgb), 0.12);
             color: var(--accent2);
-            border: 1px solid rgba(124, 106, 247, 0.2);
+            border: 1px solid rgba(var(--accent-rgb), 0.2);
             border-radius: 5px;
             padding: 1px 6px;
         }
@@ -678,7 +685,7 @@
         }
 
         .chunk-content-area thead tr {
-            background: rgba(124, 106, 247, 0.15);
+            background: rgba(var(--accent-rgb), 0.15);
         }
 
         .chunk-content-area th {
@@ -686,7 +693,7 @@
             text-align: left;
             font-weight: 700;
             color: var(--accent);
-            border-bottom: 1px solid rgba(124, 106, 247, 0.25);
+            border-bottom: 1px solid rgba(var(--accent-rgb), 0.25);
         }
 
         .chunk-content-area td {
@@ -716,7 +723,7 @@
         .chunk-content-area a {
             color: var(--accent);
             text-decoration: none;
-            border-bottom: 1px solid rgba(124, 106, 247, 0.3);
+            border-bottom: 1px solid rgba(var(--accent-rgb), 0.3);
             transition: color var(--transition), border-color var(--transition);
         }
 
@@ -773,14 +780,14 @@
             align-items: center;
             gap: 8px;
             padding: 10px 14px;
-            background: rgba(124, 106, 247, 0.08);
+            background: rgba(var(--accent-rgb), 0.08);
             cursor: pointer;
             user-select: none;
             transition: background var(--transition);
         }
 
         .thinking-header:hover {
-            background: rgba(124, 106, 247, 0.12);
+            background: rgba(var(--accent-rgb), 0.12);
         }
 
         .thinking-toggle {
@@ -921,6 +928,7 @@
             }
         }
     </style>
+    <link rel="stylesheet" href="ui-theme.css" />
 </head>
 
 <body>

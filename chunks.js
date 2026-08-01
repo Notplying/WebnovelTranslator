@@ -1151,4 +1151,17 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
         if (!allChunks.length) initPage();
     }, 500);
+
+    // Live-sync: theme changed in the options page while this tab is open.
+    browser.storage.onChanged.addListener((changes, area) => {
+        if (area === 'local' && changes.uiTheme) {
+            const theme = changes.uiTheme.newValue === 'classic' ? 'classic' : 'modern';
+            if (theme === 'modern') {
+                document.documentElement.setAttribute('data-ui', 'modern');
+            } else {
+                document.documentElement.removeAttribute('data-ui');
+            }
+            localStorage.setItem('uiTheme', theme);
+        }
+    });
 });

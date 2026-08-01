@@ -2,6 +2,7 @@
 <html lang="en">
 
 <head>
+  <script src="ui-boot.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI Webnovel Translator — Settings</title>
@@ -22,6 +23,9 @@
       --success: #4ade80;
       --radius: 12px;
       --transition: 0.2s ease;
+      --btn-primary-hover: #6a58e5;
+      --btn-secondary-hover: #252a3d;
+      --on-accent: #fff;
     }
 
     *,
@@ -331,7 +335,7 @@
     }
 
     input:checked+.slider::before {
-      background: #fff;
+      background: var(--on-accent);
       left: calc(100% - 17px);
     }
 
@@ -353,11 +357,11 @@
 
     .btn-primary {
       background: var(--accent);
-      color: #fff;
+      color: var(--on-accent);
     }
 
     .btn-primary:hover {
-      background: #6a58e5;
+      background: var(--btn-primary-hover);
       box-shadow: 0 0 20px var(--accent-glow);
     }
 
@@ -368,7 +372,7 @@
     }
 
     .btn-secondary:hover {
-      background: #252a3d;
+      background: var(--btn-secondary-hover);
       border-color: rgba(255, 255, 255, 0.15);
     }
 
@@ -847,6 +851,7 @@
       .collection-list { max-height: 200px; }
     }
   </style>
+  <link rel="stylesheet" href="ui-theme.css" />
 </head>
 
 <body>
@@ -887,6 +892,10 @@
       <div class="nav-label">Data</div>
       <button class="nav-item" data-section="data" id="nav-data">
         <span class="icon">💾</span> Import / Export
+      </button>
+      <div class="nav-label">Appearance</div>
+      <button class="nav-item" data-section="appearance" id="nav-appearance">
+        <span class="icon">🎨</span> UI Theme
       </button>
       <div class="nav-label" style="margin-top: auto; padding-top: 16px;">Community</div>
       <a href="https://discord.gg/kTQvSuxZ6Y" target="_blank" rel="noopener noreferrer" class="nav-item"
@@ -1295,6 +1304,24 @@
           <button class="btn btn-danger" id="resetButton">♻️ Reset to Defaults</button>
         </div>
         <small style="color:var(--text-muted);font-size:0.8rem;display:block;margin-top:8px">Session results only — does not affect few-shot examples.</small>
+      </div>
+    </section>
+
+    <section class="section" id="section-appearance">
+      <div class="page-header">
+        <h1>Appearance</h1>
+        <p>Customize how the extension looks.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">🎨 UI Theme</div>
+        <div class="toggle-row">
+          <div class="toggle-row-info">
+            <label id="uiTheme-label" for="uiTheme">Modern UI</label>
+            <small>Clean, crisp dark theme with a cyan accent. Disable to keep the classic look.</small>
+          </div>
+          <label class="switch"><input type="checkbox" id="uiTheme" aria-labelledby="uiTheme-label"><span
+              class="slider"></span></label>
+        </div>
       </div>
     </section>
 
