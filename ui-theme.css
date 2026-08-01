@@ -17,8 +17,10 @@
   --radius: 8px;
   --btn-primary-hover: #0ea5e9;
   --btn-secondary-hover: #22262f;
-  --accent-gradient: #38bdf8;
-  --accent-gradient-diag: #38bdf8;
+  /* Real gradients of identical stops — render flat (no visible gradient, per
+     the modern theme), but the value matches what the variable name promises. */
+  --accent-gradient: linear-gradient(90deg, var(--accent), var(--accent2));
+  --accent-gradient-diag: linear-gradient(135deg, var(--accent), var(--accent2));
 }
 
 /* chunks.html sticky header: solid fill instead of backdrop blur — cheaper

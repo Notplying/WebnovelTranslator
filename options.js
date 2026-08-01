@@ -90,17 +90,9 @@ function setField(id, value) {
 }
 
 // ─── UI theme (Modern/Classic) ────────────────────────────────────────────────
-// Applied instantly on toggle (not via the Save button) and mirrored to
+// applyUiTheme + UI_THEME live in the shared ui-theme.js module. The theme is
+// applied instantly on toggle (not via the Save button) and mirrored to
 // localStorage so ui-boot.js can read it synchronously before first paint.
-function applyUiTheme(uiTheme) {
-  const theme = uiTheme === 'classic' ? 'classic' : 'modern';
-  if (theme === 'modern') {
-    document.documentElement.setAttribute('data-ui', 'modern');
-  } else {
-    document.documentElement.removeAttribute('data-ui');
-  }
-  localStorage.setItem('uiTheme', theme);
-}
 
 async function loadSettings() {
   let stored;
@@ -134,8 +126,11 @@ async function loadSettings() {
     setField('collectionIncludeInBackup', settings.collectionIncludeInBackup);
   }
 
-  // uiTheme is applied instantly and mirrored to localStorage (see applyUiTheme);
-  // this re-sync also heals a stale/missing mirror after the boot snippet ran.
+  // Reflect the stored theme in the toggle — without this it renders unchecked
+  // (claiming Classic) while Modern is active, so the first click would be a
+  // no-op write. uiTheme is applied instantly and mirrored to localStorage
+  // (see ui-theme.js); this re-sync also heals a stale/missing mirror.
+  setField('uiTheme', settings.uiTheme !== UI_THEME.CLASSIC);
   applyUiTheme(settings.uiTheme);
 
   updatePromptPreview();
@@ -1194,7 +1189,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // UI theme toggle — instant apply, no Save button involvement.
   document.getElementById('uiTheme')?.addEventListener('change', async () => {
-    const theme = document.getElementById('uiTheme').checked ? 'modern' : 'classic';
+    const theme = document.getElementById('uiTheme').checked ? UI_THEME.MODERN : UI_THEME.CLASSIC;
     applyUiTheme(theme);
     try {
       await browser.storage.local.set({ uiTheme: theme });
@@ -1206,9 +1201,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Live-sync: another options/chunks tab changed the theme.
   browser.storage.onChanged.addListener((changes, area) => {
     if (area === 'local' && changes.uiTheme) {
-      const theme = changes.uiTheme.newValue === 'classic' ? 'classic' : 'modern';
-      setField('uiTheme', theme === 'modern');
-      applyUiTheme(theme);
+      const theme = applyUiTheme(changes.uiTheme.newValue);
+      setField('uiTheme', theme === UI_THEME.MODERN);
     }
   });
 
