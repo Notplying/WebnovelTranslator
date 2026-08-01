@@ -24,44 +24,8 @@ if (typeof marked !== 'undefined') {
     });
 }
 
-// function renderMarkdown(text) {
-//     if (typeof marked === 'undefined') return `<p>${escapeHtml(text)}</p>`;
-//     // Escape all HTML tags to plaintext except <img> tags which we need for rendering.
-//     // We do this BEFORE marked.parse() so marked never sees real HTML tags → no recursion.
-//     // Strategy: temporarily extract <img> tags, escape everything else, put <img> back.
-//     const imgTags = [];
-//     let processed = (text || '').replace(/<img[^>]*>/gi, match => {
-//         imgTags.push(match);
-//         return `\x00IMG${imgTags.length - 1}\x00`;
-//     });
-//     processed = escapeHtml(processed); // escapeHtml has no effect on \x00 placeholders
-//     imgTags.forEach((tag, i) => { processed = processed.replace(`\x00IMG${i}\x00`, tag); });
-//     const html = marked.parse(processed);
-//     return DOMPurify.sanitize(html, {
-//         ADD_ATTR: ['target', 'data-original-src', 'style'],
-//         FORBID_TAGS: ['style', 'script']
-//     });
-// }
-
-// function escapeHtml(t) {
-//     return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-// }
-function decodeHtmlEntities(t) {
-    return t
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'");
-}
-
-function escapeHtml(t) {
-    return t
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-}
+// escapeHtml + decodeHtmlEntities live in utils.js (single convention for
+// both pages; escapeHtml includes &quot; for attribute contexts).
 
 function renderMarkdown(text) {
     if (typeof marked === 'undefined') return `<p>${escapeHtml(text)}</p>`;
@@ -123,23 +87,10 @@ let reprocessingState = { isActive: false, targetIndex: -1 };
 let _terminated = false;
 
 // ─── Collections state ──────────────────────────────────────────────────────
-// The defaults rule (per-session overrides global) lives in collections.js;
-// this local mirror feeds the shared resolveDefaultCollection().
+// The defaults rule and the entry-title convention (defaultEntryTitle) live
+// in collections.js; this local mirror feeds the shared resolveDefaultCollection().
 let collectionsList = {};     // collections map from storage
 let collectionDefaults = { global: null, perSession: {} };
-
-// Derive a default entry title from the first non-empty line of the translated
-// chunk content. Falls back to the raw source, then to the legacy "Chunk N" label.
-function defaultEntryTitle(content, rawContent, index) {
-    // Prefer translated lines first; only fall back to the raw source when the
-    // translation has no non-empty line (not merely when it's absent).
-    const firstLine = String(content || '').split(/\r?\n/).find(line => line.trim())
-        || String(rawContent || '').split(/\r?\n/).find(line => line.trim())
-        || '';
-    const trimmed = firstLine.trim();
-    // Cap the title length so a single long line doesn't break the UI.
-    return trimmed ? (trimmed.length > 120 ? trimmed.slice(0, 120) + '…' : trimmed) : `Chunk ${index + 1}`;
-}
 
 async function renderCollectionSelector() {
     const sel = document.getElementById('collectionDefaultSelect');
@@ -223,7 +174,7 @@ async function addChunkToCollection(index, collectionId) {
             entry: {
                 sessionId: sessionId,
                 chunkIndex: index,
-                title: defaultEntryTitle(content, rawContent, index),
+                title: defaultEntryTitle({ content, rawContent, chunkIndex: index }),
                 content,
                 rawContent,
             },
@@ -238,7 +189,7 @@ async function addChunkToCollection(index, collectionId) {
                 coll.entries.push({
                     id: crypto.randomUUID(),
                     sessionId, chunkIndex: index,
-                    title: defaultEntryTitle(content, rawContent, index),
+                    title: defaultEntryTitle({ content, rawContent, chunkIndex: index }),
                     content, rawContent,
                     addedAt: Date.now(),
                 });
@@ -293,7 +244,7 @@ async function autoAddProcessedChunk(index, sessId) {
             entry: {
                 sessionId: sessId,
                 chunkIndex: index,
-                title: defaultEntryTitle(content, rawContent, index),
+                title: defaultEntryTitle({ content, rawContent, chunkIndex: index }),
                 content,
                 rawContent,
             },
@@ -308,7 +259,7 @@ async function autoAddProcessedChunk(index, sessId) {
                 coll.entries.push({
                     id: crypto.randomUUID(),
                     sessionId: sessId, chunkIndex: index,
-                    title: defaultEntryTitle(content, rawContent, index),
+                    title: defaultEntryTitle({ content, rawContent, chunkIndex: index }),
                     content, rawContent,
                     addedAt: Date.now(),
                 });
