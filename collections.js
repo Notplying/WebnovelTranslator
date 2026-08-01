@@ -21,6 +21,20 @@ function resolveDefaultCollection(collectionDefaults, sessionId) {
     return collectionDefaults.global ?? null;
 }
 
+// Default entry title convention, shared by every page that renders an entry
+// (chunks add-to-collection, options list/export). Stored title wins; else the
+// first non-empty line of the translation, falling back to the raw source;
+// else the legacy "Chunk N" label for entries added before the convention.
+function defaultEntryTitle(entry) {
+    if (entry && entry.title) return entry.title;
+    const firstLine = String(entry.content || '').split(/\r?\n/).find(line => line.trim())
+        || String(entry.rawContent || '').split(/\r?\n/).find(line => line.trim())
+        || '';
+    const trimmed = firstLine.trim();
+    // Cap the title length so a single long line doesn't break the UI.
+    return trimmed ? (trimmed.length > 120 ? trimmed.slice(0, 120) + '…' : trimmed) : `Chunk ${(entry.chunkIndex ?? 0) + 1}`;
+}
+
 // ─── Serialized mutations ───────────────────────────────────────────────────────
 // Wraps store.mutate for the collections key; mutators return the store's
 // { changed, note } contract. The updatedAt stamp is part of the write policy,
@@ -210,6 +224,7 @@ async function setCollectionSessionDefault(sessionId, value) {
 // ─── Node test seam (fewshot.js/settings.js pattern; inert in the browser) ─────
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
+        defaultEntryTitle,
         resolveDefaultCollection,
         getCollections,
         createCollection,
