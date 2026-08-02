@@ -2,6 +2,8 @@
 // Loaded before options.js / chunks.js, which use UI_THEME and applyUiTheme.
 // ui-boot.js stays separate on purpose: it runs synchronously in <head> with zero
 // dependencies and cannot use this module.
+// Top-level functions are browser globals; the module.exports block at the bottom
+// enables Node testing (Node-only; inert in the browser).
 
 const UI_THEME = {
   MODERN: 'modern',
@@ -31,4 +33,9 @@ function applyUiTheme(value) {
     // only the pre-paint mirror is lost.
   }
   return theme;
+}
+
+// ─── Node export (inert in browser) ───────────────────────────────────────────
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { UI_THEME, normalizeTheme, applyUiTheme };
 }

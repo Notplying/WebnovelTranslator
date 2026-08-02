@@ -57,4 +57,9 @@
             return false;
         }
     }
+
+    // Node test seam (inert in the browser; `module` is undefined there).
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = { pasteTextToChatGPT };
+    }
 })();

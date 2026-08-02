@@ -4,3 +4,8 @@ const WEB_PERMISSIONS = {
     chatgptWeb: { origins: ['https://chatgpt.com/*', 'https://chat.openai.com/*'], permissions: ['tabs'] },
     geminiWeb: { origins: ['https://gemini.google.com/*'], permissions: ['tabs'] }
 };
+
+// ─── Node export (inert in browser) ───────────────────────────────────────────
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { WEB_PERMISSIONS };
+}

@@ -630,3 +630,15 @@ async function processChunkWithGeminiWeb(message, options) {
         delete sessionControllers[sessionId];
     }
 }
+
+// ─── Node export (inert in browser) ───────────────────────────────────────────
+// Bottom of file: the guard references const declarations (HTTP_PROVIDER_CONFIGS,
+// messageHandlers) that must be initialized by now.
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        urlPatternToRegExp, withMaxTokens, withTemperature,
+        HTTP_PROVIDER_CONFIGS, respond, messageHandlers, processChunk,
+        ensureWebPermission, hasStoredWebPermission, setStoredWebPermission,
+        requestAndStoreWebPermission,
+    };
+}

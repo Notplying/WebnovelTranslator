@@ -94,16 +94,27 @@ function splitTextIntoChunks(text, maxLength) {
 
   while (startIndex < text.length) {
     let endIndex = startIndex + maxLength;
+    let cutAtNewline = false;
     if (endIndex < text.length) {
-      endIndex = text.lastIndexOf('\n', endIndex);
-      if (endIndex === -1) {
+      // Only a newline INSIDE the window counts as a cut point — lastIndexOf
+      // can return an index before startIndex (window has no newline but
+      // earlier text does), which would make an empty chunk and loop forever.
+      const newlineIndex = text.lastIndexOf('\n', endIndex);
+      if (newlineIndex >= startIndex) {
+        endIndex = newlineIndex;
+        cutAtNewline = true;
+      } else {
         endIndex = startIndex + maxLength;
       }
     }
     const chunk = text.substring(startIndex, endIndex);
     console.log(`Chunk length: ${chunk.length}`);
     chunks.push(chunk);
-    startIndex = endIndex + 1;
+    // A newline boundary is consumed by the cut (skip it); a hard cut at the
+    // window edge must NOT skip the next character or it is lost.
+    const nextStart = cutAtNewline ? endIndex + 1 : endIndex;
+    if (nextStart === startIndex) break; // maxLength 0 — no progress possible
+    startIndex = nextStart;
   }
 
   return chunks;
@@ -133,3 +144,8 @@ browser.storage.local.get(['maxLength', 'prefix', 'suffix', 'retryCount']).then(
 }).catch(err => {
   console.error('Failed to load settings from storage:', err);
 });
+
+// ─── Node export (inert in browser) ───────────────────────────────────────────
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { splitParagraphText, splitTextIntoChunks };
+}
