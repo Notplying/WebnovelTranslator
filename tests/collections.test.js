@@ -17,6 +17,7 @@ const {
   createCollection,
   addEntryToCollection,
   removeEntryFromCollection,
+  removeEntriesFromCollection,
   updateEntryTitle,
   updateEntryContent,
   clearCollectionEntries,
@@ -134,6 +135,75 @@ test('removeEntryFromCollection rejects unknown entry', async () => {
   reset();
   const { collection } = await createCollection('C');
   await assert.rejects(removeEntryFromCollection(collection.id, 'nope'), /Entry not found/);
+});
+
+test('removeEntriesFromCollection removes several entries in one write and stamps updatedAt', async () => {
+  reset();
+  const { collection } = await createCollection('C');
+  for (let i = 0; i < 4; i++) {
+    await addEntryToCollection(collection.id, { sessionId: 's1', chunkIndex: i });
+  }
+  const before = (await getCollections()).collections[collection.id];
+  const ids = before.entries.slice(1, 3).map(e => e.id);
+  const res = await removeEntriesFromCollection(collection.id, ids);
+  assert.equal(res.removed, 2);
+  const after = (await getCollections()).collections[collection.id];
+  assert.equal(after.entries.length, 2);
+  assert.deepEqual(after.entries.map(e => e.chunkIndex), [0, 3]); // survivors keep order
+  assert.ok(after.updatedAt >= before.updatedAt);
+});
+
+test('removeEntriesFromCollection removes a subset, keeps the rest', async () => {
+  reset();
+  const { collection } = await createCollection('C');
+  await addEntryToCollection(collection.id, { sessionId: 's1', chunkIndex: 0 });
+  await addEntryToCollection(collection.id, { sessionId: 's1', chunkIndex: 1 });
+  const ids = (await getCollections()).collections[collection.id].entries.map(e => e.id);
+  const res = await removeEntriesFromCollection(collection.id, [ids[1]]);
+  assert.equal(res.removed, 1);
+  const after = (await getCollections()).collections[collection.id];
+  assert.equal(after.entries.length, 1);
+  assert.equal(after.entries[0].id, ids[0]);
+});
+
+test('removeEntriesFromCollection: empty list is a no-op write', async () => {
+  reset();
+  const { collection } = await createCollection('C');
+  await addEntryToCollection(collection.id, { sessionId: 's1', chunkIndex: 0 });
+  const before = (await getCollections()).collections[collection.id];
+  const res = await removeEntriesFromCollection(collection.id, []);
+  assert.equal(res.removed, 0);
+  const after = (await getCollections()).collections[collection.id];
+  assert.equal(after.entries.length, 1);
+  assert.equal(after.updatedAt, before.updatedAt); // no write, no stamp
+});
+
+test('removeEntriesFromCollection dedupes ids and ignores unknown ids', async () => {
+  reset();
+  const { collection } = await createCollection('C');
+  await addEntryToCollection(collection.id, { sessionId: 's1', chunkIndex: 0 });
+  await addEntryToCollection(collection.id, { sessionId: 's1', chunkIndex: 1 });
+  const entries = (await getCollections()).collections[collection.id].entries;
+  const res = await removeEntriesFromCollection(collection.id, [entries[0].id, entries[0].id, 'ghost']);
+  assert.equal(res.removed, 1);
+  const after = (await getCollections()).collections[collection.id];
+  assert.equal(after.entries.length, 1);
+  assert.equal(after.entries[0].id, entries[1].id);
+});
+
+test('removeEntriesFromCollection rejects invalid input', async () => {
+  reset();
+  const { collection } = await createCollection('C');
+  await assert.rejects(removeEntriesFromCollection(undefined, ['x']), /Invalid input/);
+  await assert.rejects(removeEntriesFromCollection(collection.id, 'not-an-array'), /Invalid input/);
+  await assert.rejects(removeEntriesFromCollection(collection.id, [null]), /Invalid input/);
+});
+
+test('removeEntriesFromCollection on missing collection throws', async () => {
+  reset();
+  await assert.rejects(removeEntriesFromCollection('ghost', ['x']), /Collection not found/);
+  // An empty selection must not skip the existence check.
+  await assert.rejects(removeEntriesFromCollection('ghost', []), /Collection not found/);
 });
 
 test('updateEntryTitle / updateEntryContent mutate in place', async () => {

@@ -817,13 +817,39 @@
     }
     .collection-entry {
       display: grid;
-      grid-template-columns: 28px 1fr auto;
+      grid-template-columns: 28px 24px 1fr auto;
       gap: 8px;
       align-items: start;
       padding: 10px 12px;
       border-radius: 6px;
       background: var(--bg);
       border: 1px solid var(--border);
+    }
+    .collection-entry-select {
+      display: flex;
+      align-items: center;
+      padding-top: 2px;
+    }
+    .collection-entry-select input,
+    .collection-select-all input {
+      accent-color: var(--accent);
+      cursor: pointer;
+      width: 14px;
+      height: 14px;
+    }
+    .collection-bulk-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 10px;
+    }
+    .collection-select-all {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      cursor: pointer;
     }
     .collection-entry-title {
       font-weight: 600;

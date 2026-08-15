@@ -142,6 +142,29 @@ async function removeEntryFromCollection(collectionId, entryId) {
     return { success: true };
 }
 
+// Bulk remove: one serialized write for a list of entry ids, so the deletion is
+// atomic and stamps a single updatedAt. Lenient on unknown ids (the UI sends a
+// rendered snapshot) — only the listed ids that exist are removed.
+async function removeEntriesFromCollection(collectionId, entryIds) {
+    if (!collectionId || !Array.isArray(entryIds) || entryIds.some(id => typeof id !== 'string' || !id)) throw new Error('Invalid input.');
+    // Nothing selected — run the mutator only to validate the collection
+    // exists (changed: false skips the write, so no updatedAt stamp), so a
+    // ghost collection errors the same whether or not anything is selected.
+    if (entryIds.length === 0) {
+        await mutateCollection(collectionId, () => ({ changed: false, note: 'empty' }));
+        return { success: true, removed: 0 };
+    }
+    const ids = new Set(entryIds); // dedupe before the filter
+    let removed = 0;
+    await mutateCollection(collectionId, c => {
+        const before = c.entries.length;
+        c.entries = c.entries.filter(e => !ids.has(e.id));
+        removed = before - c.entries.length;
+        return removed > 0 ? { changed: true } : { changed: false, note: 'notFound' };
+    });
+    return { success: true, removed };
+}
+
 // Update a single entry's title — routed through the serialized mutation path.
 async function updateEntryTitle(collectionId, entryId, title) {
     if (!collectionId || !entryId || title == null) throw new Error('Invalid input.');
@@ -243,6 +266,7 @@ if (typeof module !== 'undefined' && module.exports) {
         deleteCollection,
         addEntryToCollection,
         removeEntryFromCollection,
+        removeEntriesFromCollection,
         updateEntryTitle,
         updateEntryContent,
         clearCollectionEntries,

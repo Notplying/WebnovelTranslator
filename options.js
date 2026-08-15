@@ -279,6 +279,9 @@ async function clearFewShotCustom() {
 
 // ─── Collections ─────────────────────────────────────────────────────────────
 let _selectedCollectionId = null;
+// Entry ids checked in the collection detail's bulk-remove bar. Transient UI
+// state, kept across re-renders of the same collection, cleared on switch.
+let _selectedEntryIds = new Set();
 
 // Outside-click handler for the collection export dropdown — installed only while
 // the dropdown is open and removed on close or re-render to avoid accumulation.
@@ -450,6 +453,7 @@ async function renderCollectionsSection() {
       // Click or keyboard (Enter/Space) to select. Action buttons are excluded.
       list.querySelectorAll('.collection-item').forEach(item => {
         const select = () => {
+          if (_selectedCollectionId !== item.dataset.id) _selectedEntryIds.clear();
           _selectedCollectionId = item.dataset.id;
           renderCollectionsSection();
         };
@@ -479,7 +483,7 @@ async function renderCollectionsSection() {
               if (!confirm('Delete this collection? This cannot be undone.')) return;
               const res = await browser.runtime.sendMessage({ action: 'deleteCollection', collectionId: id });
               if (res?.error) throw new Error(res.error);
-              if (_selectedCollectionId === id) _selectedCollectionId = null;
+              if (_selectedCollectionId === id) { _selectedCollectionId = null; _selectedEntryIds.clear(); }
               showToast('🗑 Collection deleted.', 'success');
             }
           } catch (err) {
@@ -504,6 +508,10 @@ function renderCollectionDetail(collectionsMap) {
     return;
   }
   const entries = coll.entries || [];
+  // Prune selection ids that no longer exist (e.g. a single entry removed via
+  // its row button) so the bulk-remove count stays honest.
+  const validIds = new Set(entries.map(e => e.id));
+  for (const id of [..._selectedEntryIds]) if (!validIds.has(id)) _selectedEntryIds.delete(id);
   detail.replaceChildren();
   const headerRow = document.createElement('div');
   headerRow.className = 'collection-header-row';
@@ -592,6 +600,15 @@ function renderCollectionDetail(collectionsMap) {
       downBtn.textContent = '▼';
       if (idx === entries.length - 1) { downBtn.disabled = true; downBtn.style.opacity = '0.3'; downBtn.style.cursor = 'default'; }
       reorderCol.append(upBtn, downBtn);
+      const selectCell = document.createElement('div');
+      selectCell.className = 'collection-entry-select';
+      const check = document.createElement('input');
+      check.type = 'checkbox';
+      check.className = 'entry-select';
+      check.dataset.entryId = e.id;
+      check.setAttribute('aria-label', 'Select entry');
+      check.checked = _selectedEntryIds.has(e.id);
+      selectCell.append(check);
       const mid = document.createElement('div');
       const titleEl = document.createElement('div');
       titleEl.className = 'collection-entry-title';
@@ -618,10 +635,67 @@ function renderCollectionDetail(collectionsMap) {
         btn.textContent = label;
         actionsEl.append(btn);
       }
-      entryEl.append(reorderCol, mid, actionsEl);
+      entryEl.append(reorderCol, selectCell, mid, actionsEl);
       frag.append(entryEl);
     });
     entriesEl.replaceChildren(frag);
+
+    // Bulk-remove toolbar: select-all + remove-selected. Built and wired in
+    // this same block, so the wiring can never run without the elements.
+    const bulkRow = document.createElement('div');
+    bulkRow.className = 'collection-bulk-row';
+    const selectAllLabel = document.createElement('label');
+    selectAllLabel.className = 'collection-select-all';
+    const selectAll = document.createElement('input');
+    selectAll.type = 'checkbox';
+    selectAll.id = 'collectionSelectAll';
+    selectAll.setAttribute('aria-label', 'Select all entries');
+    selectAllLabel.append(selectAll, document.createTextNode(' Select all'));
+    const removeSelectedBtn = document.createElement('button');
+    removeSelectedBtn.className = 'btn btn-danger btn-sm';
+    removeSelectedBtn.id = 'collectionRemoveSelectedBtn';
+    bulkRow.append(selectAllLabel, removeSelectedBtn);
+    detail.insertBefore(bulkRow, entriesWrap);
+
+    const updateBulkSelectionUI = () => {
+      const n = _selectedEntryIds.size;
+      removeSelectedBtn.disabled = n === 0;
+      removeSelectedBtn.textContent = n ? `🗑 Remove selected (${n})` : '🗑 Remove selected';
+      selectAll.checked = n === entries.length;
+      selectAll.indeterminate = n > 0 && n < entries.length;
+    };
+    entriesEl.querySelectorAll('.entry-select').forEach(cb => {
+      cb.addEventListener('change', () => {
+        if (cb.checked) _selectedEntryIds.add(cb.dataset.entryId);
+        else _selectedEntryIds.delete(cb.dataset.entryId);
+        updateBulkSelectionUI();
+      });
+    });
+    selectAll.addEventListener('change', () => {
+      entries.forEach(e => {
+        if (selectAll.checked) _selectedEntryIds.add(e.id);
+        else _selectedEntryIds.delete(e.id);
+      });
+      entriesEl.querySelectorAll('.entry-select').forEach(cb => { cb.checked = selectAll.checked; });
+      updateBulkSelectionUI();
+    });
+    removeSelectedBtn.addEventListener('click', async () => {
+      if (_selectedEntryIds.size === 0) return;
+      const n = _selectedEntryIds.size;
+      if (!confirm(`Remove ${n} entr${n === 1 ? 'y' : 'ies'} from this collection?`)) return;
+      const ids = [..._selectedEntryIds];
+      try {
+        const res = await browser.runtime.sendMessage({ action: 'removeEntriesFromCollection', collectionId: _selectedCollectionId, entryIds: ids });
+        if (res?.error) throw new Error(res.error);
+        // Report what the store actually removed — the requested list may
+        // include ids that vanished since the snapshot (e.g. another tab).
+        const removed = res.removed ?? ids.length;
+        _selectedEntryIds.clear();
+        renderCollectionsSection();
+        showToast(`🗑 ${removed} entr${removed === 1 ? 'y' : 'ies'} removed.`, 'success');
+      } catch (err) { showToast('❌ Failed to remove entries.', 'error'); }
+    });
+    updateBulkSelectionUI();
 
     // Title edit (blur → save).
     entriesEl.querySelectorAll('[contenteditable="true"]').forEach(el => {
@@ -766,6 +840,7 @@ function renderCollectionDetail(collectionsMap) {
       const res = await browser.runtime.sendMessage({ action: 'deleteCollection', collectionId: _selectedCollectionId });
       if (res?.error) throw new Error(res.error);
       _selectedCollectionId = null;
+      _selectedEntryIds.clear();
       renderCollectionsSection();
       showToast('🗑 Collection deleted.', 'success');
     } catch (err) { showToast('❌ Failed to delete collection.', 'error'); }

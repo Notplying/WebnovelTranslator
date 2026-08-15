@@ -129,6 +129,8 @@ const messageHandlers = {
     deleteCollection: (m) => deleteCollection(m.collectionId),
     addEntryToCollection: (m) => addEntryToCollection(m.collectionId, m.entry),
     removeEntryFromCollection: (m) => removeEntryFromCollection(m.collectionId, m.entryId),
+    // Bulk remove of selected entries — one serialized write for the whole list.
+    removeEntriesFromCollection: (m) => removeEntriesFromCollection(m.collectionId, m.entryIds),
     // Update a single entry's title — routed through the serialized mutation path.
     updateEntryTitle: (m) => updateEntryTitle(m.collectionId, m.entryId, m.title),
     // Update a single entry's translated content (e.g. after re-processing) — serialized.

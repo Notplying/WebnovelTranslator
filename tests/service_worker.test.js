@@ -237,6 +237,18 @@ test('messageHandlers: reprocessEntry throws on missing sessionId or non-string 
   assert.throws(() => messageHandlers.reprocessEntry({ sessionId: 's', chunkIndex: 0 }), /Invalid input\./);
 });
 
+test('messageHandlers: removeEntriesFromCollection removes only the listed entries', async () => {
+  reset();
+  const { collection } = await createCollection('C');
+  await addEntryToCollection(collection.id, { sessionId: 's1', chunkIndex: 0 });
+  await addEntryToCollection(collection.id, { sessionId: 's1', chunkIndex: 1 });
+  const ids = (await getCollections()).collections[collection.id].entries.map(e => e.id);
+  const res = await messageHandlers.removeEntriesFromCollection({ collectionId: collection.id, entryIds: [ids[0]] });
+  assert.equal(res.removed, 1);
+  const after = (await getCollections()).collections[collection.id];
+  assert.deepEqual(after.entries.map(e => e.id), [ids[1]]);
+});
+
 test('messageHandlers: getStoredData returns empty defaults for unknown session', async () => {
   const result = await messageHandlers.getStoredData({ sessionId: 'nope' });
   assert.deepEqual(result, { chunks: [], prefix: '', suffix: '', retryCount: DEFAULTS.retryCount });
