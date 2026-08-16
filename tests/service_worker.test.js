@@ -42,7 +42,7 @@ globalThis.browser.permissions = {};
 // load; Node must not stay alive waiting on it.
 globalThis.setInterval = () => ({});
 const {
-  urlPatternToRegExp, withMaxTokens, withTemperature,
+  urlPatternToRegExp, withMaxTokens, withTemperature, withReasoningEffort,
   HTTP_PROVIDER_CONFIGS, respond, messageHandlers, processChunk,
   ensureWebPermission, hasStoredWebPermission, setStoredWebPermission,
   requestAndStoreWebPermission,
@@ -94,6 +94,16 @@ test('withTemperature: number written', () => {
 test('withTemperature: non-numeric skipped', () => {
   assert.deepEqual(withTemperature({}, { temperature: '' }), {});
   assert.deepEqual(withTemperature({}, {}), {});
+});
+
+test('withReasoningEffort: non-empty value written, trimmed', () => {
+  assert.deepEqual(withReasoningEffort({}, { openaiReasoningEffort: 'high' }), { reasoning_effort: 'high' });
+  assert.deepEqual(withReasoningEffort({}, { openaiReasoningEffort: ' medium ' }), { reasoning_effort: 'medium' });
+});
+
+test('withReasoningEffort: empty / missing skipped so non-reasoning models ignore it', () => {
+  assert.deepEqual(withReasoningEffort({}, { openaiReasoningEffort: '' }), {});
+  assert.deepEqual(withReasoningEffort({}, {}), {});
 });
 
 // ─── HTTP_PROVIDER_CONFIGS builders (pure) ─────────────────────────────────────
@@ -190,6 +200,21 @@ test('openai: buildBody defaults model to gpt-4o-mini and writes max_tokens', ()
   assert.equal(body.max_tokens, 1000);
   assert.equal(body.temperature, 0.2);
   assert.equal(body.stream, true);
+});
+
+test('openai: buildBody writes reasoning_effort for reasoning models, skips when unset', () => {
+  const withEffort = HTTP_PROVIDER_CONFIGS.openai.buildBody(
+    { openaiReasoningEffort: 'medium' },
+    { prefix: '', chunk: 'C', suffix: '' },
+    [],
+  );
+  assert.equal(withEffort.reasoning_effort, 'medium');
+  const withoutEffort = HTTP_PROVIDER_CONFIGS.openai.buildBody(
+    { openaiReasoningEffort: '' },
+    { prefix: '', chunk: 'C', suffix: '' },
+    [],
+  );
+  assert.equal(withoutEffort.reasoning_effort, undefined);
 });
 
 test('HTTP provider builders: messages append examples before the user turn', () => {

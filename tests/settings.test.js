@@ -96,3 +96,9 @@ test('sanitizer does not invent keys that were not present', () => {
   assert.ok(!('maxLength' in out));
   assert.ok(!('prefix' in out));
 });
+
+test('openaiReasoningEffort defaults to empty (model default applies)', () => {
+  assert.equal(DEFAULTS.openaiReasoningEffort, '');
+  assert.equal(SETTINGS.openaiReasoningEffort.elementId, 'openaiReasoningEffort');
+  assert.equal(SETTINGS.openaiReasoningEffort.type, undefined); // string — no sanitizer clamp
+});

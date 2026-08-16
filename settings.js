@@ -45,6 +45,9 @@ const SETTINGS = {
   openaiMaxTokens: { default: '', type: 'number', allowEmpty: true, elementId: 'openaiMaxTokens' },
   openaiContextWindow: { default: '', type: 'number', allowEmpty: true, elementId: 'openaiContextWindow' },
   openaiBaseUrl: { default: 'https://api.openai.com/v1', elementId: 'openaiBaseUrl' },
+  // Reasoning effort for the OpenAI-shaped providers. '' → let the model
+  // default apply; valid values are the Chat Completions `reasoning_effort` enum.
+  openaiReasoningEffort: { default: '', elementId: 'openaiReasoningEffort' },
 
   maxSessions: { default: 3, type: 'number', integer: true, min: 1, max: 50, elementId: 'maxSessions' },
   chunkFontSize: { default: 1.05, type: 'number', min: 0.1, max: 10, elementId: 'chunkFontSize' },

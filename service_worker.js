@@ -288,6 +288,17 @@ function withTemperature(body, options) {
     return body;
 }
 
+// Shared reasoning-effort passthrough for the OpenAI-compatible providers.
+// The Chat Completions API takes a top-level `reasoning_effort` string enum
+// ('' → "auto" → let the model default apply, or one of low/medium/high and
+// model-dependent siblings like none/minimal/xhigh/max). Only a non-empty
+// value is written, so non-reasoning models keep ignoring it.
+function withReasoningEffort(body, options) {
+    const effort = options.openaiReasoningEffort;
+    if (typeof effort === 'string' && effort.trim()) body.reasoning_effort = effort.trim();
+    return body;
+}
+
 // The single HTTP-provider list (keys mirror llm.js PROVIDER_DESCRIPTORS).
 // Each entry is just URL/headers/body builders that read option keys.
 const HTTP_PROVIDER_CONFIGS = {
@@ -364,6 +375,7 @@ const HTTP_PROVIDER_CONFIGS = {
             };
             withMaxTokens(body, 'max_tokens', 'openaiMaxTokens', options);
             withTemperature(body, options);
+            withReasoningEffort(body, options);
             return body;
         }
     }
@@ -638,7 +650,7 @@ async function processChunkWithGeminiWeb(message, options) {
 // messageHandlers) that must be initialized by now.
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
-        urlPatternToRegExp, withMaxTokens, withTemperature,
+        urlPatternToRegExp, withMaxTokens, withTemperature, withReasoningEffort,
         HTTP_PROVIDER_CONFIGS, respond, messageHandlers, processChunk,
         ensureWebPermission, hasStoredWebPermission, setStoredWebPermission,
         requestAndStoreWebPermission,
