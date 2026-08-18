@@ -157,6 +157,124 @@ test('splitParagraphText: .content.py-5 — missing h1 does not break extraction
   assert.equal(splitParagraphText(4000)[0], 'only paragraph\n\n');
 });
 
+// ─── splitParagraphText — 69shuba .txtnav site path ───────────────────────────
+// 69shuba.com: chapter title in <h1>, body as bare text-node paragraphs
+// separated by <br>, with meta (.txtinfo) and ad (#txtright, .contentadv,
+// .bottom-ad) divs interleaved. See "example format.htm".
+
+test('splitParagraphText: .txtnav — h1 title + paragraph grouping, ads/meta skipped', () => {
+  const h1 = element('h1', { textContent: '第424章 改造神之橱窗' });
+  const txtnav = {
+    ...element('div', { childNodes: [
+      textNode('\n            '),                                      // leading whitespace
+      h1,
+      textNode('\n            '),
+      element('div', { innerHTML: '<span>2024-09-06</span> 作者' }),  // .txtinfo meta
+      textNode('\n            '),
+      element('div', { innerHTML: '<script>loadAdv(2, 0)</script>' }), // #txtright ad
+      textNode('\n            '),
+      textNode('\n            　　\t\t第424章 改造神之橱窗\n'),          // title repeat
+      element('br'), element('br'),
+      textNode('\n            　　白疫左右看了看。\n'),
+      element('br'), element('br'),
+      textNode('\n            　　这地方是'),                            // single-br join
+      element('br'),
+      textNode('\n            　　白疫记忆中有一个地方盛产时空石。\n'),
+      element('br'), element('br'),
+      textNode('\n            　　女子微微皱眉，似乎在思考着什么。\n'),
+    ] }),
+    querySelector(sel) { return sel === 'h1' ? h1 : null; },
+  };
+  installDocument({ '.txtnav': txtnav });
+  const chunks = splitParagraphText(4000);
+  assert.equal(chunks.length, 1);
+  // Title emitted once from <h1>; the title text-node repeat is deduped;
+  // meta + ad divs never appear; a single <br> joins one paragraph.
+  assert.equal(chunks[0],
+    '第424章 改造神之橱窗\n\n' +
+    '白疫左右看了看。\n\n' +
+    '这地方是 白疫记忆中有一个地方盛产时空石。\n\n' +
+    '女子微微皱眉，似乎在思考着什么。\n\n');
+});
+
+test('splitParagraphText: .txtnav — mid-content ad divs and blanks add no paragraphs', () => {
+  const h1 = element('h1', { textContent: '第五十一章 山雨欲来' });
+  const txtnav = {
+    ...element('div', { childNodes: [
+      h1,
+      textNode('\n            '),
+      // single <br> joins line-continuations inside a paragraph
+      textNode('\n            　　风声渐紧，'),
+      element('br'),
+      textNode('\n            　　山雨欲来。\n'),
+      element('br'), element('br'),
+      textNode(''),                                                   // blank text node
+      element('div', { innerHTML: '<script>loadAdv(7, 3)</script>' }), // .contentadv ad
+      element('br'), element('br'),
+      textNode('\n            　　\t\t雨点砸在青石板上。\n'),
+      element('br'), element('br'),
+      element('div', { innerHTML: '<script>loadAdv(3, 0)</script>' }), // .bottom-ad
+      textNode('\n'),
+    ] }),
+    querySelector(sel) { return sel === 'h1' ? h1 : null; },
+  };
+  installDocument({ '.txtnav': txtnav });
+  const chunks = splitParagraphText(4000);
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0],
+    '第五十一章 山雨欲来\n\n' +
+    '风声渐紧， 山雨欲来。\n\n' +
+    '雨点砸在青石板上。\n\n');
+});
+
+test('splitParagraphText: .txtnav — first paragraph differing from h1 is kept', () => {
+  const h1 = element('h1', { textContent: '第三章 初入江湖' });
+  const txtnav = {
+    ...element('div', { childNodes: [
+      h1,
+      textNode(''),                                                   // h1 has no text repeat
+      textNode('\n            　　\t\t天色微明，城门缓缓打开。\n'),
+    ] }),
+    querySelector(sel) { return sel === 'h1' ? h1 : null; },
+  };
+  installDocument({ '.txtnav': txtnav });
+  const chunks = splitParagraphText(4000);
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0], '第三章 初入江湖\n\n天色微明，城门缓缓打开。\n\n');
+});
+
+test('splitParagraphText: .txtnav — no h1 falls back to text node paragraphs only', () => {
+  const txtnav = {
+    ...element('div', { childNodes: [
+      textNode('\n            　　\t\t没有标题，只有正文。\n'),
+      element('br'), element('br'),
+      textNode('\n            　　\t\t第二段。\n'),
+    ] }),
+    querySelector(sel) { return null; },
+  };
+  installDocument({ '.txtnav': txtnav });
+  const chunks = splitParagraphText(4000);
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0], '没有标题，只有正文。\n\n第二段。\n\n');
+});
+
+test('splitParagraphText: .txtnav — chunks respect maxLength like other paths', () => {
+  const h1 = element('h1', { textContent: '第一章' });
+  const txtnav = {
+    ...element('div', { childNodes: [
+      h1,
+      textNode('　　　　一二三四五六七八九十'),
+    ] }),
+    querySelector(sel) { return sel === 'h1' ? h1 : null; },
+  };
+  installDocument({ '.txtnav': txtnav });
+  const chunks = splitParagraphText(8);
+  // Combined = '第一章\n\n一二三四五六七八九十\n\n'. The window of 8 reaches
+  // the second \n (index 4), which becomes the consumed boundary; the final
+  // chunk keeps the extractor's trailing '\n\n'.
+  assert.deepEqual(chunks, ['第一章\n', '一二三四五六七八', '九十\n\n']);
+});
+
 // ─── splitParagraphText — fallback pN/LN id path ──────────────────────────────
 
 test('splitParagraphText: fallback — p1..pN ids until one is missing', () => {

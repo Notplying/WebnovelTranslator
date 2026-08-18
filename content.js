@@ -72,6 +72,54 @@ function splitParagraphText(lengthinput) {
         combinedContent += text + '\n\n';
       }
     });
+  } else if (document.querySelector('.txtnav')) {
+    // 69shuba.com scraper: chapter title in <h1>, body as bare text-node
+    // paragraphs separated by <br>. A single <br> is a line-continuation
+    // inside one paragraph (the site wraps long lines), while <br><br> (or an
+    // element node) ends the paragraph. Meta (.txtinfo) and ad (e.g. #txtright,
+    // .contentadv, .bottom-ad) divs sit among the text — skipped entirely so
+    // ads and metadata never leak into the chapter text. The site repeats the
+    // chapter title as the first paragraph, so drop a leading paragraph that
+    // matches the h1 to avoid duplication.
+    const txtnav = document.querySelector('.txtnav');
+    const h1 = txtnav.querySelector('h1');
+    const chapterTitle = h1?.textContent?.trim();
+    if (chapterTitle) {
+      combinedContent += chapterTitle + '\n\n';
+    }
+    let paragraph = [];
+    let brSinceLastText = 0;
+    let skipFirst = Boolean(chapterTitle);
+    txtnav.childNodes.forEach(node => {
+      if (node.nodeType === Node.ELEMENT_NODE && node.tagName.toLowerCase() === 'br') {
+        brSinceLastText++;
+        return;
+      }
+      if (node.nodeType === Node.ELEMENT_NODE) { // meta/ad div, script, etc.
+        flushParagraph();
+        return;
+      }
+      const text = node.textContent.trim(); // text node
+      if (!text) return;
+      if (brSinceLastText >= 2 && paragraph.length) flushParagraph();
+      if (skipFirst && text === chapterTitle) {
+        skipFirst = false; // drop the site's repeated title line
+        brSinceLastText = 0;
+        return;
+      }
+      skipFirst = false;
+      paragraph.push(text);
+      brSinceLastText = 0;
+    });
+    flushParagraph();
+
+    function flushParagraph() {
+      if (paragraph.length) {
+        combinedContent += paragraph.join(' ') + '\n\n';
+        paragraph = [];
+      }
+      brSinceLastText = 0;
+    }
   } else {
     while (paragraphId <= MAX_PARAGRAPHS) {
       let paragraphElement = document.getElementById(`p${paragraphId}`);
