@@ -61,28 +61,29 @@ function renderMarkdownFragment(text) {
     // "1." .. "9." are left alone so intentional `1. First / 2. Second`
     // lists keep working.
     const NUM_SENTINEL = '\x00NP\x00';
-    const numParenIndices = [];
+    const parenMarkerTexts = [];
     processed = processed.replace(
-        /^ {0,3}(\d+)\.(?=[ \t]|\n|$)/gm,
-        (_m, n) => (n.length >= 2 ? `${n}\\.` : _m),
+        /^( {0,3})(\d+)\.(?=[ \t]|\n|$)/gm,
+        (_m, indent, n) => (n.length >= 2 ? `${indent}${n}\\.` : _m),
     );
     processed = processed.replace(
-        /^ {0,3}(\d+)\)(?=[ \t]|\n|$)/gm,
-        (_m, n) => {
+        /^( {0,3})(\d+)\)(?=[ \t]|\n|$)/gm,
+        (_m, indent, n) => {
             if (n.length < 2) return _m;
-            const idx = numParenIndices.length;
-            numParenIndices.push(`${n})`);
-            return `${NUM_SENTINEL}${idx}${NUM_SENTINEL}`;
+            const idx = parenMarkerTexts.length;
+            parenMarkerTexts.push(`${n})`);
+            return `${indent}${NUM_SENTINEL}${idx}${NUM_SENTINEL}`;
         },
     );
 
     const htmlRaw = marked.parse(processed);
     let html = htmlRaw;
-    if (numParenIndices.length) {
-        // Restore the ")" markers after parsing so they appear as literal text
-        // (the sentinel survives sanitize as plain text since it is not HTML).
-        for (let i = 0; i < numParenIndices.length; i++) {
-            html = html.split(`${NUM_SENTINEL}${i}${NUM_SENTINEL}`).join(escapeHtml(numParenIndices[i]));
+    if (parenMarkerTexts.length) {
+        // Restore the ")" markers after parsing so they appear as literal text.
+        // The sentinel contains null bytes and is not HTML, so it is restored
+        // before DOMPurify.sanitize — it must not be passed to the sanitizer.
+        for (let i = 0; i < parenMarkerTexts.length; i++) {
+            html = html.split(`${NUM_SENTINEL}${i}${NUM_SENTINEL}`).join(escapeHtml(parenMarkerTexts[i]));
         }
     }
     return DOMPurify.sanitize(html, {
