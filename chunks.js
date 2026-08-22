@@ -54,7 +54,37 @@ function renderMarkdownFragment(text) {
         processed = processed.replace(`\x00IMG${i}\x00`, tag);
     });
 
-    const html = marked.parse(processed);
+    // Escape stray numeric list markers (e.g. "607." / "607) ") at block starts
+    // so prose scores, years, etc. are not eaten as ordered lists — which
+    // would also render as "1." via the CSS counter-reset. Only the stray
+    // case (multi-digit, no intentional sequence) is escaped: small numbers
+    // "1." .. "9." are left alone so intentional `1. First / 2. Second`
+    // lists keep working.
+    const NUM_SENTINEL = '\x00NP\x00';
+    const numParenIndices = [];
+    processed = processed.replace(
+        /^ {0,3}(\d+)\.(?=[ \t]|\n|$)/gm,
+        (_m, n) => (n.length >= 2 ? `${n}\\.` : _m),
+    );
+    processed = processed.replace(
+        /^ {0,3}(\d+)\)(?=[ \t]|\n|$)/gm,
+        (_m, n) => {
+            if (n.length < 2) return _m;
+            const idx = numParenIndices.length;
+            numParenIndices.push(`${n})`);
+            return `${NUM_SENTINEL}${idx}${NUM_SENTINEL}`;
+        },
+    );
+
+    const htmlRaw = marked.parse(processed);
+    let html = htmlRaw;
+    if (numParenIndices.length) {
+        // Restore the ")" markers after parsing so they appear as literal text
+        // (the sentinel survives sanitize as plain text since it is not HTML).
+        for (let i = 0; i < numParenIndices.length; i++) {
+            html = html.split(`${NUM_SENTINEL}${i}${NUM_SENTINEL}`).join(escapeHtml(numParenIndices[i]));
+        }
+    }
     return DOMPurify.sanitize(html, {
         RETURN_DOM: true,
         ADD_ATTR: ['target', 'data-original-src', 'style'],
