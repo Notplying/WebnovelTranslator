@@ -1,0 +1,29 @@
+/* Cross-cutting a11y rules shared by options.html and chunks.html.
+   Independent of the theme layer — applies to both Modern and Classic.
+   - focus-visible: keyboard-only focus ring on form controls; the browser
+     default still applies to anything this rule doesn't match (buttons,
+     links, etc.).
+   - prefers-reduced-motion: gate so any future transition/animation is
+     respected without ceremony.
+   The theme layer (ui-theme.css) sets the variables this rule references
+   (--accent, --accent-glow); the cascade resolves them on apply, so link
+   order between the two stylesheets is not significant. */
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

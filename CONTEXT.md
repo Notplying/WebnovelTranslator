@@ -21,11 +21,11 @@ The shared modules below are classic scripts loaded before consumers. In the ser
 ## Language
 
 **Modern UI**:
-The default visual theme — crisp dark surfaces with a single cyan accent, no gradients or backdrop blur. Applied as CSS variable overrides under the `data-ui="modern"` attribute.
+The default visual theme — crisp dark surfaces with a single cyan accent, no visible gradients or backdrop blur. Applied as CSS variable overrides under the `data-ui="modern"` attribute. (The `--accent-gradient*` variables are linear-gradient values but the two stops are the same color, so the rendered output is flat.)
 _Avoid_: New UI, Liquid Glass (the rejected frosted-glass predecessor)
 
 **Classic UI**:
-The original flat dark theme. The `:root` CSS defaults, pixel-identical to pre-theme versions. Selected by toggling Modern UI off.
+The original flat dark theme. The `:root` CSS defaults, with one accessibility correction: `--text-muted` is bumped from `#64748b` (fails WCAG AA on Classic surfaces) to `#94a3b8` (passes AA with margin). All other values are unchanged from pre-theme versions. Selected by toggling Modern UI off.
 _Avoid_: Old UI, Legacy theme
 
 **UI theme toggle**:
@@ -37,8 +37,8 @@ The storage key holding the chosen theme. Values `"modern"` (default) or `"class
 _Avoid_: theme, uiStyle
 
 **Theme mirror**:
-The `localStorage` copy of `uiTheme`, written alongside the storage write. Read synchronously by `ui-boot.js` in each page's `<head>` so the theme is applied before first paint (no flash, no async race).
-_Avoid_: cache, local copy
+The `localStorage` copy of `uiTheme`, written alongside the storage write. Read synchronously by `ui-boot.js` in each page's `<head>` so the theme is applied before first paint (no flash, no async race). The implementation comment in `ui-boot.js` calls it a "cache" — accurate in code (`storage.local` is the source of truth and the mirror is healed on every page load) but the canonical user-facing term is the one above.
+_Avoid_: local copy
 
 **Settings schema**:
 The flat key→default table in `settings.js` that every load/save/sanitize/import/install loop derives from. Adding a setting = one row. See ADR-0003.

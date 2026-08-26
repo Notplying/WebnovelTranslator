@@ -18,7 +18,7 @@
       --accent2: #5eead4;
       --accent-glow: rgba(124, 106, 247, 0.25);
       --text: #e2e8f0;
-      --text-muted: #64748b;
+      --text-muted: #94a3b8;
       --danger: #f87171;
       --success: #4ade80;
       --radius: 12px;
@@ -225,14 +225,6 @@
       padding: 9px 12px;
       transition: border-color var(--transition), box-shadow var(--transition);
       width: 100%;
-    }
-
-    input:focus,
-    select:focus,
-    textarea:focus {
-      outline: none;
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-glow);
     }
 
     .field-hint {
@@ -891,6 +883,7 @@
     }
   </style>
   <link rel="stylesheet" href="ui-theme.css" />
+  <link rel="stylesheet" href="ui-base.css" />
 </head>
 
 <body>
@@ -1372,9 +1365,9 @@
         <div class="toggle-row">
           <div class="toggle-row-info">
             <label id="uiTheme-label" for="uiTheme">Modern UI</label>
-            <small>Clean, crisp dark theme with a cyan accent. Disable to keep the classic look.</small>
+            <small id="uiTheme-desc">Clean, crisp dark theme with a cyan accent. Disable to keep the classic look.</small>
           </div>
-          <label class="switch"><input type="checkbox" id="uiTheme" aria-labelledby="uiTheme-label"><span
+          <label class="switch"><input type="checkbox" id="uiTheme" aria-labelledby="uiTheme-label" aria-describedby="uiTheme-desc"><span
               class="slider"></span></label>
         </div>
       </div>
