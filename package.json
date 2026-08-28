@@ -1,0 +1,17 @@
+{
+  "name": "webnovel-translator",
+  "version": "3.1.3",
+  "private": true,
+  "description": "Firefox extension that translates webnovels via LLM APIs — tests only, no build.",
+  "scripts": {
+    "test": "node --test",
+    "lint": "web-ext lint",
+    "lint:theme-css": "node scripts/lint-theme-css.js"
+  },
+  "devDependencies": {
+    "web-ext": "^10.5.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

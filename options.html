@@ -4,6 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="ui-boot.js"></script>
   <title>AI Webnovel Translator — Settings</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
@@ -17,11 +18,14 @@
       --accent2: #5eead4;
       --accent-glow: rgba(124, 106, 247, 0.25);
       --text: #e2e8f0;
-      --text-muted: #64748b;
+      --text-muted: #94a3b8;
       --danger: #f87171;
       --success: #4ade80;
       --radius: 12px;
       --transition: 0.2s ease;
+      --btn-primary-hover: #6a58e5;
+      --btn-secondary-hover: #252a3d;
+      --on-accent: #fff;
     }
 
     *,
@@ -223,12 +227,17 @@
       width: 100%;
     }
 
-    input:focus,
-    select:focus,
-    textarea:focus {
-      outline: none;
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-glow);
+    .field-hint {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .field-hint code {
+      background: var(--surface2);
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-size: 0.72rem;
     }
 
     textarea {
@@ -331,7 +340,7 @@
     }
 
     input:checked+.slider::before {
-      background: #fff;
+      background: var(--on-accent);
       left: calc(100% - 17px);
     }
 
@@ -353,11 +362,11 @@
 
     .btn-primary {
       background: var(--accent);
-      color: #fff;
+      color: var(--on-accent);
     }
 
     .btn-primary:hover {
-      background: #6a58e5;
+      background: var(--btn-primary-hover);
       box-shadow: 0 0 20px var(--accent-glow);
     }
 
@@ -368,7 +377,7 @@
     }
 
     .btn-secondary:hover {
-      background: #252a3d;
+      background: var(--btn-secondary-hover);
       border-color: rgba(255, 255, 255, 0.15);
     }
 
@@ -813,13 +822,39 @@
     }
     .collection-entry {
       display: grid;
-      grid-template-columns: 28px 1fr auto;
+      grid-template-columns: 28px 24px 1fr auto;
       gap: 8px;
       align-items: start;
       padding: 10px 12px;
       border-radius: 6px;
       background: var(--bg);
       border: 1px solid var(--border);
+    }
+    .collection-entry-select {
+      display: flex;
+      align-items: center;
+      padding-top: 2px;
+    }
+    .collection-entry-select input,
+    .collection-select-all input {
+      accent-color: var(--accent);
+      cursor: pointer;
+      width: 14px;
+      height: 14px;
+    }
+    .collection-bulk-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 10px;
+    }
+    .collection-select-all {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      cursor: pointer;
     }
     .collection-entry-title {
       font-weight: 600;
@@ -847,6 +882,8 @@
       .collection-list { max-height: 200px; }
     }
   </style>
+  <link rel="stylesheet" href="ui-theme.css" />
+  <link rel="stylesheet" href="ui-base.css" />
 </head>
 
 <body>
@@ -887,6 +924,10 @@
       <div class="nav-label">Data</div>
       <button class="nav-item" data-section="data" id="nav-data">
         <span class="icon">💾</span> Import / Export
+      </button>
+      <div class="nav-label">Appearance</div>
+      <button class="nav-item" data-section="appearance" id="nav-appearance">
+        <span class="icon">🎨</span> UI Theme
       </button>
       <div class="nav-label" style="margin-top: auto; padding-top: 16px;">Community</div>
       <a href="https://discord.gg/kTQvSuxZ6Y" target="_blank" rel="noopener noreferrer" class="nav-item"
@@ -1218,6 +1259,22 @@
             <label for="openaiContextWindow">Context Window (optional)</label>
             <input type="number" id="openaiContextWindow" />
           </div>
+          <div class="field" style="grid-column:1/-1">
+            <label for="openaiReasoningEffort">Reasoning Effort (optional)</label>
+            <select id="openaiReasoningEffort">
+              <option value="">Auto (model default)</option>
+              <option value="none">none</option>
+              <option value="minimal">minimal</option>
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+              <option value="xhigh">xhigh</option>
+              <option value="max">max</option>
+            </select>
+            <p class="field-hint">Applies to reasoning models (o3, o4-mini, gpt-5, …) that accept the
+              Chat Completions <code>reasoning_effort</code> parameter. Options outside the model's
+              supported set are ignored, so any value is safe to leave selected.</p>
+          </div>
         </div>
       </div>
     </section>
@@ -1298,6 +1355,24 @@
       </div>
     </section>
 
+    <section class="section" id="section-appearance">
+      <div class="page-header">
+        <h1>Appearance</h1>
+        <p>Customize how the extension looks.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">🎨 UI Theme</div>
+        <div class="toggle-row">
+          <div class="toggle-row-info">
+            <label id="uiTheme-label" for="uiTheme">Modern UI</label>
+            <small id="uiTheme-desc">Clean, crisp dark theme with a cyan accent. Disable to keep the classic look.</small>
+          </div>
+          <label class="switch"><input type="checkbox" id="uiTheme" aria-labelledby="uiTheme-label" aria-describedby="uiTheme-desc"><span
+              class="slider"></span></label>
+        </div>
+      </div>
+    </section>
+
     <!-- ── Sticky Save Bar ─────────────────────────────── -->
     <div
       style="position:sticky;bottom:0;padding:16px 0 0;margin-top:8px;background:linear-gradient(transparent,var(--bg) 50%);display:flex;gap:10px">
@@ -1307,10 +1382,16 @@
 
   <div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   <script src="browser-polyfill.min.js"></script>
+  <script src="ui-theme.js"></script>
   <script src="marked.min.js"></script>
   <script src="purify.min.js"></script>
   <script src="shared_web_permissions.js"></script>
+  <script src="utils.js"></script>
   <script src="fewshot.js"></script>
+  <script src="settings.js"></script>
+  <script src="store.js"></script>
+  <script src="collections.js"></script>
+  <script src="exporters.js"></script>
   <script src="options.js"></script>
 </body>
 

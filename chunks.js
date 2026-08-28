@@ -24,47 +24,17 @@ if (typeof marked !== 'undefined') {
     });
 }
 
-// function renderMarkdown(text) {
-//     if (typeof marked === 'undefined') return `<p>${escapeHtml(text)}</p>`;
-//     // Escape all HTML tags to plaintext except <img> tags which we need for rendering.
-//     // We do this BEFORE marked.parse() so marked never sees real HTML tags → no recursion.
-//     // Strategy: temporarily extract <img> tags, escape everything else, put <img> back.
-//     const imgTags = [];
-//     let processed = (text || '').replace(/<img[^>]*>/gi, match => {
-//         imgTags.push(match);
-//         return `\x00IMG${imgTags.length - 1}\x00`;
-//     });
-//     processed = escapeHtml(processed); // escapeHtml has no effect on \x00 placeholders
-//     imgTags.forEach((tag, i) => { processed = processed.replace(`\x00IMG${i}\x00`, tag); });
-//     const html = marked.parse(processed);
-//     return DOMPurify.sanitize(html, {
-//         ADD_ATTR: ['target', 'data-original-src', 'style'],
-//         FORBID_TAGS: ['style', 'script']
-//     });
-// }
+// escapeHtml + decodeHtmlEntities live in utils.js (single convention for
+// both pages; escapeHtml includes &quot; for attribute contexts).
 
-// function escapeHtml(t) {
-//     return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-// }
-function decodeHtmlEntities(t) {
-    return t
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'");
-}
-
-function escapeHtml(t) {
-    return t
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-}
-
-function renderMarkdown(text) {
-    if (typeof marked === 'undefined') return `<p>${escapeHtml(text)}</p>`;
+// Sanitized markdown as a DOM fragment (RETURN_DOM) so callers can
+// replaceChildren() instead of assigning innerHTML — satisfies web-ext lint.
+function renderMarkdownFragment(text) {
+    if (typeof marked === 'undefined') {
+        const p = document.createElement('p');
+        p.textContent = text || '';
+        return p;
+    }
 
     const imgTags = [];
     // Decode entities first so we always work with literal chars, never double-encoded strings
@@ -84,8 +54,40 @@ function renderMarkdown(text) {
         processed = processed.replace(`\x00IMG${i}\x00`, tag);
     });
 
-    const html = marked.parse(processed);
+    // Escape stray numeric list markers (e.g. "607." / "607) ") at block starts
+    // so prose scores, years, etc. are not eaten as ordered lists — which
+    // would also render as "1." via the CSS counter-reset. Only the stray
+    // case (multi-digit, no intentional sequence) is escaped: small numbers
+    // "1." .. "9." are left alone so intentional `1. First / 2. Second`
+    // lists keep working.
+    const NUM_SENTINEL = '\x00NP\x00';
+    const parenMarkerTexts = [];
+    processed = processed.replace(
+        /^( {0,3})(\d+)\.(?=[ \t]|\n|$)/gm,
+        (_m, indent, n) => (n.length >= 2 ? `${indent}${n}\\.` : _m),
+    );
+    processed = processed.replace(
+        /^( {0,3})(\d+)\)(?=[ \t]|\n|$)/gm,
+        (_m, indent, n) => {
+            if (n.length < 2) return _m;
+            const idx = parenMarkerTexts.length;
+            parenMarkerTexts.push(`${n})`);
+            return `${indent}${NUM_SENTINEL}${idx}${NUM_SENTINEL}`;
+        },
+    );
+
+    const htmlRaw = marked.parse(processed);
+    let html = htmlRaw;
+    if (parenMarkerTexts.length) {
+        // Restore the ")" markers after parsing so they appear as literal text.
+        // The sentinel contains null bytes and is not HTML, so it is restored
+        // before DOMPurify.sanitize — it must not be passed to the sanitizer.
+        for (let i = 0; i < parenMarkerTexts.length; i++) {
+            html = html.split(`${NUM_SENTINEL}${i}${NUM_SENTINEL}`).join(escapeHtml(parenMarkerTexts[i]));
+        }
+    }
     return DOMPurify.sanitize(html, {
+        RETURN_DOM: true,
         ADD_ATTR: ['target', 'data-original-src', 'style'],
         FORBID_TAGS: ['style', 'script']
     });
@@ -123,38 +125,42 @@ let reprocessingState = { isActive: false, targetIndex: -1 };
 let _terminated = false;
 
 // ─── Collections state ──────────────────────────────────────────────────────
+// The defaults rule and the entry-title convention (defaultEntryTitle) live
+// in collections.js; this local mirror feeds the shared resolveDefaultCollection().
 let collectionsList = {};     // collections map from storage
 let collectionDefaults = { global: null, perSession: {} };
 
-function resolveDefaultCollection(sessionId) {
-    const per = collectionDefaults.perSession;
-    if (Object.prototype.hasOwnProperty.call(per, sessionId)) return per[sessionId];
-    return collectionDefaults.global ?? null;
-}
-
-// Derive a default entry title from the first non-empty line of the translated
-// chunk content. Falls back to the raw source, then to the legacy "Chunk N" label.
-function defaultEntryTitle(content, rawContent, index) {
-    // Prefer translated lines first; only fall back to the raw source when the
-    // translation has no non-empty line (not merely when it's absent).
-    const firstLine = String(content || '').split(/\r?\n/).find(line => line.trim())
-        || String(rawContent || '').split(/\r?\n/).find(line => line.trim())
-        || '';
-    const trimmed = firstLine.trim();
-    // Cap the title length so a single long line doesn't break the UI.
-    return trimmed ? (trimmed.length > 120 ? trimmed.slice(0, 120) + '…' : trimmed) : `Chunk ${index + 1}`;
+// The one shape a collection entry takes everywhere this page sends it
+// (add-to menus and auto-add). Title follows the domain's convention.
+function makeCollectionEntry(sessId, index, content, rawContent) {
+    return {
+        sessionId: sessId,
+        chunkIndex: index,
+        title: defaultEntryTitle({ content, rawContent, chunkIndex: index }),
+        content,
+        rawContent,
+    };
 }
 
 async function renderCollectionSelector() {
     const sel = document.getElementById('collectionDefaultSelect');
     if (!sel) return;
-    const resolved = resolveDefaultCollection(sessionId);
+    const resolved = resolveDefaultCollection(collectionDefaults, sessionId);
     // Preserve user selection while rebuilding options.
     const existingValue = sel.value;
-    sel.innerHTML = '<option value="">None</option>' +
-        Object.values(collectionsList).map(c =>
-            `<option value="${escapeHtml(c.id)}"${c.id === resolved ? ' selected' : ''}>${escapeHtml(c.name)}</option>`
-        ).join('');
+    const frag = document.createDocumentFragment();
+    const noneOpt = document.createElement('option');
+    noneOpt.value = '';
+    noneOpt.textContent = 'None';
+    frag.append(noneOpt);
+    for (const c of Object.values(collectionsList)) {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.name;
+        if (c.id === resolved) opt.selected = true;
+        frag.append(opt);
+    }
+    sel.replaceChildren(frag);
     // If nothing was explicitly set for this session and a global default exists, reflect it.
     if (existingValue) sel.value = existingValue;
     else if (resolved) sel.value = resolved;
@@ -162,17 +168,24 @@ async function renderCollectionSelector() {
 
 document.getElementById('collectionDefaultSelect')?.addEventListener('change', async (e) => {
     const val = e.target.value || null;
-    // Capture the prior value before mutating local state so we can roll back on failure.
-    const prior = collectionDefaults.perSession[sessionId] ?? null;
+    // Capture the prior state before mutating local mirrors so we can roll back
+    // on failure: the effective default (per-session override, else global) and
+    // whether a per-session entry existed at all.
+    const hadOverride = Object.prototype.hasOwnProperty.call(collectionDefaults.perSession, sessionId);
+    const prior = resolveDefaultCollection(collectionDefaults, sessionId);
     collectionDefaults.perSession[sessionId] = val;
     try {
         const res = await browser.runtime.sendMessage({ action: 'setCollectionSessionDefault', sessionId, value: val });
         if (res?.error) throw new Error(res.error);
     } catch (err) {
-        // Restore the previous value. Set the DOM directly rather than calling
-        // renderCollectionSelector() — that function reads sel.value from the DOM,
-        // which still holds the failed selection and would re-apply it.
-        collectionDefaults.perSession[sessionId] = prior;
+        // Restore the previous state. When the effective default came from the
+        // global (no per-session entry before), delete the optimistic override
+        // instead of pinning a duplicate per-session entry that would shadow
+        // the global. Set the DOM directly rather than calling
+        // renderCollectionSelector() — that function reads sel.value from the
+        // DOM, which still holds the failed selection and would re-apply it.
+        if (hadOverride) collectionDefaults.perSession[sessionId] = prior;
+        else delete collectionDefaults.perSession[sessionId];
         const sel = document.getElementById('collectionDefaultSelect');
         if (sel) sel.value = prior || '';
         showToast(`❌ Failed to save session default: ${err.message}`, 'error');
@@ -192,11 +205,26 @@ function populateAddToMenu(index, menuEl) {
     if (colls.length === 0) {
         menuEl.innerHTML = `<button class="dropdown-item" data-action="new">✨ New collection…</button>`;
     } else {
-        menuEl.innerHTML = colls.map(c => {
+        const frag = document.createDocumentFragment();
+        for (const c of colls) {
             const added = (c.entries || []).some(e => e.sessionId === sessionId && e.chunkIndex === index);
-            return `<button class="dropdown-item${added ? ' added' : ''}" data-action="add" data-id="${escapeHtml(c.id)}" ${added ? 'disabled' : ''}>${added ? '✓ ' : ''}${escapeHtml(c.name)}</button>`;
-        }).join('') +
-            `<div class="dropdown-sep"></div><button class="dropdown-item" data-action="new">✨ New collection…</button>`;
+            const btn = document.createElement('button');
+            btn.className = 'dropdown-item' + (added ? ' added' : '');
+            btn.dataset.action = 'add';
+            btn.dataset.id = c.id;
+            if (added) btn.disabled = true;
+            btn.textContent = (added ? '✓ ' : '') + c.name;
+            frag.append(btn);
+        }
+        const sep = document.createElement('div');
+        sep.className = 'dropdown-sep';
+        frag.append(sep);
+        const newBtn = document.createElement('button');
+        newBtn.className = 'dropdown-item';
+        newBtn.dataset.action = 'new';
+        newBtn.textContent = '✨ New collection…';
+        frag.append(newBtn);
+        menuEl.replaceChildren(frag);
     }
     menuEl.querySelectorAll('.dropdown-item[data-action="add"]').forEach(btn => {
         btn.addEventListener('click', (e) => { e.stopPropagation(); addChunkToCollection(index, btn.dataset.id); });
@@ -217,13 +245,7 @@ async function addChunkToCollection(index, collectionId) {
         const res = await browser.runtime.sendMessage({
             action: 'addEntryToCollection',
             collectionId,
-            entry: {
-                sessionId: sessionId,
-                chunkIndex: index,
-                title: defaultEntryTitle(content, rawContent, index),
-                content,
-                rawContent,
-            },
+            entry: makeCollectionEntry(sessionId, index, content, rawContent),
         });
         if (res?.error) throw new Error(res.error);
         if (res?.alreadyPresent) { showToast('ℹ️ Already in this collection.', 'success'); }
@@ -234,9 +256,7 @@ async function addChunkToCollection(index, collectionId) {
             if (!existing) {
                 coll.entries.push({
                     id: crypto.randomUUID(),
-                    sessionId, chunkIndex: index,
-                    title: defaultEntryTitle(content, rawContent, index),
-                    content, rawContent,
+                    ...makeCollectionEntry(sessionId, index, content, rawContent),
                     addedAt: Date.now(),
                 });
             }
@@ -273,7 +293,7 @@ async function newCollectionAndAdd(index) {
 // Extracted so both the normal streaming success path and the timeout-fallback path
 // add the chunk with identical resolution, entry construction, and error handling.
 async function autoAddProcessedChunk(index, sessId) {
-    const collId = resolveDefaultCollection(sessId);
+    const collId = resolveDefaultCollection(collectionDefaults, sessId);
     if (!collId) return;
     const r = processedResults[index] || {};
     const content = r.content?.text || '';
@@ -287,13 +307,7 @@ async function autoAddProcessedChunk(index, sessId) {
         const res = await browser.runtime.sendMessage({
             action: 'addEntryToCollection',
             collectionId: collId,
-            entry: {
-                sessionId: sessId,
-                chunkIndex: index,
-                title: defaultEntryTitle(content, rawContent, index),
-                content,
-                rawContent,
-            },
+            entry: makeCollectionEntry(sessId, index, content, rawContent),
         });
         if (res?.error) throw new Error(res.error);
         // Update the in-memory cache so the per-chunk dropdown sees the newly
@@ -304,9 +318,7 @@ async function autoAddProcessedChunk(index, sessId) {
             if (!existing) {
                 coll.entries.push({
                     id: crypto.randomUUID(),
-                    sessionId: sessId, chunkIndex: index,
-                    title: defaultEntryTitle(content, rawContent, index),
-                    content, rawContent,
+                    ...makeCollectionEntry(sessId, index, content, rawContent),
                     addedAt: Date.now(),
                 });
             }
@@ -378,34 +390,80 @@ function buildChunkCards(chunks, titles) {
         card.className = 'chunk-card';
         card.id = `chunk-${i}`;
         const title = titles[i] || `Chunk ${i + 1}`;
-        card.innerHTML = `
-      <div class="chunk-header" id="chunk-header-${i}">
-        <div class="chunk-num">${i + 1}</div>
-        <div class="chunk-header-info">
-          <div class="chunk-header-title">${escapeHtml(title)}</div>
-          <div class="chunk-header-preview" id="chunk-preview-${i}">${escapeHtml(raw.replace(/<[^>]*>/g, '').slice(0, 80))}…</div>
-        </div>
-        <span class="chunk-status-badge status-pending" id="chunk-badge-${i}">Pending</span>
-        <span class="chunk-chevron">▾</span>
-      </div>
-      <div class="chunk-body">
-        <div class="chunk-micro-bar"><div class="chunk-micro-fill" id="chunk-micro-${i}"></div></div>
-        <div class="part-tabs" id="chunk-tabs-${i}"></div>
-        <div class="part-contents" id="chunk-contents-${i}">
-          <div class="part-content active" data-part="0">
-            <div class="chunk-content-area" id="chunk-content-${i}"><em style="color:var(--text-muted)">Waiting…</em></div>
-          </div>
-        </div>
-        <div class="chunk-actions" id="chunk-actions-${i}">
-          <button class="btn btn-secondary btn-sm" id="chunk-copy-${i}">📋 Copy</button>
-          <button class="btn btn-secondary btn-sm" id="chunk-copy-raw-${i}">📄 Copy Raw</button>
-          <button class="btn btn-secondary btn-sm" id="chunk-reprocess-${i}">↩ Reprocess</button>
-          <div class="add-to-dropdown" id="chunk-addto-${i}">
-            <button class="btn btn-secondary btn-sm" id="chunk-addto-btn-${i}">⊕ Add to ▾</button>
-            <div class="dropdown-menu" id="chunk-addto-menu-${i}"></div>
-          </div>
-        </div>
-      </div>`;
+        const header = document.createElement('div');
+        header.className = 'chunk-header';
+        header.id = `chunk-header-${i}`;
+        const num = document.createElement('div');
+        num.className = 'chunk-num';
+        num.textContent = i + 1;
+        const headerInfo = document.createElement('div');
+        headerInfo.className = 'chunk-header-info';
+        const headerTitle = document.createElement('div');
+        headerTitle.className = 'chunk-header-title';
+        headerTitle.textContent = title;
+        const preview = document.createElement('div');
+        preview.className = 'chunk-header-preview';
+        preview.id = `chunk-preview-${i}`;
+        preview.textContent = raw.replace(/<[^>]*>/g, '').slice(0, 80) + '…';
+        headerInfo.append(headerTitle, preview);
+        const badge = document.createElement('span');
+        badge.className = 'chunk-status-badge status-pending';
+        badge.id = `chunk-badge-${i}`;
+        badge.textContent = 'Pending';
+        const chevron = document.createElement('span');
+        chevron.className = 'chunk-chevron';
+        chevron.textContent = '▾';
+        header.append(num, headerInfo, badge, chevron);
+        const body = document.createElement('div');
+        body.className = 'chunk-body';
+        const microBar = document.createElement('div');
+        microBar.className = 'chunk-micro-bar';
+        const microFill = document.createElement('div');
+        microFill.className = 'chunk-micro-fill';
+        microFill.id = `chunk-micro-${i}`;
+        microBar.append(microFill);
+        const tabs = document.createElement('div');
+        tabs.className = 'part-tabs';
+        tabs.id = `chunk-tabs-${i}`;
+        const contents = document.createElement('div');
+        contents.className = 'part-contents';
+        contents.id = `chunk-contents-${i}`;
+        const part = document.createElement('div');
+        part.className = 'part-content active';
+        part.dataset.part = '0';
+        const contentArea = document.createElement('div');
+        contentArea.className = 'chunk-content-area';
+        contentArea.id = `chunk-content-${i}`;
+        const waiting = document.createElement('em');
+        waiting.style.color = 'var(--text-muted)';
+        waiting.textContent = 'Waiting…';
+        contentArea.append(waiting);
+        part.append(contentArea);
+        contents.append(part);
+        const actions = document.createElement('div');
+        actions.className = 'chunk-actions';
+        actions.id = `chunk-actions-${i}`;
+        for (const [btnId, label] of [['chunk-copy', '📋 Copy'], ['chunk-copy-raw', '📄 Copy Raw'], ['chunk-reprocess', '↩ Reprocess']]) {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-secondary btn-sm';
+            btn.id = `${btnId}-${i}`;
+            btn.textContent = label;
+            actions.append(btn);
+        }
+        const addTo = document.createElement('div');
+        addTo.className = 'add-to-dropdown';
+        addTo.id = `chunk-addto-${i}`;
+        const addToBtn = document.createElement('button');
+        addToBtn.className = 'btn btn-secondary btn-sm';
+        addToBtn.id = `chunk-addto-btn-${i}`;
+        addToBtn.textContent = '⊕ Add to ▾';
+        const addToMenu = document.createElement('div');
+        addToMenu.className = 'dropdown-menu';
+        addToMenu.id = `chunk-addto-menu-${i}`;
+        addTo.append(addToBtn, addToMenu);
+        actions.append(addTo);
+        body.append(microBar, tabs, contents, actions);
+        card.append(header, body);
         container.appendChild(card);
 
         // Collapse toggle
@@ -519,7 +577,7 @@ function renderChunk(index, text, isStreaming = false, reasoning = '') {
     const cleanText = removeThinking(text);
 
     contentEl.classList.toggle('streaming', isStreaming);
-    contentEl.innerHTML = renderMarkdown(cleanText);
+    contentEl.replaceChildren(renderMarkdownFragment(cleanText));
     handleImages(contentEl);
 
     // Render thinking section if there's thinking content
@@ -555,7 +613,7 @@ function renderMultiPart(index, parts) {
         content.dataset.part = pi;
         const area = document.createElement('div');
         area.className = 'chunk-content-area';
-        area.innerHTML = renderMarkdown(removeThinking(part));
+        area.replaceChildren(renderMarkdownFragment(removeThinking(part)));
         handleImages(area);
         content.appendChild(area);
         contentsEl.appendChild(content);
@@ -674,13 +732,21 @@ function renderThinkingSection(index) {
 
     const thinkingSection = document.createElement('div');
     thinkingSection.className = 'thinking-section';
-    thinkingSection.innerHTML = `
-        <div class="thinking-header" id="thinking-header-${index}">
-            <span class="thinking-toggle">▸</span>
-            <span class="thinking-label">🤔 Thinking</span>
-        </div>
-        <div class="thinking-content" id="thinking-content-${index}">${escapeHtml(thinkingContent)}</div>
-    `;
+    const headerEl = document.createElement('div');
+    headerEl.className = 'thinking-header';
+    headerEl.id = `thinking-header-${index}`;
+    const toggle = document.createElement('span');
+    toggle.className = 'thinking-toggle';
+    toggle.textContent = '▸';
+    const label = document.createElement('span');
+    label.className = 'thinking-label';
+    label.textContent = '🤔 Thinking';
+    headerEl.append(toggle, label);
+    const content = document.createElement('div');
+    content.className = 'thinking-content';
+    content.id = `thinking-content-${index}`;
+    content.textContent = thinkingContent;
+    thinkingSection.append(headerEl, content);
 
     // Insert at the beginning of the chunk body (above the content)
     const chunkBody = card.querySelector('.chunk-body');
@@ -701,6 +767,27 @@ function renderThinkingSection(index) {
 }
 
 // ─── Process all chunks sequentially ─────────────────────────────────────────
+// The retry/checkpoint/timeout loop lives in chunks_pipeline.js
+// (runChunkAttempts); this function keeps only the per-chunk UI ceremony and
+// the auto-add-to-collection step.
+
+// Shared deps for runChunkAttempts — identical for process-all and reprocess.
+function requestChunkFor(sessId, chunk, checkpointPrefix, suffix) {
+    return browser.runtime.sendMessage({ action: 'processChunk', chunk, prefix: checkpointPrefix, suffix, sessionId: sessId });
+}
+
+// Render + persist a completed (non-streamed) result — used by the
+// non-streaming path and the safety-timeout fallback alike. The seam's result
+// shape is uniform ({ result, parts, streaming } — ADR-0007), so parts is
+// always present.
+async function renderAndSaveChunk(index, result) {
+    const parts = result.parts;
+    if (parts.length > 1) renderMultiPart(index, parts);
+    else renderChunk(index, result.result, false);
+    processedResults[index] = { content: { parts, text: result.result }, rawContent: allChunks[index] };
+    await saveChunk(index, processedResults[index].content, allChunks[index]);
+}
+
 async function processAllChunks(resume = false) {
     const sessId = getSessionId();
     if (!sessId) { showBanner('No session ID — cannot process chunks.', 'error'); isProcessing = false; return; }
@@ -721,70 +808,31 @@ async function processAllChunks(resume = false) {
         const card = document.getElementById(`chunk-${i}`);
         card?.classList.remove('collapsed');
 
-        let success = false;
-        for (let attempt = 0; attempt < retryCount; attempt++) {
-            if (_terminated) break;
-            _streamCompleteFlags[i] = false; // Reset per-chunk streaming state before each retry
-            updateAttemptProgress(attempt + 1, retryCount);
-            // Capture accumulated content as checkpoint for this retry attempt.
-            // Uses a minimal directive to avoid confusing LLMs that might echo the marker text.
-            const existingContent = processedResults[i]?.content?.text || null;
-            const checkpointPrefix = existingContent
-                ? `${prefix}\n\nContinue from the following content:\n${existingContent}\n\n`
-                : prefix;
-            try {
-                const result = await browser.runtime.sendMessage({
-                    action: 'processChunk',
-                    chunk: allChunks[i],
-                    prefix: checkpointPrefix,
-                    suffix,
-                    sessionId: sessId
-                });
-
-                if (_terminated) break;
-                if (result.error) throw new Error(result.error);
-
-                if (result.streaming) {
-                    // Streaming updates come via message listener; wait for them
-                    const { timedOut } = await waitForStreamComplete(i);
-                    if (_terminated) { success = !!processedResults[i]?.content?.text; break; }
-                    // If safety timeout fired but we have a direct response, use it instead of retrying
-                    if (timedOut && result.result) {
-                        processedResults[i] = { content: { parts: [result.result], text: result.result }, rawContent: allChunks[i] };
-                        renderChunk(i, result.result, false);
-                        await saveChunk(i, processedResults[i].content, allChunks[i]);
-                        await autoAddProcessedChunk(i, sessId);
-                        success = true; break;
-                    }
-                    if (timedOut) { throw new Error('Streaming timed out after 5 minutes'); }
-                    // Normal streaming completion — auto-add so every successfully processed stream adds its chunk.
-                    await autoAddProcessedChunk(i, sessId);
-                    success = true; break;
+        const out = await runChunkAttempts({
+            index: i,
+            chunk: allChunks[i],
+            pfx: prefix, sfx: suffix,
+            retryCount,
+            getExistingContent: () => processedResults[i]?.content?.text || null,
+            isTerminated: () => _terminated,
+            onAttempt: (n) => updateAttemptProgress(n, retryCount),
+            requestChunk: ({ chunk, checkpointPrefix, suffix }) => requestChunkFor(sessId, chunk, checkpointPrefix, suffix),
+            waitStream: waitForStreamComplete,
+            renderDirect: renderAndSaveChunk,
+            onFailure: async (err) => {
+                console.error(`Chunk ${i} failed after ${retryCount} attempts:`, err);
+                const errEl = document.getElementById(`chunk-content-${i}`);
+                if (errEl) {
+                    const errBox = document.createElement('div');
+                    errBox.className = 'chunk-error-box';
+                    errBox.textContent = '❌ ' + err.message;
+                    errEl.replaceChildren(errBox);
                 }
-
-                // Non-streaming
-                const parts = result.parts || [result.result];
-                if (parts.length > 1) renderMultiPart(i, parts);
-                else renderChunk(i, result.result, false);
-
-                processedResults[i] = { content: { parts, text: result.result }, rawContent: allChunks[i] };
-                await saveChunk(i, processedResults[i].content, allChunks[i]);
-                await autoAddProcessedChunk(i, sessId);
-                success = true; break;
-            } catch (err) {
-                if (_terminated) break;
-                console.error(`Chunk ${i} attempt ${attempt + 1} failed:`, err);
-                if (attempt === retryCount - 1) {
-                    const errEl = document.getElementById(`chunk-content-${i}`);
-                    if (errEl) errEl.innerHTML = `<div class="chunk-error-box">❌ ${escapeHtml(err.message)}</div>`;
-                    setChunkStatus(i, 'error');
-                    setMicroBar(i, 'reset');
-                    showBanner(`Chunk ${i + 1} failed: ${err.message}`, 'error');
-                } else {
-                    await new Promise(r => setTimeout(r, 7000));
-                }
-            }
-        }
+                setChunkStatus(i, 'error');
+                setMicroBar(i, 'reset');
+                showBanner(`Chunk ${i + 1} failed: ${err.message}`, 'error');
+            },
+        });
 
         if (_terminated) {
             // Mark current chunk as done if it has content
@@ -794,7 +842,15 @@ async function processAllChunks(resume = false) {
             }
             break;
         }
-        if (success) { setChunkStatus(i, 'done'); setMicroBar(i, 'done'); completedChunks = i + 1; updateOverallProgress(completedChunks, totalChunks); updateAttemptProgress(0, retryCount); }
+        if (out.success) {
+            // Auto-add so every successfully processed chunk lands in its
+            // resolved default collection (streaming, timeout-fallback and
+            // non-streaming paths alike).
+            await autoAddProcessedChunk(i, sessId);
+            setChunkStatus(i, 'done'); setMicroBar(i, 'done');
+            completedChunks = i + 1; updateOverallProgress(completedChunks, totalChunks);
+            updateAttemptProgress(0, retryCount);
+        }
     }
 
     isProcessing = false; streamingIndex = -1;
@@ -805,21 +861,46 @@ async function processAllChunks(resume = false) {
 }
 
 // ─── Streaming wait ───────────────────────────────────────────────────────────
+// Promise-based completion instead of the old 200 ms poll over a shared flag
+// map. The worker still pushes updateStreamContent messages; the message
+// listener resolves the pending wait (completeStreamWait) when it sees the
+// isComplete message, and a safety timer mirrors the old 5-minute timeout.
+let _streamWaits = {};
+// Completion latch: the worker's isComplete message can beat the pipeline's
+// waitStream call (message listener and sendMessage response are separate
+// macrotasks). completeStreamWait records the completion here so the next
+// waitForStreamComplete consumes it instead of hanging for the timeout.
+let _streamCompletions = {};
+
 function waitForStreamComplete(index) {
+    // Consume a completion that arrived before this wait was registered.
+    if (_streamCompletions[index]) { delete _streamCompletions[index]; return Promise.resolve({ timedOut: false }); }
+    // Self-cleaning: drop any stale wait for this index (e.g. an abandoned
+    // attempt that threw before the completion message could resolve it).
+    const stale = _streamWaits[index];
+    if (stale) { clearTimeout(stale.timer); delete _streamWaits[index]; stale.resolve({ timedOut: true }); }
     return new Promise(resolve => {
-        const check = setInterval(() => {
-            if (!isStreamingActive(index)) { clearInterval(check); resolve({ timedOut: false }); }
-        }, 200);
-        // Safety timeout 5 min — signal timeout so caller can treat as failure
-        setTimeout(() => {
-            clearInterval(check);
+        const timer = setTimeout(() => {
+            delete _streamWaits[index];
+            delete _streamCompletions[index];
             resolve({ timedOut: true });
-        }, 300000);
+        }, STREAM_TIMEOUT_MS);
+        _streamWaits[index] = { resolve, timer };
     });
 }
 
-let _streamCompleteFlags = {};
-function isStreamingActive(index) { return !_streamCompleteFlags[index]; }
+// Called by the message listener when the worker's completion message arrives.
+function completeStreamWait(index) {
+    const w = _streamWaits[index];
+    if (w) {
+        clearTimeout(w.timer);
+        delete _streamWaits[index];
+        w.resolve({ timedOut: false });
+        return;
+    }
+    // No waiter yet — record the completion for the imminent waitStream call.
+    _streamCompletions[index] = true;
+}
 
 
 // ─── Message handler (streaming updates from service worker) ──────────────────
@@ -847,7 +928,7 @@ browser.runtime.onMessage.addListener((msg) => {
         }
 
         if (msg.isComplete) {
-            _streamCompleteFlags[index] = true;
+            completeStreamWait(index);
             const text = msg.content || '';
             if (text) {
                 processedResults[index] = { content: { parts: [text], text }, rawContent: msg.rawContent || allChunks[index] };
@@ -866,18 +947,27 @@ browser.runtime.onMessage.addListener((msg) => {
 });
 
 // ─── Storage helpers ──────────────────────────────────────────────────────────
+// Serialized read-modify-write via store.js mutate (per-key queue on
+// processedChunks), so concurrent saves from two streaming sessions can't
+// interleave a get→set and drop a chunk.
 async function saveChunk(index, content, rawContent) {
     const sessId = getSessionId();
     if (!sessId) return;
-    const { processedChunks = {}, translationSessions = [] } = await browser.storage.local.get(['processedChunks', 'translationSessions']);
-    const sessChunks = processedChunks[sessId] || [];
-    sessChunks[index] = { content, rawContent };
-    processedChunks[sessId] = sessChunks;
-    const { maxSessions = 3 } = await browser.storage.local.get('maxSessions');
-    const recentIds = translationSessions.sort((a, b) => b.timestamp - a.timestamp).slice(0, maxSessions).map(s => s.id);
-    const filtered = {};
-    recentIds.forEach(sid => { if (processedChunks[sid]) filtered[sid] = processedChunks[sid]; });
-    await browser.storage.local.set({ processedChunks: filtered });
+    await mutate('processedChunks', async (processedChunks = {}) => {
+        const sessChunks = processedChunks[sessId] || [];
+        sessChunks[index] = { content, rawContent };
+        processedChunks[sessId] = sessChunks;
+        // Evict sessions beyond maxSessions, keeping only recent ids — but never
+        // the session being written: a fresh session (no translationSessions row
+        // yet, or pushed out of maxSessions) must not have its chunks wiped.
+        // Copy before sorting — the storage snapshot is shared, never mutate it.
+        const { translationSessions = [], maxSessions = 3 } = await browser.storage.local.get(['translationSessions', 'maxSessions']);
+        const recentIds = [...translationSessions].sort((a, b) => b.timestamp - a.timestamp).slice(0, maxSessions).map(s => s.id);
+        const kept = new Set([sessId, ...recentIds]);
+        const filtered = {};
+        kept.forEach(sid => { if (processedChunks[sid]) filtered[sid] = processedChunks[sid]; });
+        return { changed: true, result: filtered };
+    });
 }
 
 // ─── Copy / Download ──────────────────────────────────────────────────────────
@@ -944,6 +1034,10 @@ async function reprocessOne(index) {
     if (reprocessingState.isActive) { showToast('Already reprocessing, please wait.', 'error'); return; }
     // Block reprocessing if ANY chunk is actively processing (even if it's this one)
     if (isProcessing) { showToast('Wait for current processing to finish first.', 'error'); return; }
+    // A reprocess is fresh user intent — clear a stale terminate flag left by
+    // a previous process-all stop, or runChunkAttempts would abort before the
+    // first request and the chunk would sit at "Reprocessing…" forever.
+    _terminated = false;
     const sessId = getSessionId();
 
     let storedData;
@@ -957,10 +1051,12 @@ async function reprocessOne(index) {
     const sfx = storedData.suffix || suffix;
     const rc = storedData.retryCount || retryCount;
 
-    // Clear saved storage
-    const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
-    const sessChunks = processedChunks[sessId] || [];
-    if (sessChunks[index]) { delete sessChunks[index]; processedChunks[sessId] = sessChunks; await browser.storage.local.set({ processedChunks }); }
+    // Clear saved storage (serialized)
+    await mutate('processedChunks', (processedChunks = {}) => {
+        const sessChunks = processedChunks[sessId] || [];
+        if (sessChunks[index]) { delete sessChunks[index]; processedChunks[sessId] = sessChunks; }
+        return { changed: true, result: processedChunks };
+    });
 
     // Clear in-memory result and UI immediately
     processedResults[index] = null;
@@ -968,51 +1064,50 @@ async function reprocessOne(index) {
     if (contentEl) contentEl.innerHTML = '<em style="color:var(--text-muted)">Reprocessing…</em>';
 
     reprocessingState = { isActive: true, targetIndex: index };
-    _streamCompleteFlags[index] = false;
     setChunkStatus(index, 'processing');
     setMicroBar(index, 'pulse');
     document.getElementById(`chunk-${index}`)?.classList.remove('collapsed');
+    // A reprocess is cancellable like a stream — surface the terminate button
+    // (process-all shows/hides it; reprocess-one must do the same).
+    document.getElementById('terminateBtn').style.display = '';
 
-    for (let attempt = 0; attempt < rc; attempt++) {
-        _streamCompleteFlags[index] = false; // Reset per-chunk streaming state before each retry
-        updateAttemptProgress(attempt + 1, rc);
-        // Recompute checkpoint from current partial output each attempt (supports streaming resume)
-        const currentContent = processedResults[index]?.content?.text || null;
-        const checkpointPrefix = currentContent ? `${pfx}\n\nContinue from the following content:\n${currentContent}\n\n` : pfx;
-        try {
-            const result = await browser.runtime.sendMessage({ action: 'processChunk', chunk: allChunks[index], prefix: checkpointPrefix, suffix: sfx, sessionId: sessId });
-            if (result.error) throw new Error(result.error);
-            if (result.streaming) {
-                const { timedOut } = await waitForStreamComplete(index);
-                reprocessingState.isActive = false;
-                // If safety timeout fired but we have a direct response, use it instead of retrying
-                if (timedOut && result.result) {
-                    processedResults[index] = { content: { parts: [result.result], text: result.result }, rawContent: allChunks[index] };
-                    renderChunk(index, result.result, false);
-                    await saveChunk(index, processedResults[index].content, allChunks[index]);
-                    setChunkStatus(index, 'done'); setMicroBar(index, 'done');
-                    showToast('✅ Reprocessed!', 'success');
-                    return;
-                }
-                if (timedOut) { throw new Error('Streaming timed out after 5 minutes'); }
-                return;
-            }
-            const parts = result.parts || [result.result];
-            parts.length > 1 ? renderMultiPart(index, parts) : renderChunk(index, result.result, false);
-            processedResults[index] = { content: { parts, text: result.result }, rawContent: allChunks[index] };
-            await saveChunk(index, processedResults[index].content, allChunks[index]);
+    const out = await runChunkAttempts({
+        index,
+        chunk: allChunks[index],
+        pfx, sfx,
+        retryCount: rc,
+        getExistingContent: () => processedResults[index]?.content?.text || null,
+        isTerminated: () => _terminated,
+        onAttempt: (n) => updateAttemptProgress(n, rc),
+        requestChunk: ({ chunk, checkpointPrefix, suffix }) => requestChunkFor(sessId, chunk, checkpointPrefix, suffix),
+        waitStream: waitForStreamComplete,
+        renderDirect: renderAndSaveChunk,
+        onFailure: async (err) => {
+            console.error(`Chunk ${index} reprocess failed after ${rc} attempts:`, err);
+            showToast(`❌ Reprocess failed: ${err.message}`, 'error');
+            setChunkStatus(index, 'error'); setMicroBar(index, 'reset');
+        },
+    });
+
+    reprocessingState.isActive = false;
+    document.getElementById('terminateBtn').style.display = 'none';
+    if (out.success && !out.streamed) {
+        // Non-streaming + timeout-fallback render via renderAndSaveChunk; the
+        // streaming path's status/toast are handled by the message listener
+        // when the completion message arrived, so skip the duplicate UI here.
+        setChunkStatus(index, 'done'); setMicroBar(index, 'done');
+        showToast('✅ Reprocessed!', 'success');
+    } else if (out.terminated) {
+        // Terminated mid-reprocess — mirror mid-stream termination: keep the
+        // partial content marked done when it survived, and never leave the
+        // "Reprocessing…" placeholder behind. No cancellation toast; the
+        // terminate button already told the user it stopped.
+        if (processedResults[index]?.content?.text) {
             setChunkStatus(index, 'done'); setMicroBar(index, 'done');
             showToast('✅ Reprocessed!', 'success');
-            reprocessingState.isActive = false;
-            return;
-        } catch (err) {
-            if (attempt === rc - 1) {
-                showToast(`❌ Reprocess failed: ${err.message}`, 'error');
-                setChunkStatus(index, 'error'); setMicroBar(index, 'reset');
-                reprocessingState.isActive = false;
-                return;
-            }
-            await new Promise(r => setTimeout(r, 7000));
+        } else {
+            const el = document.getElementById(`chunk-content-${index}`);
+            if (el) el.innerHTML = '';
         }
     }
 }
@@ -1022,26 +1117,48 @@ async function reprocessAll() {
     if (isProcessing) { showToast('Processing already in progress. Please wait or terminate first.', 'error'); return; }
     if (!confirm(`Reprocess all ${totalChunks} chunks? All saved results will be cleared.`)) return;
     const sessId = getSessionId();
-    const { processedChunks = {} } = await browser.storage.local.get('processedChunks');
-    delete processedChunks[sessId];
-    await browser.storage.local.set({ processedChunks });
+    await mutate('processedChunks', (processedChunks = {}) => {
+        delete processedChunks[sessId];
+        return { changed: true, result: processedChunks };
+    });
     processedResults = [];
     processedThinking = [];
     completedChunks = 0;
     _terminated = false;
-    _streamCompleteFlags = {};
+    // Cancel every pending safety timer before dropping the map, so no
+    // orphaned timeout fires into the void after the re-render.
+    for (const w of Object.values(_streamWaits)) clearTimeout(w.timer);
+    _streamWaits = {};
+    _streamCompletions = {};
     buildChunkCards(allChunks, chunkTitles);
     updateOverallProgress(0, totalChunks);
     await processAllChunks(false);
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
+let _initStarted = false;
 async function initPage() {
+    // Idempotence guard: the worker's initializeChunksPage message and the
+    // 500 ms fallback timer can both fire — without this, buildChunkCards and
+    // processAllChunks would run twice and double-translate.
+    if (_initStarted) return;
+    _initStarted = true;
     cleanupImageBlobCache(); // Clear any leftover Blob URLs from previous sessions
     sessionId = getSessionId();
     document.getElementById('sessionId').textContent = sessionId ? `Session: ${sessionId.slice(0, 12)}…` : 'No session';
 
     if (!sessionId) { showBanner('No session ID in URL.', 'error'); return; }
+
+    // Reconcile the theme with storage.local: ui-boot.js read the localStorage
+    // mirror before first paint, but a stale or missing mirror (e.g. cleared
+    // while this tab was closed) must be healed so the page matches the
+    // persisted theme — applyUiTheme re-mirrors as a side effect.
+    try {
+        const { uiTheme } = await browser.storage.local.get('uiTheme');
+        applyUiTheme(uiTheme);
+    } catch (err) {
+        console.warn('Failed to load UI theme:', err);
+    }
 
     // Load session data
     const { translationSessions = [] } = await browser.storage.local.get('translationSessions');
@@ -1100,7 +1217,6 @@ async function initPage() {
         if (parts.length > 1) renderMultiPart(i, parts);
         else renderChunk(i, parts[0] || '', false);
         setChunkStatus(i, 'done'); setMicroBar(i, 'done');
-        _streamCompleteFlags[i] = true;
         completedChunks++;
         document.getElementById(`chunk-${i}`)?.classList.add('collapsed');
         hasPartial = true;
@@ -1127,9 +1243,12 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('copyAllBtn')?.addEventListener('click', copyAll);
     document.getElementById('downloadAllBtn')?.addEventListener('click', downloadAll);
     document.getElementById('terminateBtn')?.addEventListener('click', async () => {
-        const idx = streamingIndex; // Save before anything changes
+        // During a reprocess, streamingIndex is -1 — the active wait belongs
+        // to reprocessingState.targetIndex. Same resolution the message
+        // listener uses.
+        const idx = reprocessingState.isActive ? reprocessingState.targetIndex : streamingIndex; // Save before anything changes
         _terminated = true;
-        if (idx >= 0) _streamCompleteFlags[idx] = true;
+        if (idx >= 0) completeStreamWait(idx); // unblock the streaming wait; the loop breaks on _terminated
 
         try {
             await browser.runtime.sendMessage({ action: 'terminateRequest', sessionId: getSessionId() });
@@ -1151,4 +1270,11 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
         if (!allChunks.length) initPage();
     }, 500);
+
+    // Live-sync: theme changed in the options page while this tab is open.
+    browser.storage.onChanged.addListener((changes, area) => {
+        if (area === 'local' && changes.uiTheme) {
+            applyUiTheme(changes.uiTheme.newValue);
+        }
+    });
 });

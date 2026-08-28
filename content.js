@@ -72,6 +72,54 @@ function splitParagraphText(lengthinput) {
         combinedContent += text + '\n\n';
       }
     });
+  } else if (document.querySelector('.txtnav')) {
+    // 69shuba.com scraper: chapter title in <h1>, body as bare text-node
+    // paragraphs separated by <br>. A single <br> is a line-continuation
+    // inside one paragraph (the site wraps long lines), while <br><br> (or an
+    // element node) ends the paragraph. Meta (.txtinfo) and ad (e.g. #txtright,
+    // .contentadv, .bottom-ad) divs sit among the text — skipped entirely so
+    // ads and metadata never leak into the chapter text. The site repeats the
+    // chapter title as the first paragraph, so drop a leading paragraph that
+    // matches the h1 to avoid duplication.
+    const txtnav = document.querySelector('.txtnav');
+    const h1 = txtnav.querySelector('h1');
+    const chapterTitle = h1?.textContent?.trim();
+    if (chapterTitle) {
+      combinedContent += chapterTitle + '\n\n';
+    }
+    let paragraph = [];
+    let brSinceLastText = 0;
+    let skipFirst = Boolean(chapterTitle);
+    txtnav.childNodes.forEach(node => {
+      if (node.nodeType === Node.ELEMENT_NODE && node.tagName.toLowerCase() === 'br') {
+        brSinceLastText++;
+        return;
+      }
+      if (node.nodeType === Node.ELEMENT_NODE) { // meta/ad div, script, etc.
+        flushParagraph();
+        return;
+      }
+      const text = node.textContent.trim(); // text node
+      if (!text) return;
+      if (brSinceLastText >= 2 && paragraph.length) flushParagraph();
+      if (skipFirst && text === chapterTitle) {
+        skipFirst = false; // drop the site's repeated title line
+        brSinceLastText = 0;
+        return;
+      }
+      skipFirst = false;
+      paragraph.push(text);
+      brSinceLastText = 0;
+    });
+    flushParagraph();
+
+    function flushParagraph() {
+      if (paragraph.length) {
+        combinedContent += paragraph.join(' ') + '\n\n';
+        paragraph = [];
+      }
+      brSinceLastText = 0;
+    }
   } else {
     while (paragraphId <= MAX_PARAGRAPHS) {
       let paragraphElement = document.getElementById(`p${paragraphId}`);
@@ -94,16 +142,27 @@ function splitTextIntoChunks(text, maxLength) {
 
   while (startIndex < text.length) {
     let endIndex = startIndex + maxLength;
+    let cutAtNewline = false;
     if (endIndex < text.length) {
-      endIndex = text.lastIndexOf('\n', endIndex);
-      if (endIndex === -1) {
+      // Only a newline INSIDE the window counts as a cut point — lastIndexOf
+      // can return an index before startIndex (window has no newline but
+      // earlier text does), which would make an empty chunk and loop forever.
+      const newlineIndex = text.lastIndexOf('\n', endIndex);
+      if (newlineIndex >= startIndex) {
+        endIndex = newlineIndex;
+        cutAtNewline = true;
+      } else {
         endIndex = startIndex + maxLength;
       }
     }
     const chunk = text.substring(startIndex, endIndex);
     console.log(`Chunk length: ${chunk.length}`);
     chunks.push(chunk);
-    startIndex = endIndex + 1;
+    // A newline boundary is consumed by the cut (skip it); a hard cut at the
+    // window edge must NOT skip the next character or it is lost.
+    const nextStart = cutAtNewline ? endIndex + 1 : endIndex;
+    if (nextStart === startIndex) break; // maxLength 0 — no progress possible
+    startIndex = nextStart;
   }
 
   return chunks;
@@ -133,3 +192,8 @@ browser.storage.local.get(['maxLength', 'prefix', 'suffix', 'retryCount']).then(
 }).catch(err => {
   console.error('Failed to load settings from storage:', err);
 });
+
+// ─── Node export (inert in browser) ───────────────────────────────────────────
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { splitParagraphText, splitTextIntoChunks };
+}

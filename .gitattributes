@@ -1,0 +1,5 @@
+# Vendored third-party dist files must stay LF: addons-linter matches known
+# libraries (DOMPurify etc.) by sha256 of file content; a CRLF checkout
+# (core.autocrlf=true on Windows) would break the hash match and the file
+# would get flagged by the unsafe-assignment linter.
+*.min.js text eol=lf

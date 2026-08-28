@@ -1,0 +1,36 @@
+/* Modern UI theme — crisp dark, single cyan accent.
+   Scoped under [data-ui="modern"], set by ui-boot.js before first paint.
+   Pure CSS variable overrides: Classic keeps the :root defaults untouched,
+   so the two themes can never diverge structurally.
+
+   Cross-cutting a11y rules (focus-visible, prefers-reduced-motion) live in
+   ui-base.css so this file can stay purely a theme layer. */
+
+[data-ui="modern"] {
+  --bg: #0b0d12;
+  --surface: #12141a;
+  --surface2: #1b1e26;
+  --border: rgba(255, 255, 255, 0.08);
+  --accent: #38bdf8;
+  --accent2: #38bdf8;
+  --accent-glow: rgba(56, 189, 248, 0.15);
+  --accent-rgb: 56, 189, 248;
+  --text: #e5e9f0;
+  --text-muted: #8b93a7;
+  --radius: 8px;
+  --btn-primary-hover: #0ea5e9;
+  --btn-secondary-hover: #22262f;
+  /* Real gradients of identical stops — render flat (no visible gradient, per
+     the modern theme), but the value matches what the variable name promises. */
+  --accent-gradient: linear-gradient(90deg, var(--accent), var(--accent2));
+  --accent-gradient-diag: linear-gradient(135deg, var(--accent), var(--accent2));
+}
+
+/* chunks.html sticky header: solid fill instead of backdrop blur — cheaper
+   paint, no scroll lag. The one structural override in the theme layer
+   (ADR-0001); disable the structural-override lint with an ADR reference. */
+/* stylelint-disable-next-line webnovel/no-structural-overrides-in-theme */
+[data-ui="modern"] .header {
+  background: rgba(11, 13, 18, 0.95);
+  backdrop-filter: none;
+}

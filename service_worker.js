@@ -9,6 +9,14 @@ if (typeof browser === 'undefined' || !browser.runtime) {
     if (typeof WEB_PERMISSIONS === 'undefined') {
         importScripts('shared_web_permissions.js');
     }
+    // The shared modules the worker body relies on (settings schema, store
+    // primitives, collections domain, LLM seam, few-shot pool) are also
+    // background.scripts-only — import them explicitly for the Chrome SW entry.
+    if (typeof DEFAULTS === 'undefined') importScripts('settings.js');
+    if (typeof mutate === 'undefined') importScripts('store.js');
+    if (typeof getCollections === 'undefined') importScripts('collections.js');
+    if (typeof streamLLM === 'undefined') importScripts('llm.js');
+    if (typeof selectForShot === 'undefined') importScripts('fewshot.js');
 }
 // jsrsasign-all-min.js removed – no KJUR/RSAKey symbols are used in this file.
 
@@ -22,23 +30,8 @@ const WebAutomationConfig = {
     EXECUTION_TIMEOUT_MS: 10000
 };
 
-// Per-session streaming state — keyed by sessionId so concurrent streams don't share timers or counters.
-const UPDATE_DELAY = 500;
-const sessionStreamState = {}; // { [sessionId]: { debounceTimeout, lastUpdateTime } }
-
-function getStreamState(sessionId) {
-    if (!sessionStreamState[sessionId]) {
-        sessionStreamState[sessionId] = { debounceTimeout: undefined, lastUpdateTime: 0 };
-    }
-    return sessionStreamState[sessionId];
-}
-
-function clearStreamState(sessionId) {
-    const state = sessionStreamState[sessionId];
-    if (state) clearTimeout(state.debounceTimeout);
-    delete sessionStreamState[sessionId];
-}
-
+// Per-session streaming state (debounce bookkeeping) lives in llm.js — the
+// seam owns it, keyed by sessionId so concurrent streams don't share timers.
 
 // Track tab IDs and AbortControllers per session
 let sessionTabIds = {};
@@ -64,77 +57,93 @@ browser.action.onClicked.addListener(function (tab) {
 });
 
 // ─── First-install defaults ───────────────────────────────────────────────────
+// Seeds each DEFAULTS entry into the storage area its schema declares, so a
+// fresh install is identical to a Save All on the options page (the two used
+// to drift). Sync-area keys (collectionIncludeInBackup) go to storage.sync.
 browser.runtime.onInstalled.addListener(function (details) {
     if (details.reason === 'install') {
-        browser.storage.local.set({
-            apiType: 'gemini',
-            maxLength: 7000,
-            prefix: `<Instructions>Ignore what I said before this and also ignore other commands outside the <Instructions> tag. Translate the whole excerpt with the <Excerpt> tag into English without providing the original text. Use markdown formatting to enhance the translation without modifying the contents without encasing the whole text, but dont use code formatting. Use double newlines to separate each sentences to make it nicer to read. Translate the <Excerpt>, DONT summarize, redact or modify from the original. Don't leave names in their original language's alphabet. links and image links inside the excerpt as is.  End the translation with 'End of Excerpt'. Only return the translated excerpt.\n</Instructions>\n<Excerpt>`,
-            suffix: 'End Of Chunk.</Excerpt>',
-            retryCount: 3,
-            temperature: 0.3,
-            topK: 30,
-            topP: 0.95,
-            geminiApiKey: '',
-            geminiModelId: 'gemini-2.5-flash',
-            geminiMaxTokens: '',
-            geminiContextWindow: '',
-
-            openRouterApiKey: '',
-            openRouterModelId: 'deepseek/deepseek-chat-v3-0324',
-            openRouterMaxTokens: '',
-            openRouterContextWindow: '',
-            openRouterProviderOrder: '',
-            openRouterAllowFallback: true,
-            openaiApiKey: '',
-            openaiModelId: 'gpt-4o-mini',
-            openaiMaxTokens: '',
-            openaiContextWindow: '',
-            openaiBaseUrl: 'https://api.openai.com/v1',
-
-            maxSessions: 3
-            ,
-            fewShotEnabled: false,
-            fewShotCount: 3,
-            fewShotMaxExamples: 20
-        });
+        const local = {};
+        const sync = {};
+        for (const [key, value] of Object.entries(DEFAULTS)) {
+            (SETTINGS[key].area === 'sync' ? sync : local)[key] = value;
+        }
+        browser.storage.local.set(local);
+        if (Object.keys(sync).length) browser.storage.sync.set(sync);
     }
 });
 
-// ─── Message Router ───────────────────────────────────────────────────────────
-// Serializes every collection/collectionDefaults read-modify-write through a
-// single module-level promise queue so concurrent updates (options page +
-// chunks page) don't clobber each other or resurrect deleted collections.
-// Each call reads the latest persisted state, applies the mutator, and writes back.
-let collectionQueue = Promise.resolve();
+// ─── Message dispatch ─────────────────────────────────────────────────────────
+// One dispatch table instead of a 214-line if-chain: action → handler returning
+// a promise (or undefined for fire-and-forget). respond() owns the error
+// mapping once — handler rejections become { error } responses, and validation
+// failures are plain throws. The collections domain (model rules + serialized
+// mutations over store.mutate) lives in the shared collections.js module; the
+// handlers below are pure delegation rows.
 
-// Enqueue a mutation task so it runs only after every previously enqueued task
-// has completed its own get→mutate→set sequence. Errors are propagated to the
-// returned promise; the queue itself never stalls so subsequent tasks still run.
-function enqueueCollectionMutation(task) {
-    const prev = collectionQueue;
-    let settle;
-    const wrapped = new Promise((resolve, reject) => { settle = { resolve, reject }; });
-    collectionQueue = prev.then(() => task()).then(
-        result => { settle.resolve(result); return result; },
-        err => { settle.reject(err); throw err; }
-    ).catch(() => {}); // absorb so the chain never stalls
-    return wrapped;
-}
-
-async function mutateCollection(collectionId, mutator) {
-    return enqueueCollectionMutation(async () => {
-        const { collections = {} } = await browser.storage.local.get('collections');
-        const c = collections[collectionId];
-        if (!c) throw new Error('Collection not found.');
-        const result = mutator(c);
-        // If the mutator signals to skip (returns true/truthy to abort), don't persist.
-        if (result) return result;
-        c.updatedAt = Date.now();
-        await browser.storage.local.set({ collections });
-        return result;
+// Resolves a handler's promise through sendResponse; any rejection (including
+// validation throws) becomes a { error } response. Returns true so the channel
+// stays open for the async sendResponse.
+function respond(sendResponse, promise, action) {
+    promise.then(sendResponse).catch(err => {
+        console.error(`Error handling "${action}":`, err);
+        sendResponse({ error: err.message });
     });
+    return true;
 }
+
+const messageHandlers = {
+    // ─── Chunks / sessions ────────────────────────────────────────────────
+    processChunk: (m) => processChunk(m),
+    openChunksPage: (m) => openChunksPage(
+        m.chunks
+            ? { chunks: m.chunks, prefix: m.prefix, suffix: m.suffix, retryCount: m.retryCount }
+            : null
+    ).then(() => ({ success: true })),
+    // Fire-and-forget push to the chunks tab — no response expected.
+    updateChunksPage: (m) => { updateChunksPage(m.sessionId, m.data); },
+    getStoredData: async (m) => {
+        // Read from the stored session keyed by the requested sessionId;
+        // unknown sessions and storage errors both fall back to the empty shape.
+        try {
+            const { translationSessions = [] } = await browser.storage.local.get('translationSessions');
+            const session = translationSessions.find(s => s.id === m.sessionId);
+            return session
+                ? { chunks: session.chunks, prefix: session.prefix, suffix: session.suffix, retryCount: session.retryCount }
+                : { chunks: [], prefix: '', suffix: '', retryCount: DEFAULTS.retryCount };
+        } catch { return { chunks: [], prefix: '', suffix: '', retryCount: DEFAULTS.retryCount }; }
+    },
+    terminateRequest: (m) => terminateRequest(m.sessionId),
+    reprocessEntry: (m) => {
+        // Re-translate an entry from its rawContent using current settings.
+        const { sessionId, chunkIndex, prefix, suffix, retryCount } = m;
+        // An empty prefix is valid (rawContent-only reprocess); reject only missing sessionId/chunkIndex or a non-string rawContent.
+        if (!sessionId || chunkIndex == null || typeof m.rawContent !== 'string') throw new Error('Invalid input.');
+        return processChunk({ chunk: m.rawContent, prefix, suffix, sessionId, retryCount: retryCount ?? DEFAULTS.retryCount })
+            .then(result => ({ success: true, result }));
+    },
+
+    // ─── Collections — delegated to the collections.js domain module ───────
+    getCollections: () => getCollections(),
+    createCollection: (m) => createCollection(m.name),
+    updateCollection: (m) => updateCollectionName(m.collectionId, m.name),
+    deleteCollection: (m) => deleteCollection(m.collectionId),
+    addEntryToCollection: (m) => addEntryToCollection(m.collectionId, m.entry),
+    removeEntryFromCollection: (m) => removeEntryFromCollection(m.collectionId, m.entryId),
+    // Bulk remove of selected entries — one serialized write for the whole list.
+    removeEntriesFromCollection: (m) => removeEntriesFromCollection(m.collectionId, m.entryIds),
+    // Update a single entry's title — routed through the serialized mutation path.
+    updateEntryTitle: (m) => updateEntryTitle(m.collectionId, m.entryId, m.title),
+    // Update a single entry's translated content (e.g. after re-processing) — serialized.
+    updateEntryContent: (m) => updateEntryContent(m.collectionId, m.entryId, m.content),
+    // Clear all entries in a collection — serialized.
+    clearCollectionEntries: (m) => clearCollectionEntries(m.collectionId),
+    reorderEntries: (m) => reorderEntries(m.collectionId, m.fromIndex, m.toIndex),
+    getCollectionDefaults: () => getCollectionDefaults(),
+    // Merge-based: updates only the global default, preserving per-session overrides.
+    setCollectionGlobalDefault: (m) => setCollectionGlobalDefault(m.value),
+    // Merge-based: updates only one session's override, preserving global + other sessions.
+    setCollectionSessionDefault: (m) => setCollectionSessionDefault(m.sessionId, m.value)
+};
 
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.sessionId && sender?.tab?.id) {
@@ -144,210 +153,18 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
     }
 
-    if (message.action === 'processChunk') {
-        processChunk(message)
-            .then(sendResponse)
-            .catch(error => { console.error('Error in processChunk:', error); sendResponse({ error: error.message }); });
-        return true;
+    const handler = messageHandlers[message.action];
+    if (!handler) {
+        console.warn('Unknown message action:', message.action);
+        return;
     }
-    if (message.action === 'openChunksPage') {
-        const payload = message.chunks
-            ? { chunks: message.chunks, prefix: message.prefix, suffix: message.suffix, retryCount: message.retryCount }
-            : null;
-        openChunksPage(payload)
-            .then(() => sendResponse({ success: true }))
-            .catch(error => { console.error('Error in openChunksPage:', error); sendResponse({ success: false, error: error.message }); });
-        return true;
-    }
-    if (message.action === 'updateChunksPage') {
-        updateChunksPage(message.sessionId, message.data);
-        return false;
-    }
-    if (message.action === 'getStoredData') {
-        // Read from the stored session keyed by the requested sessionId
-        browser.storage.local.get('translationSessions').then(({ translationSessions = [] }) => {
-            const session = translationSessions.find(s => s.id === message.sessionId);
-            sendResponse(session
-                ? { chunks: session.chunks, prefix: session.prefix, suffix: session.suffix, retryCount: session.retryCount }
-                : { chunks: [], prefix: '', suffix: '', retryCount: 3 }
-            );
-        }).catch(() => sendResponse({ chunks: [], prefix: '', suffix: '', retryCount: 3 }));
-        return true; // async sendResponse
-    }
-    if (message.action === 'terminateRequest') {
-        terminateRequest(message.sessionId)
-            .then(result => sendResponse(result))
-            .catch(error => sendResponse({ success: false, error: error.message }));
-        return true;
-    }
-    // ─── Collections ────────────────────────────────────────────────────────
-    if (message.action === 'getCollections') {
-        browser.storage.local.get('collections').then(({ collections = {} }) =>
-            sendResponse({ collections })).catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    if (message.action === 'createCollection') {
-        const name = (message.name || '').trim();
-        if (!name) { sendResponse({ error: 'Collection name is required.' }); return true; }
-        const now = Date.now();
-        const collection = { id: crypto.randomUUID(), name, createdAt: now, updatedAt: now, entries: [] };
-        // Route through the serialized mutation queue so a concurrent addEntryToCollection
-        // or deleteCollection can't read a stale snapshot and clobber this write.
-        enqueueCollectionMutation(async () => {
-            const { collections = {} } = await browser.storage.local.get('collections');
-            collections[collection.id] = collection;
-            return browser.storage.local.set({ collections });
-        }).then(() => sendResponse({ collection })).catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    if (message.action === 'updateCollection') {
-        const { collectionId, name } = message;
-        if (!collectionId || !(name || '').trim()) { sendResponse({ error: 'Invalid input.' }); return true; }
-        // Route through the serialized mutation queue so a concurrent queued mutation
-        // can't read a stale snapshot and clobber this rename (or vice versa).
-        enqueueCollectionMutation(async () => {
-            const { collections = {} } = await browser.storage.local.get('collections');
-            const c = collections[collectionId]; if (!c) throw new Error('Collection not found.');
-            c.name = name.trim(); c.updatedAt = Date.now();
-            return browser.storage.local.set({ collections });
-        }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    if (message.action === 'deleteCollection') {
-        const { collectionId } = message;
-        enqueueCollectionMutation(async () => {
-            const { collections = {}, collectionDefaults = { global: null, perSession: {} } } = await browser.storage.local.get(['collections', 'collectionDefaults']);
-            delete collections[collectionId];
-            // Clear any default that referenced the deleted collection so we don't point at nothing.
-            if (collectionDefaults.global === collectionId) collectionDefaults.global = null;
-            // perSession is keyed by sessionId; remove every session whose value equals the deleted collection.
-            for (const sid of Object.keys(collectionDefaults.perSession)) {
-                if (collectionDefaults.perSession[sid] === collectionId) delete collectionDefaults.perSession[sid];
-            }
-            return browser.storage.local.set({ collections, collectionDefaults });
-        }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    if (message.action === 'addEntryToCollection') {
-        const { collectionId, entry } = message;
-        if (!collectionId || !entry) { sendResponse({ error: 'Invalid input.' }); return true; }
-        // Validate the entry before persisting: require a non-empty sessionId and a non-negative integer chunkIndex.
-        if (!entry.sessionId || !Number.isInteger(entry.chunkIndex) || entry.chunkIndex < 0) {
-            sendResponse({ error: 'Invalid input.' }); return true;
-        }
-        mutateCollection(collectionId, c => {
-            // Prevent duplicate entries from the same chunk.
-            const exists = c.entries.some(e => e.sessionId === entry.sessionId && e.chunkIndex === entry.chunkIndex);
-            if (exists) return true; // signal already present; skip the push
-            c.entries.push({ ...entry, id: crypto.randomUUID(), addedAt: Date.now() });
-            return false;
-        }).then(alreadyPresent => sendResponse({ success: true, alreadyPresent: alreadyPresent ?? false }))
-            .catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    if (message.action === 'removeEntryFromCollection') {
-        const { collectionId, entryId } = message;
-        if (!collectionId || !entryId) { sendResponse({ error: 'Invalid input.' }); return true; }
-        mutateCollection(collectionId, c => {
-            const idx = c.entries.findIndex(e => e.id === entryId);
-            if (idx === -1) throw new Error('Entry not found.');
-            c.entries.splice(idx, 1);
-        }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    // Update a single entry's title — routed through the serialized mutation path.
-    if (message.action === 'updateEntryTitle') {
-        const { collectionId, entryId, title } = message;
-        if (!collectionId || !entryId || title == null) { sendResponse({ error: 'Invalid input.' }); return true; }
-        mutateCollection(collectionId, c => {
-            const entry = c.entries.find(e => e.id === entryId);
-            if (!entry) throw new Error('Entry not found.');
-            entry.title = title;
-        }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    // Update a single entry's translated content (e.g. after re-processing) — serialized.
-    if (message.action === 'updateEntryContent') {
-        const { collectionId, entryId, content } = message;
-        if (!collectionId || !entryId || content == null) { sendResponse({ error: 'Invalid input.' }); return true; }
-        mutateCollection(collectionId, c => {
-            const entry = c.entries.find(e => e.id === entryId);
-            if (!entry) throw new Error('Entry not found.');
-            entry.content = content;
-        }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    // Clear all entries in a collection — serialized.
-    if (message.action === 'clearCollectionEntries') {
-        const { collectionId } = message;
-        if (!collectionId) { sendResponse({ error: 'Invalid input.' }); return true; }
-        mutateCollection(collectionId, c => {
-            c.entries = [];
-        }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    if (message.action === 'reorderEntries') {
-        const { collectionId, fromIndex, toIndex } = message;
-        if (!collectionId || fromIndex == null || toIndex == null) { sendResponse({ error: 'Invalid input.' }); return true; }
-        mutateCollection(collectionId, c => {
-            // Validate the original indices are already integers within bounds before mutating.
-            if (!Number.isInteger(fromIndex) || !Number.isInteger(toIndex) || fromIndex < 0 || fromIndex >= c.entries.length || toIndex < 0 || toIndex >= c.entries.length) {
-                throw new Error('Invalid fromIndex or toIndex.');
-            }
-            const [moved] = c.entries.splice(fromIndex, 1);
-            c.entries.splice(toIndex, 0, moved);
-        }).then(() => sendResponse({ success: true })).catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    if (message.action === 'getCollectionDefaults') {
-        browser.storage.local.get('collectionDefaults').then(({ collectionDefaults }) =>
-            sendResponse({ defaults: collectionDefaults ?? { global: null, perSession: {} } }))
-            .catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    // Merge-based: updates only the global default, preserving per-session overrides.
-    if (message.action === 'setCollectionGlobalDefault') {
-        const value = message.value ?? null;
-        enqueueCollectionMutation(async () => {
-            const { collections = {}, collectionDefaults = { global: null, perSession: {} } } = await browser.storage.local.get(['collections', 'collectionDefaults']);
-            // Null/empty clears the default; any referenced collection must actually exist.
-            if (value !== null && value !== undefined && value !== '' && !collections[value]) {
-                throw new Error('Invalid collection reference.');
-            }
-            collectionDefaults.global = value;
-            return browser.storage.local.set({ collectionDefaults });
-        }).then(() => sendResponse({ success: true }))
-            .catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    // Merge-based: updates only one session's override, preserving global + other sessions.
-    if (message.action === 'setCollectionSessionDefault') {
-        const { sessionId, value } = message;
-        if (!sessionId) { sendResponse({ error: 'sessionId is required.' }); return true; }
-        enqueueCollectionMutation(async () => {
-            const { collections = {}, collectionDefaults = { global: null, perSession: {} } } = await browser.storage.local.get(['collections', 'collectionDefaults']);
-            // Null/empty clears the override; any referenced collection must actually exist.
-            if (value !== null && value !== undefined && value !== '' && !collections[value]) {
-                throw new Error('Invalid collection reference.');
-            }
-            if (value === null || value === undefined || value === '') delete collectionDefaults.perSession[sessionId];
-            else collectionDefaults.perSession[sessionId] = value;
-            return browser.storage.local.set({ collectionDefaults });
-        }).then(() => sendResponse({ success: true }))
-            .catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-    if (message.action === 'reprocessEntry') {
-        // Re-translate an entry from its rawContent using current settings.
-        const { sessionId, chunkIndex, prefix, suffix, retryCount } = message;
-        // An empty prefix is valid (rawContent-only reprocess); reject only missing sessionId/chunkIndex or a non-string rawContent.
-        if (!sessionId || chunkIndex == null || typeof message.rawContent !== 'string') {
-            sendResponse({ error: 'Invalid input.' }); return true;
-        }
-        processChunk({ chunk: message.rawContent, prefix, suffix, sessionId, retryCount: retryCount ?? 3 })
-            .then(result => sendResponse({ success: true, result }))
-            .catch(err => sendResponse({ error: err.message }));
-        return true;
+    try {
+        const result = handler(message, sender);
+        if (result === undefined) return false; // fire-and-forget — no response expected
+        return respond(sendResponse, result, message.action);
+    } catch (err) {
+        // Synchronous validation throws from non-async handlers.
+        return respond(sendResponse, Promise.reject(err), message.action);
     }
 });
 
@@ -360,33 +177,10 @@ async function generateContentHash(chunks, prefix, suffix) {
     return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Per-sessionId mutex to serialize concurrent updateSessionStorage calls
-const sessionStorageLocks = new Map();
-
+// Session upsert + maxSessions eviction now lives in store.js saveSession,
+// serialized per-key (replaces the old per-sessionId lock map).
 async function updateSessionStorage(sessionId, sessionDataToStore) {
-    // Acquire lock: chain onto the previous promise for this sessionId
-    const prev = sessionStorageLocks.get(sessionId) ?? Promise.resolve();
-    let releaseLock;
-    const next = new Promise(resolve => { releaseLock = resolve; });
-    const chained = prev.then(() => next);
-    sessionStorageLocks.set(sessionId, chained);
-    await prev;
-    try {
-        let { translationSessions = [] } = await browser.storage.local.get('translationSessions');
-        translationSessions = translationSessions.filter(s => s.id !== sessionId);
-        const sessionEntry = { id: sessionId, timestamp: Date.now(), firstChunk: sessionDataToStore.chunks[0] || '', ...sessionDataToStore };
-        const { maxSessions = 3 } = await browser.storage.local.get('maxSessions');
-        const updatedSessions = [sessionEntry, ...translationSessions]
-            .sort((a, b) => b.timestamp - a.timestamp)
-            .slice(0, maxSessions);
-        await browser.storage.local.set({ translationSessions: updatedSessions });
-    } finally {
-        releaseLock();
-        // Clean up the lock entry once it resolves to avoid unbounded growth
-        chained.then(() => {
-            if (sessionStorageLocks.get(sessionId) === chained) sessionStorageLocks.delete(sessionId);
-        });
-    }
+    await saveSession(sessionId, sessionDataToStore);
 }
 
 async function openChunksPage(payload) {
@@ -448,402 +242,201 @@ async function terminateRequest(sessionId) {
 async function processChunk(message) {
     const options = await browser.storage.local.get();
     const type = options.apiType;
-    if (type === 'gemini') return processChunkWithGemini(message, options);
-
-    if (type === 'openRouter') return processChunkWithOpenRouter(message, options);
-    if (type === 'openai') return processChunkWithOpenAI(message, options);
+    // One HTTP-provider list: the configs table below (keys mirror the
+    // PROVIDER_DESCRIPTORS rows in llm.js). Web providers fall through.
+    if (HTTP_PROVIDER_CONFIGS[type]) {
+        return processChunkWithHttpProvider(message, options, type);
+    }
 
     if (type === 'chatgptWeb') return processChunkWithChatGPTWeb(message, options);
     if (type === 'geminiWeb') return processChunkWithGeminiWeb(message, options);
     throw new Error('Invalid API type selected');
 }
 
-/**
- * Finds the longest substring that is both a suffix of oldStr and a prefix of newStr.
- * Used to trim duplicate overlap at stream boundaries when a retry run continues
- * from where a previous run left off.
- *
- * @param {string} oldStr - The previously accumulated content (ending portion checked).
- * @param {string} newStr - The new streaming content (starting portion checked).
- * @returns {{ suffix: string, prefixLength: number }} overlap substring and chars to skip in newStr
- */
-function longestCommonSuffixPrefix(oldStr, newStr) {
-    const maxLen = Math.min(oldStr.length, newStr.length);
-    let overlapLen = 0;
-    for (let i = 1; i <= maxLen; i++) {
-        const suffix = oldStr.slice(-i);
-        if (newStr.startsWith(suffix)) overlapLen = i;
+// ─── HTTP LLM providers ───────────────────────────────────────────────────────
+// The fetch/SSE/timeout/abort/LCS core lives in the shared llm.js seam
+// (streamLLM). Each provider shrinks to URL/headers/body builders here in the
+// worker (they read option keys) plus a descriptor row in llm.js.
+// Few-shot selection/saving is injected into the seam from fewshot.js.
+
+const fewShotAdapter = {
+    selectExamples: ({ maxBudgetChars, chunkText }) => selectForShot({ maxBudgetChars, chunkText }),
+    buildExampleMessages,
+    saveExample: addExample
+};
+
+// Shared token-cap guard for the OpenAI-shaped providers: a positive integer
+// in options[maxTokensKey] is written to body[maxTokensField], else skipped.
+// (Gemini guards its own maxOutputTokens inline — different config shape.)
+function withMaxTokens(body, maxTokensField, maxTokensKey, options) {
+    const raw = options[maxTokensKey];
+    if (typeof raw === 'string' && raw.trim()) {
+        const t = parseInt(raw);
+        if (!isNaN(t) && t > 0) body[maxTokensField] = t;
     }
-    const suffix = overlapLen > 0 ? oldStr.slice(-overlapLen) : '';
-    return { suffix, prefixLength: overlapLen };
+    return body;
 }
 
-/**
- * Wraps ReadableStreamDefaultReader.read() with retry logic for transient network errors.
- *
- * @param {ReadableStreamDefaultReader} reader
- * @param {number} maxErrors - Maximum consecutive errors before throwing (default 3)
- * @param {number} baseDelayMs - Initial delay between retries in ms (default 1000)
- * @returns {Promise<{done: boolean, value: Uint8Array|null}>}
- */
-async function readWithRetry(reader, maxErrors = 3, baseDelayMs = 1000) {
-    let errors = 0;
-    let delay = baseDelayMs;
-    while (true) {
-        try {
-            return await reader.read();
-        } catch (e) {
-            // Do not retry on abort/cancel — these are intentional terminations
-            if (e.name === 'AbortError' || (e.name === 'TypeError' && e.message.includes('cancelled'))) {
-                throw e;
-            }
-            // TypeError with "error in input stream" or network-level failures are retryable
-            if (e.name === 'TypeError' || e.message.includes('error in input stream') || e.message.includes('network')) {
-                errors++;
-                if (errors > maxErrors) throw e;
-                console.warn(`[Stream read] Attempt ${errors} failed: ${e.message}. Retrying in ${delay}ms...`);
-                await new Promise(r => setTimeout(r, delay));
-                delay *= 2; // exponential backoff: 1s → 2s → 4s
-                continue;
-            }
-            // Any other error is non-retryable
-            throw e;
-        }
-    }
+// Shared temperature parsing for the OpenAI-shaped providers: a numeric
+// options.temperature (string or number) is written to body.temperature, else
+// skipped (provider default applies).
+function withTemperature(body, options) {
+    const temperature = typeof options.temperature === 'string'
+        ? parseFloat(options.temperature.trim())
+        : Number(options.temperature);
+    if (!isNaN(temperature)) body.temperature = temperature;
+    return body;
 }
 
-// ─── Streaming helper (shared SSE logic for OpenAI-compatible APIs) ───────────
-async function processSSEStream(reader, sessionId, message, updateChunksPageFn, initialSnapshot = null) {
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let fullContent = '';
-    let fullReasoning = ''; // OpenRouter stores thinking/reasoning separately
-    let accumulatedSnapshot = initialSnapshot; // accept snapshot from caller for LCS dedup
-    try {
-        while (true) {
-            const { done, value } = await readWithRetry(reader);
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            while (true) {
-                const lineEnd = buffer.indexOf('\n');
-                if (lineEnd === -1) break;
-                const line = buffer.slice(0, lineEnd).trim();
-                buffer = buffer.slice(lineEnd + 1);
-                if (!line.startsWith('data: ')) continue;
-                const data = line.slice(6);
-                if (data === '[DONE]') break;
-                try {
-                    const parsed = JSON.parse(data);
-                    let content = parsed.choices?.[0]?.delta?.content;
-                    let reasoning = parsed.choices?.[0]?.delta?.reasoning; // OpenRouter reasoning field
-                    if (content || reasoning) {
-                        // Trim duplicate overlap at the boundary between an original run and a retry run
-                        if (accumulatedSnapshot !== null) {
-                            const { suffix, prefixLength } = longestCommonSuffixPrefix(accumulatedSnapshot, content || '');
-                            if (prefixLength > 0) {
-                                console.debug(`[SSE stream] Trimmed ${prefixLength}-char overlap at resume boundary: "${suffix}"`);
-                                content = (content || '').slice(prefixLength);
-                            }
-                            accumulatedSnapshot = null;
-                        }
-                        if (content) fullContent += content;
-                        if (reasoning) fullReasoning += reasoning;
-                        const state = getStreamState(sessionId);
-                        const now = Date.now();
-                        if (now - state.lastUpdateTime >= UPDATE_DELAY) {
-                            clearTimeout(state.debounceTimeout);
-                            updateChunksPageFn(sessionId, { action: 'updateStreamContent', content: fullContent, reasoning: fullReasoning, rawContent: message.chunk });
-                            state.lastUpdateTime = now;
-                        } else {
-                            clearTimeout(state.debounceTimeout);
-                            state.debounceTimeout = setTimeout(() => {
-                                updateChunksPageFn(sessionId, { action: 'updateStreamContent', content: fullContent, reasoning: fullReasoning, rawContent: message.chunk });
-                                state.lastUpdateTime = Date.now();
-                            }, UPDATE_DELAY);
-                        }
-                    }
-                } catch (e) {
-                    // Partial SSE chunks are expected during streaming and are non-fatal.
-                    console.debug('[SSE parse] Ignoring benign parse error:', e.message, '| raw data:', data);
-                }
-            }
-        }
-    } catch (e) {
-        // Capture accumulated content for LCS deduplication on retry
-        if (e.name === 'TypeError' || e.message.includes('input stream') || e.message.includes('network')) {
-            accumulatedSnapshot = fullContent;
-            // Throw to signal retry is needed — caller will catch and handle as error
-            throw e;
-        }
-        // Non-retryable errors propagate
-        throw e;
-    }
-    return { content: fullContent, reasoning: fullReasoning, snapshot: null };
+// Shared reasoning-effort passthrough for the OpenAI-compatible providers.
+// The Chat Completions API takes a top-level `reasoning_effort` string enum
+// ('' → "auto" → let the model default apply, or one of low/medium/high and
+// model-dependent siblings like none/minimal/xhigh/max). Only a non-empty
+// value is written, so non-reasoning models keep ignoring it.
+function withReasoningEffort(body, options) {
+    const effort = options.openaiReasoningEffort;
+    if (typeof effort === 'string' && effort.trim()) body.reasoning_effort = effort.trim();
+    return body;
 }
 
-// ─── Few-shot example selection (shared by API providers) ─────────────────────
-// Builds the OpenAI-shaped [{role, content}] example messages for a provider,
-// guarding selection in try/catch so a few-shot failure never breaks a
-// translation. Gemini casts role→model/parts itself; OpenRouter/OpenAI spread
-// the array as-is. Returns { chunkText, exampleMessages } so all three providers
-// share identical selection behavior.
-async function buildFewShotExampleMessages(message, options, contextWindowKey, providerLabel) {
-    const chunkText = `${message.prefix}\n${message.chunk}\n${message.suffix}`;
-    let exampleMessages = [];
-    try {
-        if (options.fewShotEnabled) {
-            const budget = parseInt(options[contextWindowKey]) || 0;
-            const examples = await selectForShot({ maxBudgetChars: budget, chunkText });
-            exampleMessages = buildExampleMessages(examples);
-        }
-    } catch (e) { console.error(`[fewshot] ${providerLabel} example selection failed:`, e); }
-    return { chunkText, exampleMessages };
-}
-
-// ─── Gemini API ───────────────────────────────────────────────────────────────
-async function processChunkWithGemini(message, options) {
-    let tabCloseListener;
-    let fullContent = '';
-    let accumulatedSnapshot = null; // captures fullContent state at the last successful chunk; used for LCS dedup on retry
-    const controller = new AbortController();
-    const sessionId = message.sessionId;
-    sessionControllers[sessionId] = controller;
-
-    const { chunkText, exampleMessages } = await buildFewShotExampleMessages(message, options, 'geminiContextWindow', 'Gemini');
-    const exampleContents = exampleMessages
-      .map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
-
-    const requestBody = {
-        contents: [...exampleContents, { role: 'user', parts: [{ text: chunkText }] }],
-        generationConfig: {
-            temperature: (v => Number.isFinite(v) ? v : 0.9)(parseFloat(options.temperature)),
-            topK: (v => Number.isFinite(v) ? v : 40)(parseInt(options.topK)),
-            topP: (v => Number.isFinite(v) ? v : 0.95)(parseFloat(options.topP)),
-            thinkingConfig: {
-                thinkingBudget: 0,
-            }
-        },
-        safetySettings: [
-            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
-            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
-            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-        ],
-    };
-    if (options.geminiMaxTokens?.trim()) {
-        const t = parseInt(options.geminiMaxTokens);
-        if (!isNaN(t) && t > 0) requestBody.generationConfig.maxOutputTokens = t;
-    }
-
-    // AbortController-based timeout (works with the session's controller)
-    const timeoutMs = (parseInt(options.apiTimeout) || 120) * 1000;
-    let timeoutId;
-    const timeoutPromise = new Promise((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error('API response timeout')), timeoutMs);
-    });
-    const controllerWithTimeout = new AbortController();
-    const originalSignal = controller.signal;
-    originalSignal.addEventListener('abort', () => { clearTimeout(timeoutId); controllerWithTimeout.abort(); }, { once: true });
-
-    try {
-        {
-            tabCloseListener = tabId => {
-                if (tabId === sessionTabIds[sessionId]) { controller.abort(); browser.tabs.onRemoved.removeListener(tabCloseListener); delete sessionTabIds[sessionId]; }
+// The single HTTP-provider list (keys mirror llm.js PROVIDER_DESCRIPTORS).
+// Each entry is just URL/headers/body builders that read option keys.
+const HTTP_PROVIDER_CONFIGS = {
+    gemini: {
+        buildUrl: (options) => `https://generativelanguage.googleapis.com/v1beta/models/${options.geminiModelId}:streamGenerateContent?alt=sse`,
+        // The API key travels in the x-goog-api-key header, not the query
+        // string — keys must not leak into logs/URL history.
+        buildHeaders: (options) => ({
+            'Content-Type': 'application/json',
+            'x-goog-api-key': options.geminiApiKey
+        }),
+        buildBody: (options, message, exampleMessages) => {
+            // Gemini casts OpenAI-shaped examples to model/user roles with parts.
+            const exampleContents = exampleMessages
+                .map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
+            const body = {
+                contents: [...exampleContents, { role: 'user', parts: [{ text: `${message.prefix}\n${message.chunk}\n${message.suffix}` }] }],
+                generationConfig: {
+                    // Fallbacks come from the settings schema, not local literals.
+                    temperature: (v => Number.isFinite(v) ? v : DEFAULTS.temperature)(parseFloat(options.temperature)),
+                    topK: (v => Number.isFinite(v) ? v : DEFAULTS.topK)(parseInt(options.topK)),
+                    topP: (v => Number.isFinite(v) ? v : DEFAULTS.topP)(parseFloat(options.topP)),
+                    thinkingConfig: { thinkingBudget: 0 }
+                },
+                safetySettings: [
+                    { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+                    { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+                    { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+                    { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+                ]
             };
-            browser.tabs.onRemoved.addListener(tabCloseListener);
-            updateChunksPage(sessionId, { action: 'updateStreamContent', content: '', rawContent: message.chunk, isInitial: true });
-
-            const response = await Promise.race([
-                fetch(`https://generativelanguage.googleapis.com/v1beta/models/${options.geminiModelId}:streamGenerateContent?key=${options.geminiApiKey}&alt=sse`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody), signal: controllerWithTimeout.signal,
-                }),
-                timeoutPromise
-            ]);
-            if (!response.ok) {
-                const err = await response.json().catch(() => ({}));
-                throw new Error(`HTTP ${response.status}: ${err.error?.message || ''}`);
+            const raw = options.geminiMaxTokens;
+            if (typeof raw === 'string' && raw.trim()) {
+                const t = parseInt(raw);
+                if (!isNaN(t) && t > 0) body.generationConfig.maxOutputTokens = t;
             }
-
-            const reader = response.body?.getReader();
-            if (!reader) throw new Error('Response body not readable');
-            const decoder = new TextDecoder();
-            let buffer = '';
-            try {
-                while (true) {
-                    const { done, value } = await readWithRetry(reader);
-                    if (done) break;
-                    buffer += decoder.decode(value, { stream: true });
-                    while (true) {
-                        let lineEnd = buffer.indexOf('\n');
-                        if (lineEnd === -1 && buffer.startsWith('data: ') && buffer.endsWith('}')) lineEnd = buffer.length;
-                        else if (lineEnd === -1) break;
-                        let line = buffer.slice(0, lineEnd).trim();
-                        buffer = buffer.slice(lineEnd + 1);
-                        if (line.startsWith('data: ')) line = line.slice(6).trim();
-                        if (line === '[DONE]') break;
-                        if (!line.startsWith('{') || !line.endsWith('}')) continue;
-                        try {
-                            const parsed = JSON.parse(line);
-                            let text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
-                            if (text) {
-                                // Trim duplicate overlap at the boundary with any previous stream run
-                                if (accumulatedSnapshot !== null) {
-                                    const { suffix, prefixLength } = longestCommonSuffixPrefix(accumulatedSnapshot, text);
-                                    if (prefixLength > 0) {
-                                        console.debug(`[Gemini stream] Trimmed ${prefixLength}-char overlap at resume boundary: "${suffix}"`);
-                                        text = text.slice(prefixLength);
-                                    }
-                                    accumulatedSnapshot = null; // only deduplicate once at the boundary
-                                }
-                                if (text) fullContent += text;
-                                const state = getStreamState(sessionId);
-                                const now = Date.now();
-                                if (now - state.lastUpdateTime >= UPDATE_DELAY) {
-                                    clearTimeout(state.debounceTimeout);
-                                    updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk });
-                                    state.lastUpdateTime = now;
-                                } else {
-                                    clearTimeout(state.debounceTimeout);
-                                    state.debounceTimeout = setTimeout(() => { updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk }); state.lastUpdateTime = Date.now(); }, UPDATE_DELAY);
-                                }
-                            } else if (parsed.error) throw new Error(`Gemini Stream Error: ${parsed.error.message}`);
-                        } catch (e) {
-                            if (e.message.startsWith('Gemini Stream')) throw e;
-                            console.debug('[Gemini SSE parse] Ignoring benign parse error:', e.message, '| raw line:', line);
-                        }
-                    }
-                }
-            } finally {
-                reader.cancel().catch(() => { });
-                clearStreamState(sessionId);
-                if (tabCloseListener) browser.tabs.onRemoved.removeListener(tabCloseListener);
-                delete sessionControllers[sessionId];
-            }
-            updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk, isComplete: true });
-            if (options.fewShotEnabled && fullContent) {
-                try { await addExample({ raw: message.chunk, translation: fullContent, timestamp: Date.now() }); }
-                catch (e) { console.error('[fewshot] addExample failed:', e); }
-            }
-            await new Promise(r => setTimeout(r, 100));
-            return { result: fullContent, streaming: true, complete: true };
+            return body;
         }
-    } catch (error) {
-        // Capture accumulated content for LCS deduplication on retry
-        if (error.name === 'TypeError' || error.message.includes('input stream') || error.message.includes('network')) {
-            accumulatedSnapshot = fullContent;
+    },
+    openRouter: {
+        buildUrl: () => 'https://openrouter.ai/api/v1/chat/completions',
+        buildHeaders: (options) => ({
+            'Authorization': `Bearer ${options.openRouterApiKey}`,
+            'HTTP-Referer': 'https://addons.mozilla.org/en-US/firefox/addon/ai-webnovel-translator/',
+            'X-OpenRouter-Title': 'AI Webnovel Translator',
+            'Content-Type': 'application/json'
+        }),
+        buildBody: (options, message, exampleMessages) => {
+            const body = {
+                model: options.openRouterModelId || 'openai/gpt-4',
+                messages: [...exampleMessages, { role: 'user', content: `${message.prefix}\n${message.chunk}\n${message.suffix}` }],
+                stream: true
+            };
+            withMaxTokens(body, 'max_tokens', 'openRouterMaxTokens', options);
+            withTemperature(body, options);
+            if (options.openRouterProviderOrder?.trim()) {
+                const order = options.openRouterProviderOrder.split(',').map(s => s.trim()).filter(Boolean);
+                if (order.length) body.provider = { order, allow_fallbacks: options.openRouterAllowFallback !== false };
+            }
+            return body;
         }
-        if (tabCloseListener) browser.tabs.onRemoved.removeListener(tabCloseListener);
-        delete sessionControllers[sessionId];
-        updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, rawContent: message.chunk, isComplete: true, error: true });
-        if (error.name === 'AbortError') return { error: 'Gemini request cancelled' };
-        return { error: `Gemini API Error: ${error.message}` };
+    },
+    openai: {
+        buildUrl: (options) => `${(options.openaiBaseUrl?.trim() || 'https://api.openai.com/v1')}/chat/completions`,
+        buildHeaders: (options) => ({
+            'Authorization': `Bearer ${options.openaiApiKey}`,
+            'Content-Type': 'application/json'
+        }),
+        buildBody: (options, message, exampleMessages) => {
+            const body = {
+                model: options.openaiModelId || 'gpt-4o-mini',
+                messages: [...exampleMessages, { role: 'user', content: `${message.prefix}\n${message.chunk}\n${message.suffix}` }],
+                stream: true
+            };
+            withMaxTokens(body, 'max_tokens', 'openaiMaxTokens', options);
+            withTemperature(body, options);
+            withReasoningEffort(body, options);
+            return body;
+        }
     }
-}
+};
 
-
-// ─── Generic OpenAI-compatible streaming processor ────────────────────────────
-async function processChunkWithOpenAICompatible(message, options, apiUrl, headers, requestBody, providerName) {
-    let tabCloseListener;
-    let fullContent = '';
-    let accumulatedSnapshot = null; // persists across chunk-level retries; used for LCS dedup if stream resumes
+/**
+ * Runs one HTTP-provider translation through the shared llm.js seam.
+ * Owns the browser edge: session controller, tab-close abort, stream pushes,
+ * few-shot finalize, and error-class → user-string mapping.
+ */
+async function processChunkWithHttpProvider(message, options, providerKey) {
+    const config = HTTP_PROVIDER_CONFIGS[providerKey];
     const controller = new AbortController();
     const sessionId = message.sessionId;
     sessionControllers[sessionId] = controller;
-    const isStreaming = true;
+    // Human label comes from the descriptor row in llm.js — one source.
+    const label = PROVIDER_DESCRIPTORS[providerKey]?.label || providerKey;
 
-    // AbortController-based timeout (works with the session's controller)
-    const timeoutMs = (parseInt(options.apiTimeout) || 120) * 1000;
-    let timeoutId;
-    const timeoutPromise = new Promise((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error('API response timeout')), timeoutMs);
-    });
-    const controllerWithTimeout = new AbortController();
-    const originalSignal = controller.signal;
-    originalSignal.addEventListener('abort', () => { clearTimeout(timeoutId); controllerWithTimeout.abort(); }, { once: true });
+    let tabCloseListener;
+    tabCloseListener = tabId => {
+        if (tabId === sessionTabIds[sessionId]) { controller.abort(); browser.tabs.onRemoved.removeListener(tabCloseListener); delete sessionTabIds[sessionId]; }
+    };
+    browser.tabs.onRemoved.addListener(tabCloseListener);
+    updateChunksPage(sessionId, { action: 'updateStreamContent', content: '', rawContent: message.chunk, isInitial: true });
 
     try {
-        tabCloseListener = tabId => { if (tabId === sessionTabIds[sessionId]) { controller.abort(); browser.tabs.onRemoved.removeListener(tabCloseListener); delete sessionTabIds[sessionId]; } };
-        browser.tabs.onRemoved.addListener(tabCloseListener);
-        if (isStreaming) updateChunksPage(sessionId, { action: 'updateStreamContent', content: '', rawContent: message.chunk, isInitial: true });
-
-        const response = await Promise.race([
-            fetch(apiUrl, { method: 'POST', headers, body: JSON.stringify(requestBody), signal: controllerWithTimeout.signal }),
-            timeoutPromise
-        ]);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error('Response body not readable');
-        let streamResult;
-        try {
-            streamResult = await processSSEStream(reader, sessionId, message, updateChunksPage, accumulatedSnapshot);
-            fullContent = streamResult.content;
-            accumulatedSnapshot = streamResult.snapshot;
-        } finally {
-            reader.cancel().catch(() => { });
-            clearStreamState(sessionId);
-            if (tabCloseListener) browser.tabs.onRemoved.removeListener(tabCloseListener);
-            delete sessionControllers[sessionId];
-        }
-        updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent, reasoning: streamResult.reasoning || '', rawContent: message.chunk, isComplete: true });
-        if (options.fewShotEnabled && fullContent) {
-            try { await addExample({ raw: message.chunk, translation: fullContent, timestamp: Date.now() }); }
+        const { content, reasoning } = await streamLLM({
+            provider: providerKey,
+            message,
+            options,
+            signal: controller.signal,
+            buildUrl: config.buildUrl,
+            buildHeaders: config.buildHeaders,
+            buildBody: config.buildBody,
+            onDelta: (delta) => updateChunksPage(sessionId, { action: 'updateStreamContent', content: delta.content, reasoning: delta.reasoning, rawContent: message.chunk }),
+            fewShot: fewShotAdapter
+        });
+        updateChunksPage(sessionId, { action: 'updateStreamContent', content, reasoning, rawContent: message.chunk, isComplete: true });
+        if (options.fewShotEnabled && content) {
+            try { await fewShotAdapter.saveExample({ raw: message.chunk, translation: content, timestamp: Date.now() }); }
             catch (e) { console.error('[fewshot] addExample failed:', e); }
         }
         await new Promise(r => setTimeout(r, 100));
-        return { result: fullContent, streaming: true, complete: true };
+        return { result: content, parts: [content], streaming: true, complete: true };
     } catch (error) {
-        // Capture accumulated content for LCS deduplication on retry
-        if (error.name === 'TypeError' || error.message.includes('input stream') || error.message.includes('network')) {
-            accumulatedSnapshot = fullContent;
+        updateChunksPage(sessionId, { action: 'updateStreamContent', content: '', rawContent: message.chunk, isComplete: true, error: true });
+        if (error.name === 'AbortError') return { error: `${label} request cancelled` };
+        if (error.name === 'TimeoutError') return { error: `${label} request timed out` };
+        if (error.name === 'HttpError') {
+            if (error.status === 401) return { error: `${label}: Invalid API key` };
+            if (error.status === 429) return { error: `${label}: Rate limit exceeded` };
+            return { error: `${label} Error: HTTP ${error.status}${error.bodyMessage ? ': ' + error.bodyMessage : ''}` };
         }
+        return { error: `${label} Error: ${error.message}` };
+    } finally {
+        // Cleanup on BOTH success and failure — the tab-close abort listener
+        // would otherwise accumulate per processed chunk.
         if (tabCloseListener) browser.tabs.onRemoved.removeListener(tabCloseListener);
         delete sessionControllers[sessionId];
-        updateChunksPage(sessionId, { action: 'updateStreamContent', content: fullContent || '', reasoning: streamResult?.reasoning || '', rawContent: message.chunk, isComplete: true, error: true });
-        if (error.name === 'AbortError') return { error: `${providerName} request cancelled` };
-        if (error.message.includes('401')) return { error: `${providerName}: Invalid API key` };
-        if (error.message.includes('429')) return { error: `${providerName}: Rate limit exceeded` };
-        return { error: `${providerName} Error: ${error.message}` };
     }
 }
-
-async function processChunkWithOpenRouter(message, options) {
-    const { chunkText, exampleMessages } = await buildFewShotExampleMessages(message, options, 'openRouterContextWindow', 'OpenRouter');
-    const requestBody = {
-        model: options.openRouterModelId || 'openai/gpt-4',
-        messages: [...exampleMessages, { role: 'user', content: chunkText }],
-        stream: true
-    };
-    if (options.openRouterMaxTokens?.trim()) { const t = parseInt(options.openRouterMaxTokens); if (!isNaN(t) && t > 0) requestBody.max_tokens = t; }
-    const temperature = typeof options.temperature === 'string'
-        ? parseFloat(options.temperature.trim())
-        : Number(options.temperature);
-    if (!isNaN(temperature)) requestBody.temperature = temperature;
-    if (options.openRouterProviderOrder?.trim()) {
-        const order = options.openRouterProviderOrder.split(',').map(s => s.trim()).filter(Boolean);
-        if (order.length) requestBody.provider = { order, allow_fallbacks: options.openRouterAllowFallback !== false };
-    }
-    const headers = { 'Authorization': `Bearer ${options.openRouterApiKey}`, 'HTTP-Referer': 'https://addons.mozilla.org/en-US/firefox/addon/ai-webnovel-translator/', 'X-OpenRouter-Title': 'AI Webnovel Translator', 'Content-Type': 'application/json' };
-    return processChunkWithOpenAICompatible(message, options, 'https://openrouter.ai/api/v1/chat/completions', headers, requestBody, 'OpenRouter');
-}
-
-async function processChunkWithOpenAI(message, options) {
-    const { chunkText, exampleMessages } = await buildFewShotExampleMessages(message, options, 'openaiContextWindow', 'OpenAI');
-    const requestBody = {
-        model: options.openaiModelId || 'gpt-4o-mini',
-        messages: [...exampleMessages, { role: 'user', content: chunkText }],
-        stream: true
-    };
-    if (options.openaiMaxTokens?.trim()) { const t = parseInt(options.openaiMaxTokens); if (!isNaN(t) && t > 0) requestBody.max_tokens = t; }
-    const temperature = typeof options.temperature === 'string'
-        ? parseFloat(options.temperature.trim())
-        : Number(options.temperature);
-    if (!isNaN(temperature)) requestBody.temperature = temperature;
-    const baseUrl = options.openaiBaseUrl?.trim() || 'https://api.openai.com/v1';
-    const headers = { 'Authorization': `Bearer ${options.openaiApiKey}`, 'Content-Type': 'application/json' };
-    return processChunkWithOpenAICompatible(message, options, `${baseUrl}/chat/completions`, headers, requestBody, 'OpenAI');
-}
-
 
 // Safely convert a URL match pattern (with * wildcards) into an anchored RegExp.
 // All regex metacharacters except * are escaped so e.g. '.' in 'chatgpt.com' is literal.
@@ -1001,7 +594,7 @@ async function processChunkWithChatGPTWeb(message, options) {
             new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error('Aborted')), { once: true }))
         ]);
         if (!result?.success) throw new Error(result?.error || 'Unknown error');
-        return { result: 'Sent to ChatGPT Web', parts: ['Sent to ChatGPT Web'] };
+        return { result: 'Sent to ChatGPT Web', parts: ['Sent to ChatGPT Web'], streaming: false };
     } catch (error) {
         return { error: 'Failed to send to ChatGPT: ' + error.message };
     } finally {
@@ -1044,10 +637,22 @@ async function processChunkWithGeminiWeb(message, options) {
             new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error('Aborted')), { once: true }))
         ]);
         if (!result?.success) throw new Error(result?.error || 'Unknown error');
-        return { result: 'Sent to Gemini Web', parts: ['Sent to Gemini Web'] };
+        return { result: 'Sent to Gemini Web', parts: ['Sent to Gemini Web'], streaming: false };
     } catch (error) {
         return { error: 'Failed to send to Gemini: ' + error.message };
     } finally {
         delete sessionControllers[sessionId];
     }
+}
+
+// ─── Node export (inert in browser) ───────────────────────────────────────────
+// Bottom of file: the guard references const declarations (HTTP_PROVIDER_CONFIGS,
+// messageHandlers) that must be initialized by now.
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        urlPatternToRegExp, withMaxTokens, withTemperature, withReasoningEffort,
+        HTTP_PROVIDER_CONFIGS, respond, messageHandlers, processChunk,
+        ensureWebPermission, hasStoredWebPermission, setStoredWebPermission,
+        requestAndStoreWebPermission,
+    };
 }
